@@ -43,7 +43,7 @@ No account. No upload. No trial. No watermark. No surprise paywall.
 - **Back / Next bar** — the same walk without a keyboard. A slim bar under the title
   moves blank to blank and says where you are (*Blank line · 4 of 10*). When it lands on
   a tick box the middle of the bar becomes the tick button, so a phone never needs a
-  keyboard to fill a form.
+  keyboard to fill a form. It stays on screen with the keyboard up.
 - **Blackout** — press and drag; the box grows under your finger so you can see
   exactly what you are covering. On export, any page containing a
   blackout is **flattened to an image**, so the hidden text is genuinely destroyed rather
@@ -170,6 +170,27 @@ rather than to the bottom of the clamp; that fallback is the difference between 
 sensible box and a 6pt one.
 
 The whole scan is cached per page and only runs once per rotation.
+
+## Reading order
+
+Tab and the Back / Next bar walk one ordered list per page, built from all three kinds
+of spot at once. Two things make that order come out right.
+
+Every spot reports `cy` — the middle of *where you would write* — rather than whatever
+edge each kind happens to know about. A field's rect gives its top, a rule gives its
+baseline with the text sitting above it, a tick box gives its outline. Sorting those
+raw values put things that share a visual row a whole line-height apart and the order
+jumped around. Each kind now converts to the same anchor first.
+
+Rows are then grown top to bottom, joining a spot to the current row when its middle
+is within about a line of the row's, and each row is read left to right. Row height
+comes from the spots themselves, so a row of tick boxes and a row of tall multi-line
+fields both group correctly without a magic constant.
+
+The cursor only moves when you actually do something: typing in a field, snapping text
+or a signature to a line, ticking a box, or grabbing something already placed. A bare
+tap on the page leaves it where it was, so Next carries on from the field you had open
+rather than from wherever your thumb landed.
 
 ## Keeping the bars on screen
 

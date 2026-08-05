@@ -345,10 +345,10 @@ function pageBg(p) {
 }
 
 function paintFields() {
-  S.pageBox.forEach(p => {
+  S.pageBox.forEach((p, pi) => {
     if (!p.fields?.length) return;
     p.fieldWrap.innerHTML = '';
-    p.fields.forEach(f => {
+    p.fields.forEach((f, fi) => {
       let el;
       if (f.type === 'text') {
         el = document.createElement(f.multiline ? 'textarea' : 'input');
@@ -384,6 +384,8 @@ function paintFields() {
       el.className = 'fld fld-' + f.type;
       el.dataset.name = f.name;
       el.title = f.name;
+      // whichever field you land in becomes the place Next carries on from
+      el.addEventListener('focus', () => markSpot(pi, `f:${pi}:${fi}`));
       f.el = el;
       p.fieldWrap.append(el);
     });
@@ -1130,16 +1132,16 @@ pagesEl.addEventListener('pointerdown', e => {
   // a check or an X dropped on a tick box lands squarely inside it
   if (S.tool === 'check' || S.tool === 'x') {
     const B = findBox(p, x, y, 0.006);
-    if (B) { e.preventDefault(); clearBoxCursor(); return void cycleBox(pi, B, S.tool); }
+    if (B) { e.preventDefault(); clearBoxCursor(); cycleBox(pi, B, S.tool); return void markSpot(pi, boxKey(pi, B)); }
   }
   if (S.tool || pendingSig) { e.preventDefault(); return place(pi, x, y); }
 
   // nothing armed: clicking straight into an empty tick box ticks it
   const B = findBox(p, x, y, 0.002);
-  if (B) { e.preventDefault(); clearBoxCursor(); return void cycleBox(pi, B, 'check'); }
+  if (B) { e.preventDefault(); clearBoxCursor(); cycleBox(pi, B, 'check'); return void markSpot(pi, boxKey(pi, B)); }
 
   focusStage();
-  anchorNearest(pi, x, y);
+  leaveSpot();
   if (S.sel) select(null);
 });
 
@@ -1234,6 +1236,7 @@ function place(pi, x, y) {
     if (it.stampMode !== 'none') addStamp(it);
     if (L) flashLine(p, L);
     pendingSig = null; S.tool = null; reflectTool(); select(id);
+    if (L) markSpot(pi, lineKey(pi, L));
     saveSoon(); return;
   }
 
@@ -1262,6 +1265,7 @@ function place(pi, x, y) {
   const d = itemEl(it);
   if (!STICKY.has(tool)) { S.tool = null; reflectTool(); }
   select(id);
+  if (it.lineKey) markSpot(pi, it.lineKey);
   if (isText(it) && !it.date) edit(d);
 }
 
@@ -1392,6 +1396,7 @@ function startDrag(e, d) {
     (tnode?.contentEditable === 'true' || tnode?.contentEditable === 'plaintext-only');
 
   if (!editing) { select(it.id); e.preventDefault(); try { d.setPointerCapture(e.pointerId); } catch (_) {} }
+  if (it.lineKey) markSpot(it.page, it.lineKey);
 
   const p = S.pageBox[it.page];
   const spin = norm4(totalRot(p) - it.rot);
@@ -1584,6 +1589,7 @@ document.addEventListener('keydown', e => {
 
 const KB = { pi: 0, key: null, box: null, el: null, cur: null, at: 0, of: 0 };
 const lineKey = (pi, L) => `l:${pi}:${Math.round(L.y * 1e4)}:${Math.round(L.x0 * 1e4)}`;
+const boxKey  = (pi, B) => `b:${pi}:${Math.round(B.cy * 1e4)}:${Math.round(B.cx * 1e4)}`;
 
 /** where a form field sits on the page as displayed, 0–1 */
 function fieldRect(p, f) {
@@ -1602,11 +1608,18 @@ function spotsForPage(pi) {
   if (!p) return [];
   const out = [], rects = [];
 
+  /* Every kind reports `cy` — the middle of where you would actually write —
+     and `h`, roughly how tall that writing is. Comparing a field's top edge
+     with a rule's baseline and a box's bottom edge, as this used to, put
+     things on the same visual row a whole line-height apart and the order
+     jumped about. */
   (p.fields || []).forEach((f, i) => {
     const r = fieldRect(p, f);
     if (!r) return;
     rects.push(r);
-    out.push({ kind: 'field', page: pi, f, x: r.x0, y: r.y0, key: `f:${pi}:${i}` });
+    out.push({ kind: 'field', page: pi, f, x: r.x0, y: r.y0,
+               cy: (r.y0 + r.y1) / 2, h: Math.abs(r.y1 - r.y0),
+               key: `f:${pi}:${i}` });
   });
 
   // a guess is only worth offering where the document did not already declare one
@@ -1615,23 +1628,38 @@ function spotsForPage(pi) {
 
   pageLines(p).forEach(L => {
     if (!free(L.x0, L.y - L.fs * 1.3, L.x1, L.y + 0.004)) return;
-    out.push({ kind: 'line', page: pi, L, x: L.x0, y: L.y, key: lineKey(pi, L) });
+    out.push({ kind: 'line', page: pi, L, x: L.x0, y: L.y,
+               cy: L.y - L.fs * 0.38, h: L.fs,      // text sits above the rule
+               key: lineKey(pi, L) });
   });
   pageBoxes(p).forEach(B => {
     if (!free(B.x0, B.y0, B.x1, B.y1)) return;
     out.push({ kind: 'box', page: pi, B, x: B.x0, y: B.y1,
-               key: `b:${pi}:${Math.round(B.cy * 1e4)}:${Math.round(B.cx * 1e4)}` });
+               cy: B.cy, h: B.h, key: boxKey(pi, B) });
   });
 
-  // reading order: group into rows, then left to right inside each row
-  out.sort((a, b) => a.y - b.y || a.x - b.x);
+  /* Reading order: build rows top to bottom, joining anything whose middle is
+     within about a line of the row's, then read each row left to right. */
+  out.sort((a, b) => a.cy - b.cy || a.x - b.x);
   const rows = [];
-  out.forEach(s => {
+  for (const s of out) {
     const r = rows[rows.length - 1];
-    if (r && s.y - r.y <= 0.014) r.items.push(s);
-    else rows.push({ y: s.y, items: [s] });
-  });
+    const tol = Math.max(0.009, Math.max(r ? r.h : 0, s.h) * 0.8);
+    if (r && s.cy - r.cy <= tol) { r.items.push(s); r.h = Math.max(r.h, s.h); }
+    else rows.push({ cy: s.cy, h: s.h, items: [s] });
+  }
   return rows.flatMap(r => r.items.sort((a, b) => a.x - b.x));
+}
+
+/** Move the cursor onto a spot the user just acted on, so Next carries on
+    from there. A bare tap on the page deliberately does not do this — it
+    should leave you where you were. */
+function markSpot(pi, key) {
+  const list = spotsForPage(pi);
+  const i = list.findIndex(s => s.key === key);
+  if (i < 0) return;
+  KB.pi = pi; KB.key = key; KB.at = i + 1; KB.of = list.length; KB.cur = list[i];
+  syncJump();
 }
 
 async function spotsOf(pi) {
@@ -1799,7 +1827,11 @@ function clearBoxCursor() {
   const h = $('#kbhint');
   if (h) h.hidden = true;
 }
-function leaveSpot() { clearBoxCursor(); KB.cur = null; syncJump(); }
+function leaveSpot() {
+  clearBoxCursor();
+  if (KB.cur?.kind === 'box') KB.cur = null;   // the highlight is gone, so is the label
+  syncJump();
+}
 
 /** Enter on a highlighted tick box: X, then a check, then clear again */
 function bumpBox() {
@@ -1862,18 +1894,6 @@ document.addEventListener('keydown', e => {
     }
   }
 }, true);
-
-/** After a tap, carry on from where they tapped rather than from the top. */
-function anchorNearest(pi, x, y) {
-  const list = spotsForPage(pi);
-  if (!list.length) { KB.pi = pi; KB.key = null; KB.cur = null; return; }
-  let best = 0, bd = Infinity;
-  list.forEach((s, i) => {
-    const d = Math.hypot(s.x - x, (s.y - y) * 1.6);   // vertical distance matters more
-    if (d < bd) { bd = d; best = i; }
-  });
-  KB.pi = pi; KB.key = list[best].key; KB.at = best + 1; KB.of = list.length; KB.cur = null;
-}
 
 // tapping the page hands the keyboard back to the document
 stageEl.addEventListener('pointerdown', e => {
