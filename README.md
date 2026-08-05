@@ -27,8 +27,10 @@ No account. No upload. No trial. No watermark. No surprise paywall.
   weight, before placing or afterwards on a signature already on the page.
   Saved locally for reuse.
 - **Signature timestamp** — the local date and time go under the signature
-  automatically. The two behave as one object: drag either and both move.
-  Switch to date-only or turn it off.
+  automatically. The two behave as one object: drag either and both move, and
+  either handle resizes the pair. The date is sized from the signature's width
+  but stops shrinking at about 6.7pt, because a date you cannot read is worse
+  than one that is slightly large. Switch to date-only or turn it off.
 - **Date** — standalone date object in `08/05/2026`, `August 5, 2026`, or `5 August 2026`
 - **Checkmark / X** — sized for a normal checkbox; the tool stays armed so you can
   tick a whole column in one go, and turns off when you tap it again

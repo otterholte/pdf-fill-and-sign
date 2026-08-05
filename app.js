@@ -73,6 +73,15 @@ const DB = (() => {
 /* --------------------------------------------------------------- state */
 const COLORS = ['#0b0f14', '#1b4fd8', '#c8202a'];
 const DEF = { fs: 0.0165, stampFs: 0.0105, mark: 0.026, sigW: 0.26, redW: 0.34, redH: 0.032 };
+
+/* A signature timestamp tracks the signature's width so the two look like one
+   object — but only down to a point. Past it the date stops shrinking, because
+   an unreadable date under a signature is worse than a slightly large one. The
+   floor is the same 6.7pt-on-Letter minimum used for snapped text elsewhere;
+   the ceiling stops a page-wide signature dragging the date up with it. */
+const MIN_STAMP_FS = 0.0085;
+const MAX_STAMP_FS = 0.055;
+const stampFsFor = w => clamp(DEF.stampFs * (w / DEF.sigW), MIN_STAMP_FS, MAX_STAMP_FS);
 /* tools that stay armed so you can tap several in a row */
 const STICKY = new Set(['check', 'x']);
 /* distance from the top of a text line-box down to its baseline, in ems
@@ -1277,7 +1286,7 @@ function addStamp(sig) {
     id: uid(), page: sig.page, rot: sig.rot, type: 'text',
     x: sig.x + 0.004, y: clamp(sig.y + sigH + 0.004, 0, 1),
     // scale to the signature, or a small snapped signature gets a huge date
-    fs: clamp(DEF.stampFs * (sig.w / DEF.sigW), 0.005, 0.055),
+    fs: stampFsFor(sig.w),
     color: COLORS[0],
     text: '', link: sig.id,
     date: { at: Date.now(), fmt: sig.stampMode === 'date' ? 1 : 3 },
@@ -1472,7 +1481,7 @@ function startResize(e, d) {
   const [Wl, Hl] = itemFrame(it);
   const sx = e.clientX, sy = e.clientY;
   const st = it.type === 'sig' ? stampOf(it) : null;
-  const o = { fs: it.fs, w: it.w, h: it.h, size: it.size, stFs: st?.fs };
+  const o = { fs: it.fs, w: it.w, h: it.h, size: it.size };
   let started = false;
   d.setPointerCapture(e.pointerId);
   e.preventDefault(); e.stopPropagation();
@@ -1484,7 +1493,7 @@ function startResize(e, d) {
     if (isText(it)) it.fs = clamp(o.fs + dy * 0.6 + dx * 0.15, 0.005, 0.14);
     else if (it.type === 'sig') {
       it.w = clamp(o.w + dx, 0.04, 1.2);                                    // aspect locked
-      if (st) st.fs = clamp(o.stFs * (it.w / o.w), 0.004, 0.14);            // the date scales with it
+      if (st) st.fs = stampFsFor(it.w);          // the date follows, down to a readable floor
     }
     else if (it.type === 'redact') { it.w = clamp(o.w + dx, 0.008, 1.2); it.h = clamp(o.h + dy, 0.004, 1.0); }
     else it.size = clamp(o.size + dy, 0.006, 0.35);
@@ -1517,7 +1526,7 @@ const bump = f => {
   else if (it.type === 'sig') {
     it.w = clamp(it.w * f, 0.04, 1.2);
     const st = stampOf(it);
-    if (st) st.fs = clamp(st.fs * f, 0.004, 0.14);
+    if (st) st.fs = stampFsFor(it.w);
   }
   else if (it.type === 'redact') { it.w = clamp(it.w * f, 0.008, 1.2); it.h = clamp(it.h * f, 0.004, 1); }
   else it.size = clamp(it.size * f, 0.006, 0.35);
