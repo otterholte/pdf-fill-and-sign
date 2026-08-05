@@ -40,6 +40,10 @@ No account. No upload. No trial. No watermark. No surprise paywall.
   created on the line and focused, ready to type), and empty tick boxes. `Enter` on a
   highlighted tick box stamps an X, then a checkmark, then clears it. `Esc` jumps to
   Finish. Everything the scan finds stays in memory in that tab.
+- **Back / Next bar** — the same walk without a keyboard. A slim bar under the title
+  moves blank to blank and says where you are (*Blank line · 4 of 10*). When it lands on
+  a tick box the middle of the bar becomes the tick button, so a phone never needs a
+  keyboard to fill a form.
 - **Blackout** — press and drag; the box grows under your finger so you can see
   exactly what you are covering. On export, any page containing a
   blackout is **flattened to an image**, so the hidden text is genuinely destroyed rather
@@ -146,12 +150,24 @@ already rendered to a canvas, so `scanLines()` reads it back and looks for long,
 *thin*, nearly-solid bands of dark pixels with white space directly above and below.
 An underscore run or a drawn rule passes all four tests; a row of type fails at
 least two of them (letters leave gaps, and a text row is tall and crowded).
-`inkHeightLeft()` then walks up from the rule to the nearest ink cluster on its
-left — the field's label — and derives a font size from its height. That is why a
-snapped text box comes out the same size as "Tenant name:" beside it.
+Two details matter more than they look.
 
-The whole scan is cached per page render and only runs the first time you place
-something on that page.
+**Every rule on a row, not just the widest.** A row like `City ______  State ____
+ZIP ______` is three separate rules at the same height. Keeping one run per row —
+the obvious implementation — silently drops the other two, and the short middle one
+is exactly the blank a person then finds "doesn't register". Rows therefore collect
+all qualifying runs, and bands grow downwards by matching each run to the band it
+actually overlaps, so neighbouring rules never merge into one.
+
+**Labels sit beside a blank or above it.** `inkHeightLeft()` walks up from the rule to
+the nearest ink cluster on its left — the label in `Tenant name: ______` — and derives
+a font size from its height. When there is nothing to the left, which is the case for
+any rule starting at the page margin, it looks directly above the rule within the
+rule's own width instead. If neither finds a label, the size falls back to the default
+rather than to the bottom of the clamp; that fallback is the difference between a
+sensible box and a 6pt one.
+
+The whole scan is cached per page and only runs once per rotation.
 
 ## How the coordinate system works
 

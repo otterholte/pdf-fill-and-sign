@@ -167,6 +167,19 @@
     <button class="btn-save" id="btnFinish">Finish</button>
   </header>
 
+  <!-- jump from blank to blank without a keyboard -->
+  <nav class="jumpbar" id="jumpbar" aria-label="Move through the blanks">
+    <button class="jump" id="btnPrevSpot">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Back</span>
+    </button>
+    <button class="jump jump-mid" id="btnSpotAct"><span id="spotLabel">Jump to the next blank</span></button>
+    <button class="jump" id="btnNextSpot">
+      <span>Next</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  </nav>
+
   <div class="stage" id="stage" tabindex="0">
     <div class="pages" id="pages"></div>
   </div>

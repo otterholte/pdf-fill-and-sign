@@ -191,7 +191,8 @@ async function loadDoc(buf, name, items, rots, fields) {
   await buildPages(rots);
   syncBars();
   clearBoxCursor();
-  KB.pi = 0; KB.key = null;
+  KB.pi = 0; KB.key = null; KB.cur = null; KB.at = 0; KB.of = 0;
+  syncJump();
   focusStage();
   saveSoon();
 }
@@ -206,7 +207,7 @@ function closeDoc() {
   S.fields = {}; S.fields0 = {}; formToldOnce = false;
   S.pageBox = [];
   clearBoxCursor();
-  KB.pi = 0; KB.key = null;
+  KB.pi = 0; KB.key = null; KB.cur = null; KB.at = 0; KB.of = 0;
   checkResume();
 }
 $('#btnBack').addEventListener('click', () => {
@@ -616,37 +617,62 @@ function scanLines(cv) {
     mask[m] = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 < DARK ? 1 : 0;
   }
 
-  const minLen = Math.max(30, W * 0.06);
-  const rows = [];
+  /* Every qualifying run on the row, not just the longest one. A form row
+     like "City ______  State ____  ZIP ______" has three separate rules at
+     the same height; keeping only the widest would silently lose the other
+     two, which is exactly what makes a short blank feel "not registered". */
+  const minLen = Math.max(24, W * 0.045);
+  const rows = new Array(H).fill(null);
   for (let y = 0; y < H; y++) {
-    let best = 0, bx0 = 0, bx1 = 0, start = -1, gap = 0, base = y * W;
+    const base = y * W;
+    let list = null, start = -1, last = -1, gap = 0;
+    const close = () => {
+      if (start >= 0 && last - start + 1 >= minLen) (list || (list = [])).push({ x0: start, x1: last });
+      start = -1; last = -1; gap = 0;
+    };
     for (let x = 0; x < W; x++) {
-      const dark = mask[base + x] === 1;
-      if (dark) {
-        if (start < 0) start = x;
-        gap = 0;
-        const len = x - start + 1;
-        if (len > best) { best = len; bx0 = start; bx1 = x; }
-      } else if (start >= 0) {
-        if (++gap > GAP) { start = -1; gap = 0; }
-      }
+      if (mask[base + x]) { if (start < 0) start = x; last = x; gap = 0; }
+      else if (start >= 0 && ++gap > GAP) close();
     }
-    rows.push(best >= minLen ? { x0: bx0, x1: bx1, len: best } : null);
+    close();
+    rows[y] = list;
   }
 
-  // merge vertically adjacent rows into bands; keep only thin ones
+  /* Grow bands downwards, matching each row's runs to the band they overlap.
+     Matching on overlap rather than mere adjacency keeps neighbouring rules
+     on the same row apart. */
   const maxThick = Math.max(4, Math.round(H * 0.007));
   const raw = [];
-  let cur = null;
+  const share = (a, b) => {
+    const ov = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) + 1;
+    return ov <= 0 ? 0 : ov / Math.min(a.x1 - a.x0 + 1, b.x1 - b.x0 + 1);
+  };
+  let open = [];
   for (let y = 0; y <= H; y++) {
-    const r = rows[y];
-    if (r) {
-      if (!cur) cur = { top: y, bot: y, x0: r.x0, x1: r.x1 };
-      else { cur.bot = y; if (r.x1 - r.x0 > cur.x1 - cur.x0) { cur.x0 = r.x0; cur.x1 = r.x1; } }
-    } else if (cur) {
-      if (cur.bot - cur.top + 1 <= maxThick) raw.push(cur);
-      cur = null;
+    const list = rows[y] || [];
+    const taken = new Set();
+    const next = [];
+    for (const b of open) {
+      let pick = -1, bestShare = 0.6;
+      for (let i = 0; i < list.length; i++) {
+        if (taken.has(i)) continue;
+        const v = share(b, list[i]);
+        if (v > bestShare) { bestShare = v; pick = i; }
+      }
+      if (pick < 0) {
+        if (b.bot - b.top + 1 <= maxThick) raw.push(b);
+        continue;
+      }
+      taken.add(pick);
+      const r = list[pick];
+      b.bot = y;
+      if (r.x1 - r.x0 > b.x1 - b.x0) { b.x0 = r.x0; b.x1 = r.x1; }
+      next.push(b);
     }
+    for (let i = 0; i < list.length; i++) {
+      if (!taken.has(i)) next.push({ top: y, bot: y, x0: list[i].x0, x1: list[i].x1 });
+    }
+    open = next;
   }
 
   /* A row of type can also produce a long run — letters nearly touch. Two
@@ -674,12 +700,9 @@ function scanLines(cv) {
 /** Height of the label sitting just left of a line — used to match font size.
     Walks up from the rule and stops at the first clear gap, so the row above
     (a different field) is never folded into the measurement. */
-function inkHeightLeft(scan, band) {
+function inkHeightIn(scan, band, xStart, xEnd, maxSkip) {
   const { W, H, mask } = scan;
-  if (!mask) return 0;
-  const xEnd = Math.max(0, band.x0 - 3);
-  const xStart = Math.max(0, band.x0 - Math.round(W * 0.32));
-  if (xEnd - xStart < 8) return 0;
+  if (!mask || xEnd - xStart < 8) return 0;
   const inked = y => {
     if (y < 0) return false;
     const base = y * W;
@@ -688,16 +711,30 @@ function inkHeightLeft(scan, band) {
   };
   const maxUp = Math.round(H * 0.035);
   let y = band.top - 1, skipped = 0;
-  while (y >= 0 && skipped < Math.round(H * 0.006) && !inked(y)) { y--; skipped++; }
+  while (y >= 0 && skipped < maxSkip && !inked(y)) { y--; skipped++; }
   if (y < 0 || !inked(y)) return 0;
   const bottom = y;
   let gap = 0;
-  while (y >= 0 && band.top - y < maxUp) {
+  while (y >= 0 && bottom - y < maxUp) {
     if (inked(y)) gap = 0;
     else if (++gap >= 3) break;
     y--;
   }
   return bottom - (y + gap) + 1;
+}
+
+/** Height of the label belonging to a line. Forms label a blank one of two
+    ways — beside it ("Name: ______") or above it — so try beside first and
+    fall back to directly above, within the line's own width. */
+function inkHeightLeft(scan, band) {
+  const { W, H } = scan;
+  const beside = inkHeightIn(
+    scan, band,
+    Math.max(0, band.x0 - Math.round(W * 0.32)),
+    Math.max(0, band.x0 - 3),
+    Math.round(H * 0.006));
+  if (beside) return beside;
+  return inkHeightIn(scan, band, band.x0, Math.min(W, band.x1 + 1), Math.round(H * 0.024));
 }
 
 /* ------------------------------------------------------- CHECKBOX SPOTTING
@@ -833,13 +870,19 @@ function ensureScan(p) {
       }).promise;
       const scan = scanLines(cv);
       p.scanned = {
-        lines: scan.bands.map(b => ({
-          y: b.top / scan.H,                       // where a baseline should sit
-          x0: b.x0 / scan.W,
-          x1: b.x1 / scan.W,
-          fs: clamp((inkHeightLeft(scan, b) / 0.72) / scan.H, 0.0085, 0.045) || DEF.fs,
-          hasLabel: inkHeightLeft(scan, b) > 0,
-        })),
+        lines: scan.bands.map(b => {
+          /* Match the label if we found one. With no label to measure, a
+             sensible default beats the bottom of the clamp — that is what
+             used to make an unlabelled blank get 6pt text. */
+          const ink = inkHeightLeft(scan, b);
+          return {
+            y: b.top / scan.H,                     // where a baseline should sit
+            x0: b.x0 / scan.W,
+            x1: b.x1 / scan.W,
+            fs: ink ? clamp((ink / 0.72) / scan.H, 0.0085, 0.045) : DEF.fs,
+            hasLabel: ink > 0,
+          };
+        }),
         boxes: scanBoxes(scan),
       };
     } catch (_) {
@@ -1093,6 +1136,7 @@ pagesEl.addEventListener('pointerdown', e => {
   if (B) { e.preventDefault(); clearBoxCursor(); return void cycleBox(pi, B, 'check'); }
 
   focusStage();
+  anchorNearest(pi, x, y);
   if (S.sel) select(null);
 });
 
@@ -1225,7 +1269,9 @@ function addStamp(sig) {
   const st = {
     id: uid(), page: sig.page, rot: sig.rot, type: 'text',
     x: sig.x + 0.004, y: clamp(sig.y + sigH + 0.004, 0, 1),
-    fs: DEF.stampFs, color: COLORS[0],
+    // scale to the signature, or a small snapped signature gets a huge date
+    fs: clamp(DEF.stampFs * (sig.w / DEF.sigW), 0.005, 0.055),
+    color: COLORS[0],
     text: '', link: sig.id,
     date: { at: Date.now(), fmt: sig.stampMode === 'date' ? 1 : 3 },
   };
@@ -1400,14 +1446,25 @@ function startDrag(e, d) {
 
 /* resize */
 function startResize(e, d) {
-  const it = S.items.find(i => i.id === d.dataset.id);
+  let it = S.items.find(i => i.id === d.dataset.id);
   if (!it) return;
+
+  /* A timestamp belongs to its signature. Its handle sits right where the
+     signature's does, so grabbing either one has to resize the pair — not
+     blow the date up on its own. */
+  if (it.link) {
+    const sig = S.items.find(i => i.id === it.link);
+    const sd = sig && elOf(sig.id);
+    if (sig && sd) { it = sig; d = sd; }
+  }
+
   select(it.id);
   const p = S.pageBox[it.page];
   const spin = norm4(totalRot(p) - it.rot);
   const [Wl, Hl] = itemFrame(it);
   const sx = e.clientX, sy = e.clientY;
-  const o = { fs: it.fs, w: it.w, h: it.h, size: it.size };
+  const st = it.type === 'sig' ? stampOf(it) : null;
+  const o = { fs: it.fs, w: it.w, h: it.h, size: it.size, stFs: st?.fs };
   let started = false;
   d.setPointerCapture(e.pointerId);
   e.preventDefault(); e.stopPropagation();
@@ -1417,7 +1474,10 @@ function startResize(e, d) {
     const [ppx, ppy] = unspin(spin, ev.clientX - sx, ev.clientY - sy);
     const dx = ppx / Wl, dy = ppy / Hl;
     if (isText(it)) it.fs = clamp(o.fs + dy * 0.6 + dx * 0.15, 0.005, 0.14);
-    else if (it.type === 'sig') it.w = clamp(o.w + dx, 0.04, 1.2);          // aspect locked
+    else if (it.type === 'sig') {
+      it.w = clamp(o.w + dx, 0.04, 1.2);                                    // aspect locked
+      if (st) st.fs = clamp(o.stFs * (it.w / o.w), 0.004, 0.14);            // the date scales with it
+    }
     else if (it.type === 'redact') { it.w = clamp(o.w + dx, 0.008, 1.2); it.h = clamp(o.h + dy, 0.004, 1.0); }
     else it.size = clamp(o.size + dy, 0.006, 0.35);
     sizeItem(it, d);
@@ -1441,10 +1501,16 @@ $$('#swatches .sw').forEach(b => b.addEventListener('click', () => {
   paintItems(); select(it.id);
 }));
 const bump = f => {
-  const it = getSel(); if (!it) return;
+  const sel = getSel(); if (!sel) return;
+  // sizing a timestamp sizes the signature it belongs to
+  const it = (sel.link && S.items.find(i => i.id === sel.link)) || sel;
   push();
   if (isText(it)) it.fs = clamp(it.fs * f, 0.005, 0.14);
-  else if (it.type === 'sig') it.w = clamp(it.w * f, 0.04, 1.2);
+  else if (it.type === 'sig') {
+    it.w = clamp(it.w * f, 0.04, 1.2);
+    const st = stampOf(it);
+    if (st) st.fs = clamp(st.fs * f, 0.004, 0.14);
+  }
   else if (it.type === 'redact') { it.w = clamp(it.w * f, 0.008, 1.2); it.h = clamp(it.h * f, 0.004, 1); }
   else it.size = clamp(it.size * f, 0.006, 0.35);
   if (it.type === 'sig') reseatStamp(it);
@@ -1513,7 +1579,7 @@ document.addEventListener('keydown', e => {
    live in memory, and nothing about them is sent or stored anywhere beyond
    the local draft already described on the home screen. */
 
-const KB = { pi: 0, key: null, box: null, el: null };
+const KB = { pi: 0, key: null, box: null, el: null, cur: null, at: 0, of: 0 };
 const lineKey = (pi, L) => `l:${pi}:${Math.round(L.y * 1e4)}:${Math.round(L.x0 * 1e4)}`;
 
 /** where a form field sits on the page as displayed, 0–1 */
@@ -1583,7 +1649,7 @@ async function moveSpot(dir) {
   for (let hop = 0; hop <= n; hop++) {
     if (next >= 0 && next < list.length) {
       const s = list[next];
-      KB.pi = pi; KB.key = s.key;
+      KB.pi = pi; KB.key = s.key; KB.at = next + 1; KB.of = list.length;
       return enterSpot(s);
     }
     pi = (pi + dir + n) % n;
@@ -1593,9 +1659,31 @@ async function moveSpot(dir) {
   toast('Nothing obvious to fill in here — use the toolbar to add a text box.', 3200);
 }
 
+/* ---------------------------------------------------------- the jump bar */
+const SPOT_LABEL = { field: 'Form field', line: 'Blank line', box: 'Tick this box' };
+
+function syncJump() {
+  const s = KB.cur;
+  const mid = $('#btnSpotAct'), lab = $('#spotLabel');
+  const onBox = !!KB.box;
+  mid.classList.toggle('is-act', onBox);
+  lab.textContent = onBox ? 'Tick this box'
+    : s ? `${SPOT_LABEL[s.kind]} · ${KB.at} of ${KB.of}`
+    : 'Jump to the next blank';
+}
+
+$('#btnPrevSpot').addEventListener('click', () => moveSpot(-1));
+$('#btnNextSpot').addEventListener('click', () => moveSpot(1));
+$('#btnSpotAct').addEventListener('click', () => {
+  if (KB.box) return bumpBox();
+  if (!KB.cur) return void moveSpot(1);
+  enterSpot(KB.cur);                                   // put me back where I was
+});
+
 async function enterSpot(s) {
   const p = S.pageBox[s.page];
   clearBoxCursor();
+  KB.cur = s;
 
   if (s.kind === 'field') {
     select(null);
@@ -1605,6 +1693,7 @@ async function enterSpot(s) {
       const v = s.f.el.value.length;
       try { s.f.el.setSelectionRange(v, v); } catch (_) {}
     }
+    syncJump();
     return;
   }
 
@@ -1623,16 +1712,18 @@ async function enterSpot(s) {
     scrollToSpot(p, s.x, s.y);
     const d = elOf(it.id);
     if (d) edit(d);
+    syncJump();
     return;
   }
 
-  // a tick box: highlight it and wait for Enter
+  // a tick box: highlight it and wait for Enter or the bar's tick button
   select(null);
   blurActive();
   KB.box = s;
   paintBoxCursor(p, s.B);
   scrollToSpot(p, s.B.cx, s.B.cy);
   focusStage();
+  syncJump();
 }
 
 function scrollToSpot(p, x, y) {
@@ -1667,6 +1758,7 @@ function clearBoxCursor() {
   const h = $('#kbhint');
   if (h) h.hidden = true;
 }
+function leaveSpot() { clearBoxCursor(); KB.cur = null; syncJump(); }
 
 /** Enter on a highlighted tick box: X, then a check, then clear again */
 function bumpBox() {
@@ -1730,8 +1822,23 @@ document.addEventListener('keydown', e => {
   }
 }, true);
 
-// clicking anywhere on the page area hands the keyboard back to the document
-stageEl.addEventListener('pointerdown', () => { if (!KB.box) KB.key = null; });
+/** After a tap, carry on from where they tapped rather than from the top. */
+function anchorNearest(pi, x, y) {
+  const list = spotsForPage(pi);
+  if (!list.length) { KB.pi = pi; KB.key = null; KB.cur = null; return; }
+  let best = 0, bd = Infinity;
+  list.forEach((s, i) => {
+    const d = Math.hypot(s.x - x, (s.y - y) * 1.6);   // vertical distance matters more
+    if (d < bd) { bd = d; best = i; }
+  });
+  KB.pi = pi; KB.key = list[best].key; KB.at = best + 1; KB.of = list.length; KB.cur = null;
+}
+
+// tapping the page hands the keyboard back to the document
+stageEl.addEventListener('pointerdown', e => {
+  if (!e.isPrimary || KB.box) return;
+  leaveSpot();
+});
 
 /* ================================================================ ROTATE */
 function currentPage() {
