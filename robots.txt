@@ -1,2 +1,4 @@
 User-agent: *
 Allow: /
+
+Sitemap: https://otterholte.github.io/pdf-fill-and-sign/sitemap.xml

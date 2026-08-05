@@ -187,6 +187,31 @@ a:hover{text-decoration:underline;}
 }
 @keyframes snapfade{0%{opacity:.9;}60%{opacity:.55;}100%{opacity:0;}}
 
+/* the tick box the keyboard is currently sitting on */
+.boxcursor{
+  position:absolute;transform-origin:0 0;pointer-events:none;z-index:4;border-radius:2px;
+  box-shadow:0 0 0 2px var(--accent), 0 0 0 5px rgba(27,79,216,.22);
+  animation:boxpulse 1.4s ease-in-out infinite;
+}
+@keyframes boxpulse{0%,100%{opacity:1;}50%{opacity:.55;}}
+
+.stage:focus{outline:none;}
+.stage:focus-visible{outline:none;}
+
+.kbhint{
+  position:absolute;left:50%;transform:translateX(-50%);bottom:calc(var(--safe-b) + 88px);
+  display:flex;align-items:center;gap:6px;z-index:7;pointer-events:none;
+  background:var(--ink);color:var(--ink-contrast);font-size:12.5px;font-weight:500;
+  padding:8px 14px;border-radius:999px;box-shadow:var(--shadow);white-space:nowrap;
+}
+.kbhint[hidden]{display:none;}
+.kbhint kbd{
+  font:inherit;font-weight:700;background:rgba(127,127,127,.28);
+  border-radius:5px;padding:1px 6px;
+}
+.kbhint span{opacity:.45;}
+@media (hover:none){.kbhint{display:none;}}
+
 /* real form fields declared by the PDF */
 .fields{position:absolute;left:0;top:0;right:0;bottom:0;}
 .editor.arming .fields{pointer-events:none;}
@@ -226,6 +251,9 @@ select.fld{padding-right:0;}
 .handle{position:absolute;width:26px;height:26px;right:-17px;bottom:-17px;display:none;place-items:center;touch-action:none;}
 .handle::after{content:"";width:14px;height:14px;border-radius:50%;background:var(--accent);border:2.5px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3);}
 .it.sel > .handle{display:grid;}
+/* a mark sitting in a tick box is already the right size — keep the whole
+   thing clickable so tapping it cycles the mark instead of resizing it */
+.it.is-boxed > .handle{display:none;}
 .rubber{position:absolute;background:rgba(0,0,0,.85);outline:1.5px solid var(--accent);pointer-events:none;transform-origin:0 0;}
 
 /* bars */

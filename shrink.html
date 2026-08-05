@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Shrink — Free Image Compressor. Nothing Uploaded, No Account.</title>
+<meta name="description" content="Make an image file smaller for free, right on your device. Pick a level or type the size you need in MB. Photos are never uploaded — no account, no watermark, no paywall.">
+<meta name="keywords" content="compress image free, reduce image file size, shrink photo to 1mb, resize image online free, make picture smaller, compress jpeg without uploading, image compressor no account, reduce photo size for email, compress photo on iphone, compress image to specific size">
+<meta name="author" content="Eli Otterholt">
+<meta name="theme-color" content="#0f1216" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<link rel="icon" href="icons/shrink.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="site.css">
+<link rel="stylesheet" href="shrink.css">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Shrink — Free Image Compressor">
+<meta property="og:description" content="Make an image small enough to send. Pick a size. Nothing is uploaded.">
+<meta property="og:image" content="icons/og.png">
+<meta name="twitter:card" content="summary_large_image">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "Shrink",
+  "alternateName": "Free Image Compressor",
+  "applicationCategory": "MultimediaApplication",
+  "operatingSystem": "Any device with a web browser",
+  "browserRequirements": "Requires JavaScript.",
+  "description": "A free image compressor that runs entirely on your device. Choose a compression level or a target size in MB. Images are never uploaded.",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "isAccessibleForFree": true,
+  "author": { "@type": "Person", "name": "Eli Otterholt", "email": "otterholteli@gmail.com" },
+  "featureList": [
+    "Compress JPEG, PNG, WebP and HEIC images",
+    "Choose a target file size in MB",
+    "Three one-tap compression levels",
+    "Batch several images at once",
+    "Runs entirely on the device — nothing is uploaded",
+    "No account, no watermark, no paywall"
+  ],
+  "mainEntity": {
+    "@type": "FAQPage",
+    "mainEntity": [
+      { "@type": "Question", "name": "Are my photos uploaded anywhere?",
+        "acceptedAnswer": { "@type": "Answer", "text": "No. The image is opened, resized and re-encoded by your own browser. It never leaves your device, and there is no server involved at any point." } },
+      { "@type": "Question", "name": "Can I compress an image to an exact size?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes. Type the size you need in MB and Shrink finds the highest quality that fits under it, reducing the dimensions only if quality alone is not enough." } },
+      { "@type": "Question", "name": "Is it really free?",
+        "acceptedAnswer": { "@type": "Answer", "text": "Yes, permanently. Everything happens on your device, so there are no running costs to recover. There is no account, no watermark and no paywall." } }
+    ]
+  }
+}
+</script>
+</head>
+<body>
+
+<main class="page-wrap">
+  <div class="head">
+    <a class="brand" href="tools.html">
+      <svg class="brand-mark" viewBox="0 0 512 512" aria-hidden="true">
+        <rect width="512" height="512" rx="112" fill="#0f8a5f"/>
+        <rect x="118" y="118" width="276" height="276" rx="34" fill="none" stroke="#a7e9cd" stroke-width="26"/>
+        <rect x="196" y="196" width="120" height="120" rx="20" fill="#ffffff"/>
+      </svg>
+      <span class="brand-name">Shrink</span>
+    </a>
+
+    <h1 class="hero-title">Make an image smaller</h1>
+    <p class="hero-sub">Too big to email or upload? Pick a size and get it back in a second.</p>
+
+    <p class="free-line"><strong>Free forever.</strong> No account, no payment, no trial, no watermark.</p>
+    <ul class="free-chips">
+      <li>No sign-up</li>
+      <li>No card</li>
+      <li>Nothing uploaded</li>
+      <li>No paywall at the end</li>
+    </ul>
+  </div>
+
+  <!-- how small -->
+  <section class="panel" aria-label="How small">
+    <h2 class="panel-title">How small do you need it?</h2>
+    <div class="levels" id="levels" role="group" aria-label="Compression level">
+      <button class="lev" data-lev="light">
+        <strong>A little</strong>
+        <span>Still print-quality</span>
+      </button>
+      <button class="lev is-on" data-lev="balanced">
+        <strong>A lot</strong>
+        <span>Great for email</span>
+      </button>
+      <button class="lev" data-lev="max">
+        <strong>As small as possible</strong>
+        <span>For slow uploads</span>
+      </button>
+    </div>
+
+    <div class="target">
+      <label class="target-row">
+        <input type="checkbox" id="useTarget">
+        <span>Or aim for an exact size</span>
+      </label>
+      <div class="target-in" id="targetIn" hidden>
+        <input type="number" id="targetMb" min="0.05" max="50" step="0.1" value="1" inputmode="decimal" aria-label="Target size in megabytes">
+        <span class="unit">MB or under</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- pick files -->
+  <div class="drop" id="drop">
+    <button class="btn-primary big" id="btnOpen">Choose images</button>
+    <p class="drop-hint">or drop them here — you can paste one too</p>
+    <input type="file" id="fileInput" accept="image/*" multiple hidden>
+  </div>
+
+  <p class="privacy">Just start using it. Your images stay on your device.</p>
+
+  <!-- results -->
+  <section class="results" id="results" hidden>
+    <div class="results-head">
+      <p class="tally" id="tally"></p>
+      <button class="btn-ghost sm" id="btnClear">Clear</button>
+    </div>
+    <div class="cards" id="cards"></div>
+    <div class="results-foot">
+      <button class="btn-primary wide" id="btnSaveAll">Save all</button>
+      <button class="btn-ghost wide" id="btnShareAll" hidden>Share</button>
+    </div>
+  </section>
+
+  <section class="seo">
+    <h2>Compress a photo without uploading it anywhere</h2>
+    <p>Most "free" image compressors ask you to upload your photo to a company's server, then put a size cap, a queue, or a paywall in front of the download. Shrink does the whole job in your browser. Your picture is decoded, resized and re-encoded by your own device, and the smaller file appears immediately. There is no upload, no account, and no limit on how many you do.</p>
+
+    <h2>How to use it</h2>
+    <ul>
+      <li><strong>Pick how small</strong> — three levels covering almost every real need, or type an exact size in MB if something is asking for one.</li>
+      <li><strong>Add your images</strong> — choose them, drop them in, or paste a screenshot straight from your clipboard. Several at once is fine.</li>
+      <li><strong>Save</strong> — every image shows what it was, what it is now, and how much smaller that is. Save one, save all, or share them straight into another app.</li>
+    </ul>
+
+    <h2>What it does to your image</h2>
+    <p>Shrink reduces the file size two ways: it lowers the JPEG quality a little, and, when that is not enough on its own, it reduces the pixel dimensions. It never adds a watermark, never crops, and never changes the colours. Photos with transparent backgrounds are saved as WebP so the transparency survives; everything else is saved as a JPEG, which is what almost every form and email client expects.</p>
+    <p>If a file is already about as small as it can get, Shrink says so and hands you back the original rather than making it worse.</p>
+
+    <h2>Why is this free?</h2>
+    <p>Because it costs me nothing to run. There is no server doing the work, so there is no bill that grows with the number of people using it. I build software for a living, and this is a straightforward way to show what that looks like. If you need something simple built for your business, email me.</p>
+  </section>
+
+  <footer class="site-foot">
+    <p class="made">Built by <strong>Eli Otterholt</strong></p>
+    <p class="foot-links">
+      <a href="mailto:otterholteli@gmail.com?subject=Building%20something%20simple">otterholteli@gmail.com</a>
+      <span>·</span>
+      <a href="tools.html">More simple tools by Eli</a>
+      <span>·</span>
+      <a href="index.html">Fill &amp; Sign</a>
+    </p>
+    <p class="fine">Need something simple built for your business? Email me — I build small tools like this for free.</p>
+    <p class="fine">Free forever. No accounts, no ads, no tracking, no analytics.</p>
+  </footer>
+</main>
+
+<div class="toast" id="toast" hidden></div>
+<script src="shrink.js"></script>
+</body>
+</html>

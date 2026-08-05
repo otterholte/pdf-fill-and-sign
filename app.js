@@ -190,6 +190,9 @@ async function loadDoc(buf, name, items, rots, fields) {
 
   await buildPages(rots);
   syncBars();
+  clearBoxCursor();
+  KB.pi = 0; KB.key = null;
+  focusStage();
   saveSoon();
 }
 
@@ -201,6 +204,9 @@ function closeDoc() {
   try { S.pdf?.destroy?.(); } catch (_) {}
   S.pdf = null; S.bytes = null; S.items = []; S.sel = null; S.tool = null; lastBlob = null;
   S.fields = {}; S.fields0 = {}; formToldOnce = false;
+  S.pageBox = [];
+  clearBoxCursor();
+  KB.pi = 0; KB.key = null;
   checkResume();
 }
 $('#btnBack').addEventListener('click', () => {
@@ -313,11 +319,14 @@ function announceForm() {
   $('#docPages').textContent = n
     ? `${pages} · ${n} fillable field${n > 1 ? 's' : ''}`
     : `${pages} · stays on this device`;
-  if (n && !formToldOnce) {
-    formToldOnce = true;
-    toast('This form is fillable — tap a highlighted box and type.', 4200);
-  }
+  if (formToldOnce) return;
+  formToldOnce = true;
+  if (HAS_KEYBOARD) toast(n
+    ? 'Press Tab to jump through the fields — Enter ticks a box.'
+    : 'Press Tab to jump from blank to blank — Enter ticks a box.', 5200);
+  else if (n) toast('This form is fillable — tap a highlighted box and type.', 4200);
 }
+const HAS_KEYBOARD = matchMedia('(hover: hover) and (pointer: fine)').matches;
 
 /* the page background, so an edited field can cover whatever was in it before */
 function pageBg(p) {
@@ -484,6 +493,26 @@ const toUnrot = (p, dx, dy) => unrotXY(totalRot(p), dx, dy);
 let renderT;
 function renderSoon() { clearTimeout(renderT); renderT = setTimeout(renderVisible, 140); }
 
+async function renderOne(p, dpr) {
+  const key = p.dw + ':' + totalRot(p);
+  if (p.renderKey === key) {
+    if (p.readyKey !== key && p.task) { try { await p.task.promise; p.readyKey = key; } catch (_) {} }
+    return;
+  }
+  try {
+    p.task?.cancel();
+    const target = Math.round(p.dw * (dpr || clamp(window.devicePixelRatio || 1, 1, 2.5)));
+    const vp = p.page.getViewport({ scale: target / (totalRot(p) % 180 ? p.uh : p.uw), rotation: totalRot(p) });
+    p.cv.width = Math.round(vp.width);
+    p.cv.height = Math.round(vp.height);
+    p.renderKey = key;
+    p.task = p.page.render({ canvasContext: p.cv.getContext('2d', { alpha: false }), viewport: vp });
+    await p.task.promise;
+    p.readyKey = key;
+    if (p.fields?.length) reflectFields(p);
+  } catch (_) { p.renderKey = null; }
+}
+
 async function renderVisible() {
   const tok = ++S.renderTok;
   const dpr = clamp(window.devicePixelRatio || 1, 1, 2.5);
@@ -494,20 +523,8 @@ async function renderVisible() {
     if (tok !== S.renderTok) return;
     const y = p.el.offsetTop;
     if (y + p.dh < top || y > bot) continue;
-    const key = p.dw + ':' + totalRot(p);
-    if (p.renderKey === key) continue;
-    try {
-      p.task?.cancel();
-      const target = Math.round(p.dw * dpr);
-      const vp = p.page.getViewport({ scale: target / (totalRot(p) % 180 ? p.uh : p.uw), rotation: totalRot(p) });
-      p.cv.width = Math.round(vp.width);
-      p.cv.height = Math.round(vp.height);
-      p.renderKey = key;
-      p.task = p.page.render({ canvasContext: p.cv.getContext('2d', { alpha: false }), viewport: vp });
-      await p.task.promise;
-      p.readyKey = key;                    // line scanning waits for real pixels
-      if (p.fields?.length) reflectFields(p);
-    } catch (_) { p.renderKey = null; }
+    await renderOne(p, dpr);
+    ensureScan(p);          // warm the blank/tick-box scan for this page
   }
 }
 stageEl.addEventListener('scroll', renderSoon, { passive: true });
@@ -590,15 +607,21 @@ function scanLines(cv) {
   const W = cv.width, H = cv.height;
   let d;
   try { d = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data; }
-  catch (_) { return { W, H, bands: [], data: null }; }
+  catch (_) { return { W, H, bands: [], data: null, mask: null }; }
+
+  /* one pass to a 1-byte-per-pixel ink mask — every scan below reads this
+     instead of re-deriving luminance, which keeps the box pass cheap */
+  const mask = new Uint8Array(W * H);
+  for (let i = 0, m = 0; m < mask.length; m++, i += 4) {
+    mask[m] = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 < DARK ? 1 : 0;
+  }
 
   const minLen = Math.max(30, W * 0.06);
   const rows = [];
   for (let y = 0; y < H; y++) {
-    let best = 0, bx0 = 0, bx1 = 0, start = -1, gap = 0, base = y * W * 4;
+    let best = 0, bx0 = 0, bx1 = 0, start = -1, gap = 0, base = y * W;
     for (let x = 0; x < W; x++) {
-      const i = base + x * 4;
-      const dark = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 < DARK;
+      const dark = mask[base + x] === 1;
       if (dark) {
         if (start < 0) start = x;
         gap = 0;
@@ -632,11 +655,8 @@ function scanLines(cv) {
      below it. Text is neither. */
   const density = (y, x0, x1) => {
     if (y < 0 || y >= H) return 0;
-    let c = 0, base = y * W * 4;
-    for (let x = x0; x <= x1; x++) {
-      const i = base + x * 4;
-      if ((d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 < DARK) c++;
-    }
+    let c = 0, base = y * W;
+    for (let x = x0; x <= x1; x++) if (mask[base + x]) c++;
     return c / (x1 - x0 + 1);
   };
   const bands = raw.filter(b => {
@@ -648,25 +668,22 @@ function scanLines(cv) {
     return above < 0.28 && below < 0.28;
   });
 
-  return { W, H, bands, data: d };
+  return { W, H, bands, data: d, mask };
 }
 
 /** Height of the label sitting just left of a line — used to match font size.
     Walks up from the rule and stops at the first clear gap, so the row above
     (a different field) is never folded into the measurement. */
 function inkHeightLeft(scan, band) {
-  const { W, H, data } = scan;
-  if (!data) return 0;
+  const { W, H, mask } = scan;
+  if (!mask) return 0;
   const xEnd = Math.max(0, band.x0 - 3);
   const xStart = Math.max(0, band.x0 - Math.round(W * 0.32));
   if (xEnd - xStart < 8) return 0;
   const inked = y => {
     if (y < 0) return false;
-    const base = y * W * 4;
-    for (let x = xStart; x < xEnd; x++) {
-      const i = base + x * 4;
-      if ((data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000 < DARK) return true;
-    }
+    const base = y * W;
+    for (let x = xStart; x < xEnd; x++) if (mask[base + x]) return true;
     return false;
   };
   const maxUp = Math.round(H * 0.035);
@@ -683,20 +700,168 @@ function inkHeightLeft(scan, band) {
   return bottom - (y + gap) + 1;
 }
 
-function pageLines(p) {
-  const key = p.readyKey;
-  if (!key) return [];
-  if (p.lineKey === key) return p.lines;
-  const scan = scanLines(p.cv);
-  p.lines = scan.bands.map(b => ({
-    y: b.top / scan.H,                       // where a baseline should sit
-    x0: b.x0 / scan.W,
-    x1: b.x1 / scan.W,
-    fs: clamp((inkHeightLeft(scan, b) / 0.72) / scan.H, 0.0085, 0.045) || DEF.fs,
-    hasLabel: inkHeightLeft(scan, b) > 0,
-  }));
-  p.lineKey = key;
-  return p.lines;
+/* ------------------------------------------------------- CHECKBOX SPOTTING
+   A tick box is the one shape on a form that is unmistakable from pixels
+   alone: a small, near-square outline with nothing inside it. Look for a
+   short horizontal run, a matching run a plausible distance below, solid
+   sides joining them, and a clear middle. Anything already ticked fails the
+   clear-middle test, which is exactly what we want — we only offer to fill
+   boxes that are still empty. */
+function scanBoxes(scan) {
+  const { W, H, mask } = scan;
+  if (!mask) return [];
+
+  const minS = Math.max(5, Math.round(H * 0.0075));
+  const maxS = Math.max(minS + 4, Math.round(H * 0.030));
+
+  // short horizontal runs, per row — candidate top and bottom edges
+  const runs = new Array(H).fill(null);
+  for (let y = 0; y < H; y++) {
+    const base = y * W;
+    let list = null, start = -1;
+    for (let x = 0; x <= W; x++) {
+      if (x < W && mask[base + x]) { if (start < 0) start = x; continue; }
+      if (start >= 0) {
+        const len = x - start;
+        if (len >= minS && len <= maxS) (list || (list = [])).push(start, x - 1);
+        start = -1;
+      }
+    }
+    runs[y] = list;
+  }
+
+  const out = [], taken = [];
+  for (let y = 0; y < H; y++) {
+    const list = runs[y];
+    if (!list) continue;
+    for (let k = 0; k < list.length; k += 2) {
+      const x0 = list[k], x1 = list[k + 1], L = x1 - x0 + 1;
+
+      // a bottom edge roughly one box-width below, at the same x range
+      let y1 = -1;
+      const lo = Math.max(2, Math.round(L * 0.62)), hi = Math.round(L * 1.62);
+      for (let dy = lo; dy <= hi && y + dy < H; dy++) {
+        const bl = runs[y + dy];
+        if (!bl) continue;
+        for (let j = 0; j < bl.length; j += 2) {
+          if (Math.abs(bl[j] - x0) <= 2 && Math.abs(bl[j + 1] - x1) <= 2) { y1 = y + dy; break; }
+        }
+        if (y1 > 0) break;
+      }
+      if (y1 < 0) continue;
+
+      // already covered by a box we accepted (thick borders repeat per row)
+      if (taken.some(t => Math.abs(t.x - x0) <= 3 && Math.abs(t.y - y) <= Math.max(3, L * 0.5))) continue;
+
+      /* Round letters are hollow too. A bold lowercase "o" has a long run
+         across the top of the bowl, a matching one across the bottom, solid
+         sides and a clear middle — it passes every test above. What it does
+         not have is a *thin* border: two rows into an "o" you are still in
+         the stroke, whereas two rows into a drawn box there is nothing but
+         the two sides. That is the test that separates them. */
+      const row = (yy) => {
+        if (yy < 0 || yy >= H) return 1;
+        let c = 0;
+        const b = yy * W;
+        for (let xx = x0; xx <= x1; xx++) if (mask[b + xx]) c++;
+        return c / L;
+      };
+      if (row(y + 2) > 0.40 || row(y1 - 2) > 0.40) continue;
+
+      const Hh = y1 - y + 1;
+      const side = cx => {
+        let c = 0;
+        for (let yy = y; yy <= y1; yy++) {
+          const b = yy * W;
+          if (mask[b + cx] || (cx > 0 && mask[b + cx - 1]) || (cx + 1 < W && mask[b + cx + 1])) c++;
+        }
+        return c / Hh;
+      };
+      if (side(x0) < 0.78 || side(x1) < 0.78) continue;
+
+      const ix0 = x0 + 2, ix1 = x1 - 2, iy0 = y + 2, iy1 = y1 - 2;
+      if (ix1 - ix0 < 1 || iy1 - iy0 < 1) continue;
+      let ink = 0;
+      for (let yy = iy0; yy <= iy1; yy++) {
+        const b = yy * W;
+        for (let xx = ix0; xx <= ix1; xx++) if (mask[b + xx]) ink++;
+      }
+      if (ink / ((ix1 - ix0 + 1) * (iy1 - iy0 + 1)) > 0.12) continue;   // already ticked / not hollow
+
+      taken.push({ x: x0, y });
+      out.push({
+        x0: x0 / W, y0: y / H, x1: (x1 + 1) / W, y1: (y1 + 1) / H,
+        cx: (x0 + x1 + 1) / 2 / W, cy: (y + y1 + 1) / 2 / H,
+        w: L / W, h: Hh / H,
+      });
+    }
+  }
+  return out;
+}
+
+/* Scanning runs on its own small render rather than the on-screen canvas, so
+   the answer is the same whether you are zoomed out on a phone or zoomed
+   right in on a desktop — and a 6× zoom never means scanning a 12000px
+   bitmap. The canvas is thrown away immediately; only the measurements are
+   kept, in memory, in this tab. */
+const EMPTY_SCAN = { lines: [], boxes: [] };
+const SCAN_W = 1000;
+const scanKeyOf = p => 'r' + totalRot(p);
+
+function pageScan(p) {
+  return (p.scanKey === scanKeyOf(p) && p.scanned) || EMPTY_SCAN;
+}
+const pageLines = p => pageScan(p).lines;
+const pageBoxes = p => pageScan(p).boxes;
+
+function ensureScan(p) {
+  const key = scanKeyOf(p);
+  if (p.scanKey === key) return Promise.resolve(p.scanned);
+  if (p.scanPending === key) return p.scanJob;
+  p.scanPending = key;
+  p.scanJob = (async () => {
+    const cv = document.createElement('canvas');
+    try {
+      try { await p.task?.promise; } catch (_) {}      // don't render a page twice at once
+      const v0 = p.page.getViewport({ scale: 1, rotation: totalRot(p) });
+      const vp = p.page.getViewport({ scale: SCAN_W / v0.width, rotation: totalRot(p) });
+      cv.width = Math.round(vp.width);
+      cv.height = Math.round(vp.height);
+      await p.page.render({
+        canvasContext: cv.getContext('2d', { alpha: false, willReadFrequently: true }),
+        viewport: vp,
+      }).promise;
+      const scan = scanLines(cv);
+      p.scanned = {
+        lines: scan.bands.map(b => ({
+          y: b.top / scan.H,                       // where a baseline should sit
+          x0: b.x0 / scan.W,
+          x1: b.x1 / scan.W,
+          fs: clamp((inkHeightLeft(scan, b) / 0.72) / scan.H, 0.0085, 0.045) || DEF.fs,
+          hasLabel: inkHeightLeft(scan, b) > 0,
+        })),
+        boxes: scanBoxes(scan),
+      };
+    } catch (_) {
+      p.scanned = EMPTY_SCAN;
+    }
+    cv.width = cv.height = 0;                       // release the bitmap
+    p.scanKey = key;
+    p.scanPending = null;
+    return p.scanned;
+  })();
+  return p.scanJob;
+}
+
+/** the tick box under a tap, if the tap really is inside one */
+function findBox(p, x, y, pad = 0.004) {
+  let best = null, bd = Infinity;
+  for (const B of pageBoxes(p)) {
+    if (x < B.x0 - pad || x > B.x1 + pad || y < B.y0 - pad || y > B.y1 + pad) continue;
+    const d = Math.hypot(x - B.cx, y - B.cy);
+    if (d < bd) { bd = d; best = B; }
+  }
+  return best;
 }
 
 /** nearest fill-in line to a tap, or null.
@@ -733,7 +898,7 @@ const textOf = it => (it.date ? renderDate(it) : it.text);
 function itemEl(it) {
   const p = S.pageBox[it.page];
   const d = document.createElement('div');
-  d.className = 'it it-' + it.type + (it.date ? ' it-date' : '');
+  d.className = 'it it-' + it.type + (it.date ? ' it-date' : '') + (it.boxed ? ' is-boxed' : '');
   d.dataset.id = it.id;
 
   if (isText(it)) {
@@ -901,24 +1066,93 @@ pagesEl.addEventListener('pointerdown', e => {
   const pageEl = e.target.closest('.page');
   if (!pageEl) return;
 
+  if (e.target.closest('.fld')) return;         // a real form field handles itself
+
   const handle = e.target.closest('.handle');
   const itEl = e.target.closest('.it');
   if (handle && itEl) return startResize(e, itEl);
   if (itEl) return startDrag(e, itEl);
 
   const pi = +pageEl.dataset.i;
+  const p = S.pageBox[pi];
   const r = pageEl.getBoundingClientRect();
   // the page as the user sees it right now is the frame we place into
   const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
 
   if (S.tool === 'redact') { e.preventDefault(); return startRubber(e, pi, x, y); }
+
+  // a check or an X dropped on a tick box lands squarely inside it
+  if (S.tool === 'check' || S.tool === 'x') {
+    const B = findBox(p, x, y, 0.006);
+    if (B) { e.preventDefault(); clearBoxCursor(); return void cycleBox(pi, B, S.tool); }
+  }
   if (S.tool || pendingSig) { e.preventDefault(); return place(pi, x, y); }
+
+  // nothing armed: clicking straight into an empty tick box ticks it
+  const B = findBox(p, x, y, 0.002);
+  if (B) { e.preventDefault(); clearBoxCursor(); return void cycleBox(pi, B, 'check'); }
+
+  focusStage();
   if (S.sel) select(null);
 });
+
+/* ------------------------------------------------------------- tick boxes */
+const isMark = it => it.type === 'check' || it.type === 'x';
+
+/** the mark already sitting in this box, if any */
+function markInBox(pi, B) {
+  return S.items.find(it => {
+    if (it.page !== pi || !isMark(it)) return false;
+    const [Wl, Hl] = itemFrame(it);
+    const cx = it.x + (it.size * Hl / Wl) / 2, cy = it.y + it.size / 2;
+    return cx >= B.x0 && cx <= B.x1 && cy >= B.y0 && cy <= B.y1;
+  });
+}
+
+function placeInBox(pi, B, type, sel = true) {
+  const p = S.pageBox[pi];
+  const rot = totalRot(p);
+  const [Wl, Hl] = localDims(p.lw, p.lh, rot);
+  const side = Math.min(B.w * Wl, B.h * Hl) * 0.86;   // sits inside the rule, not on it
+  const size = side / Hl;
+  const it = {
+    id: uid(), page: pi, rot, type,
+    x: clamp(B.cx - (side / Wl) / 2, 0, 1),
+    y: clamp(B.cy - size / 2, 0, 1),
+    size, color: COLORS[0], boxed: 1,
+  };
+  push();
+  S.items.push(it);
+  itemEl(it);
+  if (sel) select(it.id);
+  saveSoon();
+  return it;
+}
+
+/** One box, one control: empty → your mark → the other mark → empty again.
+    `first` is what you get on the first press, so a click gives a checkmark
+    and Enter gives an X, and either way both are two presses away. */
+function cycleBox(pi, B, first, sel = true) {
+  const cur = markInBox(pi, B);
+  if (!cur) return placeInBox(pi, B, first, sel);
+  if (cur.type === first) {
+    push();
+    cur.type = first === 'x' ? 'check' : 'x';
+    paintItems();
+    if (sel) select(cur.id);
+    saveSoon();
+    return cur;
+  }
+  push();
+  removeItem(cur.id);
+  saveSoon();
+  return null;
+}
 
 // tapping the grey area beside the page also deselects
 stageEl.addEventListener('pointerdown', e => {
   if (!e.isPrimary || e.target.closest('.page')) return;
+  focusStage();
   if (S.sel) select(null);
 });
 
@@ -964,6 +1198,7 @@ function place(pi, x, y) {
     if (L && x - tx > 0.36) tx = x;            // don't yank across a full-width rule
     it = { id, page: pi, rot, type: 'text', x: clamp(tx, 0, .97), y: clamp(ty, 0, .99),
            fs, color: COLORS[0], text: '' };
+    if (L) it.lineKey = lineKey(pi, L);
     if (tool === 'date') it.date = { at: Date.now(), fmt: 0 };
     if (L) flashLine(p, L);
   } else if (tool === 'redact') {
@@ -1129,6 +1364,8 @@ function startDrag(e, d) {
       if (Math.hypot(ev.clientX - sx, ev.clientY - sy) <= 6) return;
       moved = true;
       if (editing) { tnode.blur(); select(it.id); try { d.setPointerCapture(pid); } catch (_) {} }
+      // dragged out of its tick box: it is a free mark again, handle and all
+      if (it.boxed) { delete it.boxed; d.classList.remove('is-boxed'); }
       push();
     }
     ev.preventDefault();
@@ -1148,6 +1385,12 @@ function startDrag(e, d) {
     window.removeEventListener('pointerup', up);
     window.removeEventListener('pointercancel', up);
     if (!moved && isText(it) && !it.date && wasSel && !editing) edit(d);
+    // tapping a mark that already sits in a tick box moves it on round the cycle
+    if (!moved && wasSel && isMark(it)) {
+      const [Wl, Hl] = itemFrame(it);
+      const B = findBox(p, it.x + (it.size * Hl / Wl) / 2, it.y + it.size / 2, 0.004);
+      if (B) cycleBox(it.page, B, 'check');
+    }
     if (moved) saveSoon();
   };
   window.addEventListener('pointermove', move, { passive: false });
@@ -1260,6 +1503,235 @@ document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
 });
+
+/* ================================================ KEYBOARD FILLING (desktop)
+   On a real keyboard the fastest way through a form is Tab, Tab, Tab. So Tab
+   walks every place you could plausibly need to write, in reading order:
+   fields the document actually declares, blank lines it only implies, and
+   empty tick boxes. The implied ones come from the same local pixel scan that
+   powers tap-to-snap — the page is measured in this tab, the measurements
+   live in memory, and nothing about them is sent or stored anywhere beyond
+   the local draft already described on the home screen. */
+
+const KB = { pi: 0, key: null, box: null, el: null };
+const lineKey = (pi, L) => `l:${pi}:${Math.round(L.y * 1e4)}:${Math.round(L.x0 * 1e4)}`;
+
+/** where a form field sits on the page as displayed, 0–1 */
+function fieldRect(p, f) {
+  if (!f.el) return null;
+  const pr = p.el.getBoundingClientRect();
+  if (!pr.width || !pr.height) return null;
+  const fr = f.el.getBoundingClientRect();
+  return {
+    x0: (fr.left - pr.left) / pr.width, y0: (fr.top - pr.top) / pr.height,
+    x1: (fr.right - pr.left) / pr.width, y1: (fr.bottom - pr.top) / pr.height,
+  };
+}
+
+function spotsForPage(pi) {
+  const p = S.pageBox[pi];
+  if (!p) return [];
+  const out = [], rects = [];
+
+  (p.fields || []).forEach((f, i) => {
+    const r = fieldRect(p, f);
+    if (!r) return;
+    rects.push(r);
+    out.push({ kind: 'field', page: pi, f, x: r.x0, y: r.y0, key: `f:${pi}:${i}` });
+  });
+
+  // a guess is only worth offering where the document did not already declare one
+  const free = (x0, y0, x1, y1) =>
+    !rects.some(r => x0 < r.x1 && x1 > r.x0 && y0 < r.y1 && y1 > r.y0);
+
+  pageLines(p).forEach(L => {
+    if (!free(L.x0, L.y - L.fs * 1.3, L.x1, L.y + 0.004)) return;
+    out.push({ kind: 'line', page: pi, L, x: L.x0, y: L.y, key: lineKey(pi, L) });
+  });
+  pageBoxes(p).forEach(B => {
+    if (!free(B.x0, B.y0, B.x1, B.y1)) return;
+    out.push({ kind: 'box', page: pi, B, x: B.x0, y: B.y1,
+               key: `b:${pi}:${Math.round(B.cy * 1e4)}:${Math.round(B.cx * 1e4)}` });
+  });
+
+  // reading order: group into rows, then left to right inside each row
+  out.sort((a, b) => a.y - b.y || a.x - b.x);
+  const rows = [];
+  out.forEach(s => {
+    const r = rows[rows.length - 1];
+    if (r && s.y - r.y <= 0.014) r.items.push(s);
+    else rows.push({ y: s.y, items: [s] });
+  });
+  return rows.flatMap(r => r.items.sort((a, b) => a.x - b.x));
+}
+
+async function spotsOf(pi) {
+  const p = S.pageBox[pi];
+  if (!p) return [];
+  await ensureScan(p);
+  return S.pageBox[pi] === p ? spotsForPage(pi) : [];   // document may have closed mid-scan
+}
+
+async function moveSpot(dir) {
+  if (!S.pdf || !S.pageBox.length) return;
+  const n = S.pageBox.length;
+  let pi = clamp(KB.pi || 0, 0, n - 1);
+  let list = await spotsOf(pi);
+  const ix = KB.key ? list.findIndex(s => s.key === KB.key) : -1;
+  let next = ix < 0 ? (dir > 0 ? 0 : list.length - 1) : ix + dir;
+
+  for (let hop = 0; hop <= n; hop++) {
+    if (next >= 0 && next < list.length) {
+      const s = list[next];
+      KB.pi = pi; KB.key = s.key;
+      return enterSpot(s);
+    }
+    pi = (pi + dir + n) % n;
+    list = await spotsOf(pi);
+    next = dir > 0 ? 0 : list.length - 1;
+  }
+  toast('Nothing obvious to fill in here — use the toolbar to add a text box.', 3200);
+}
+
+async function enterSpot(s) {
+  const p = S.pageBox[s.page];
+  clearBoxCursor();
+
+  if (s.kind === 'field') {
+    select(null);
+    scrollToSpot(p, s.x, s.y);
+    s.f.el?.focus({ preventScroll: true });
+    if (s.f.type === 'text' && s.f.el?.setSelectionRange) {
+      const v = s.f.el.value.length;
+      try { s.f.el.setSelectionRange(v, v); } catch (_) {}
+    }
+    return;
+  }
+
+  if (s.kind === 'line') {
+    let it = S.items.find(i => i.page === s.page && i.lineKey === s.key);
+    if (!it) {
+      const rot = totalRot(p);
+      const fs = s.L.fs;
+      it = { id: uid(), page: s.page, rot, type: 'text',
+             x: clamp(s.L.x0 + 0.006, 0, .97),
+             y: clamp(s.L.y - fs * (BASELINE + 0.06), 0, .99),
+             fs, color: COLORS[0], text: '', lineKey: s.key };
+      push(); S.items.push(it); itemEl(it); flashLine(p, s.L); saveSoon();
+    }
+    select(it.id);
+    scrollToSpot(p, s.x, s.y);
+    const d = elOf(it.id);
+    if (d) edit(d);
+    return;
+  }
+
+  // a tick box: highlight it and wait for Enter
+  select(null);
+  blurActive();
+  KB.box = s;
+  paintBoxCursor(p, s.B);
+  scrollToSpot(p, s.B.cx, s.B.cy);
+  focusStage();
+}
+
+function scrollToSpot(p, x, y) {
+  const top = p.el.offsetTop + y * p.dh - stageEl.clientHeight * 0.42;
+  const max = Math.max(0, stageEl.scrollHeight - stageEl.clientHeight);
+  const want = clamp(top, 0, max);
+  if (Math.abs(want - stageEl.scrollTop) > 6) stageEl.scrollTo({ top: want, behavior: 'smooth' });
+  const maxX = Math.max(0, stageEl.scrollWidth - stageEl.clientWidth);
+  if (maxX > 2) {
+    stageEl.scrollLeft = clamp(p.el.offsetLeft + x * p.dw - stageEl.clientWidth * 0.4, 0, maxX);
+  }
+}
+
+function paintBoxCursor(p, B) {
+  const rot = totalRot(p);
+  const [Wl, Hl] = localDims(p.lw, p.lh, rot);
+  const [ux, uy] = unrotXY(rot, B.x0, B.y0);
+  const el = document.createElement('div');
+  el.className = 'boxcursor';
+  el.style.left = (ux * p.lw) + 'px';
+  el.style.top = (uy * p.lh) + 'px';
+  el.style.width = (B.w * Wl) + 'px';
+  el.style.height = (B.h * Hl) + 'px';
+  el.style.transform = rot ? `rotate(${-norm4(rot)}deg)` : '';
+  p.layer.append(el);
+  KB.el = el;
+  $('#kbhint').hidden = false;
+}
+function clearBoxCursor() {
+  KB.el?.remove();
+  KB.el = null; KB.box = null;
+  const h = $('#kbhint');
+  if (h) h.hidden = true;
+}
+
+/** Enter on a highlighted tick box: X, then a check, then clear again */
+function bumpBox() {
+  const s = KB.box;
+  if (!s) return;
+  cycleBox(s.page, s.B, 'x', false);
+  select(null);
+  focusStage();
+}
+
+const blurActive = () => {
+  const ae = document.activeElement;
+  if (ae && ae !== document.body && ae !== stageEl) ae.blur?.();
+};
+const focusStage = () => { try { stageEl.focus({ preventScroll: true }); } catch (_) {} };
+
+/** Tab belongs to the document only while the user is actually in it */
+function tabIsOurs() {
+  if (KB.box) return true;
+  const ae = document.activeElement;
+  if (!ae || ae === document.body) return false;
+  return ae === stageEl || stageEl.contains(ae);
+}
+
+document.addEventListener('keydown', e => {
+  if ($('#editor').hidden || !$('#done').hidden) return;
+  if ($$('.sheet-wrap').some(s => !s.hidden)) return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  if (e.key === 'Tab' && tabIsOurs()) {
+    e.preventDefault();
+    moveSpot(e.shiftKey ? -1 : 1);
+    return;
+  }
+
+  if (e.key === 'Enter') {
+    const ae = document.activeElement;
+    if (ae?.tagName === 'TEXTAREA') return;                        // multi-line field: newline
+    if (ae?.classList?.contains('fld-check') || ae?.classList?.contains('fld-radio')) return;
+    if (KB.box) { e.preventDefault(); return bumpBox(); }
+    if (ae?.isContentEditable || ae?.tagName === 'INPUT' || ae?.tagName === 'SELECT') {
+      if (!stageEl.contains(ae)) return;
+      e.preventDefault();
+      return void moveSpot(1);
+    }
+    const it = getSel();
+    if (it && isMark(it)) {
+      e.preventDefault(); push();
+      it.type = it.type === 'x' ? 'check' : 'x';
+      paintItems(); select(it.id); saveSoon();
+    }
+    return;
+  }
+
+  if (e.key === 'Escape') {
+    if (KB.box) { clearBoxCursor(); focusStage(); return; }
+    if (stageEl.contains(document.activeElement) || document.activeElement === stageEl) {
+      blurActive(); KB.key = null;
+      $('#btnFinish').focus();
+    }
+  }
+}, true);
+
+// clicking anywhere on the page area hands the keyboard back to the document
+stageEl.addEventListener('pointerdown', () => { if (!KB.box) KB.key = null; });
 
 /* ================================================================ ROTATE */
 function currentPage() {
@@ -1825,10 +2297,6 @@ $('#btnWipe').addEventListener('click', async () => {
   toast('All local document data and saved signatures deleted.');
 });
 $('#btnWhy').addEventListener('click', () => { $('#whySheet').hidden = false; });
-$('#moreTools').addEventListener('click', e => {
-  e.preventDefault();
-  toast('Coming soon — email otterholteli@gmail.com in the meantime.', 3200);
-});
 
 /* incoming files: Android share target + desktop file handlers */
 async function checkShared() {
@@ -1862,4 +2330,5 @@ if ('launchQueue' in window) {
   }
 })();
 
-window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fieldChanged };
+window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fieldChanged,
+                pageBoxes, findBox, ensureScan, spotsForPage, spotsOf, moveSpot, KB };

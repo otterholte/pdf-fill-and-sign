@@ -1,0 +1,89 @@
+/* Shrink — free image compressor. Built by Eli Otterholt.
+   Same house style as Fill & Sign, its own colour. */
+
+:root{ --accent:#0f8a5f; --accent-soft:#e2f5ec; }
+@media (prefers-color-scheme: dark){
+  :root{ --accent:#3ecf8e; --accent-soft:#123227; }
+}
+
+/* ---------- how small ---------- */
+.panel{
+  background:var(--bg-2);border:1px solid var(--line);border-radius:20px;
+  padding:18px 16px 16px;margin:4px 0 22px;
+}
+.panel-title{margin:0 0 12px;font-size:14px;font-weight:650;letter-spacing:-.01em;text-align:center;color:var(--fg-2);}
+
+.levels{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;}
+@media (max-width:460px){ .levels{grid-template-columns:1fr;} }
+.lev{
+  display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center;
+  padding:13px 8px;border-radius:14px;background:var(--bg);
+  border:1.5px solid var(--line);transition:border-color .12s ease, background .12s ease;
+}
+.lev strong{font-size:14px;font-weight:650;letter-spacing:-.015em;line-height:1.2;}
+.lev span{font-size:11.5px;color:var(--fg-3);line-height:1.3;}
+.lev.is-on{border-color:var(--accent);background:var(--accent-soft);}
+.lev.is-on strong{color:var(--accent);}
+.lev.is-on span{color:var(--accent);opacity:.8;}
+.lev:disabled{opacity:.5;}
+
+.target{margin-top:14px;padding-top:13px;border-top:1px solid var(--line);}
+.target-row{display:flex;align-items:center;gap:9px;font-size:14px;color:var(--fg-2);cursor:pointer;}
+.target-row input{width:18px;height:18px;accent-color:var(--accent);flex:none;margin:0;}
+.target-in{display:flex;align-items:center;gap:9px;margin:11px 0 0 27px;}
+.target-in[hidden]{display:none;}
+.target-in input{
+  width:96px;font:inherit;font-size:15px;font-weight:600;color:var(--fg);
+  padding:9px 11px;border-radius:11px;border:1.5px solid var(--line);background:var(--bg);
+}
+.target-in input:focus{outline:none;border-color:var(--accent);}
+.unit{font-size:13.5px;color:var(--fg-3);}
+
+/* ---------- results ---------- */
+.results{margin-top:30px;}
+.results[hidden]{display:none;}
+.results-head{display:flex;align-items:center;gap:12px;margin-bottom:12px;}
+.tally{flex:1;min-width:0;margin:0;font-size:14px;font-weight:600;letter-spacing:-.01em;}
+.tally em{font-style:normal;color:var(--accent);}
+
+.cards{display:flex;flex-direction:column;gap:10px;}
+.card{
+  display:flex;align-items:center;gap:13px;padding:11px;
+  background:var(--bg-2);border:1px solid var(--line);border-radius:16px;
+}
+.thumb{
+  width:52px;height:52px;border-radius:10px;flex:none;object-fit:cover;
+  background:var(--bg-3);display:block;
+}
+.card-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;}
+.card-name{
+  font-size:13.5px;font-weight:600;letter-spacing:-.01em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.card-size{font-size:12.5px;color:var(--fg-2);font-variant-numeric:tabular-nums;}
+.card-size .was{color:var(--fg-3);}
+.card-size .now{color:var(--fg);font-weight:600;}
+.card-size .cut{color:var(--accent);font-weight:600;}
+.card-size .warn{color:var(--fg-3);}
+.card-size .bad{color:var(--danger);}
+.bar{height:4px;border-radius:2px;background:var(--bg-3);overflow:hidden;margin-top:3px;}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:2px;transition:width .3s ease;}
+.card-act{flex:none;display:flex;gap:4px;}
+.icon-btn{
+  display:grid;place-items:center;width:38px;height:38px;border-radius:11px;
+  color:var(--fg-2);background:var(--bg);border:1px solid var(--line);
+}
+.icon-btn:active{background:var(--bg-3);}
+.icon-btn:disabled{opacity:.4;}
+.card.is-busy .card-act{opacity:.4;pointer-events:none;}
+
+.spin{
+  width:16px;height:16px;border-radius:50%;flex:none;
+  border:2px solid var(--bg-3);border-top-color:var(--accent);
+  animation:spin .7s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+.results-foot{display:flex;flex-direction:column;gap:9px;margin-top:16px;}
+.results-foot .btn-primary{background:var(--accent);color:#fff;}
+@media (prefers-color-scheme: dark){ .results-foot .btn-primary{color:#08130e;} }

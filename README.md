@@ -32,6 +32,14 @@ No account. No upload. No trial. No watermark. No surprise paywall.
 - **Date** — standalone date object in `08/05/2026`, `August 5, 2026`, or `5 August 2026`
 - **Checkmark / X** — sized for a normal checkbox; the tool stays armed so you can
   tick a whole column in one go, and turns off when you tap it again
+- **Tick boxes the PDF only *drew*** — an empty square on the page is found from the
+  pixels and treated as a control. Click straight into one with no tool armed and it
+  gets a checkmark; click again for an X; again to clear it.
+- **Tab through the whole document** — on a keyboard, Tab walks every place you could
+  need to write, in reading order: declared form fields, blank lines (a text box is
+  created on the line and focused, ready to type), and empty tick boxes. `Enter` on a
+  highlighted tick box stamps an X, then a checkmark, then clears it. `Esc` jumps to
+  Finish. Everything the scan finds stays in memory in that tab.
 - **Blackout** — press and drag; the box grows under your finger so you can see
   exactly what you are covering. On export, any page containing a
   blackout is **flattened to an image**, so the hidden text is genuinely destroyed rather
@@ -77,11 +85,17 @@ Any static host works the same way — Netlify, Cloudflare Pages, S3.
 ## Project layout
 
 ```
-index.html            markup, SEO metadata, JSON-LD
-app.css               all styles, light + dark
-app.js                the whole application (ES module)
+index.html            Fill & Sign — markup, SEO metadata, JSON-LD
+app.css               Fill & Sign styles, light + dark
+app.js                the whole Fill & Sign application (ES module)
+tools.html            the index of tools
+shrink.html           Shrink — the image compressor
+shrink.css            Shrink's own colour and its UI
+shrink.js             the compressor (canvas encode + target-size search)
+site.css              shared shell: tokens, controls, header, footer
 sw.js                 service worker: offline cache + share-target intake
 manifest.webmanifest  PWA manifest, share_target, file_handlers
+sitemap.xml           the three public pages
 icons/                app icons and the Open Graph image
 vendor/
   pdf.min.mjs         Mozilla pdf.js — rendering          (Apache-2.0)
@@ -105,6 +119,25 @@ inferred.
 If the PDF declares nothing — which is most of them — the app falls back to
 snapping to visible rules, described below. That is a guess, so it only ever
 positions what you were already placing; it never invents a field.
+
+## How tick boxes are found
+
+`scanBoxes()` works on the same one-byte ink mask as the line scan. It looks for a
+short horizontal run, a matching run one box-width below at the same x range, solid
+sides joining the two, and a clear middle. The clear middle is doing real work: a box
+that is *already* ticked fails it, so only empty boxes are ever offered.
+
+The interesting false positive is a bold lowercase **o**. It has a long run across the
+top of the bowl, a matching one across the bottom, solid sides and a hollow centre — it
+passes every test above. What separates it from a drawn box is border thickness: two
+rows into an "o" you are still inside the stroke, whereas two rows into a rectangle
+there is nothing but the two sides. That single check removes the glyphs and keeps the
+boxes.
+
+Scanning does not read the on-screen canvas. It renders its own 1000px-wide copy of the
+page and throws the bitmap away, so the answer is identical whether you are zoomed out
+on a phone or at 6× on a desktop — and a deep zoom never means scanning a 12000px
+bitmap.
 
 ## How blank-line snapping works
 
@@ -137,10 +170,26 @@ represent.
 
 ## Not included, deliberately
 
-Accounts, subscriptions, watermarks, ads, AI, OCR, form-field detection, editing the
-original PDF text, converting Word files, merging, splitting, compressing, page reordering,
-cloud storage, collaboration, digital certificates. Each one left out is what keeps this
-fast, private, and free.
+Accounts, subscriptions, watermarks, ads, AI, OCR, editing the original PDF text,
+converting Word files, merging, splitting, page reordering, cloud storage, collaboration,
+digital certificates. Each one left out is what keeps this fast, private, and free.
+
+---
+
+## Shrink — the second tool
+
+`shrink.html` is a separate, self-contained image compressor sharing the same shell and
+the same promise: it runs entirely in the browser, so it costs nothing to host.
+
+Three one-tap levels, or an exact target in MB. The target search spends its budget on
+quality first and only reduces dimensions when quality alone cannot get there; because
+file size tracks pixel count, the measured overshoot tells it roughly how far to drop, so
+it converges in a couple of passes rather than grinding. Images with real transparency are
+written as WebP so it survives; everything else becomes a JPEG. If a file is already
+within a tenth of its floor, Shrink hands back the original untouched and says so, rather
+than trading visible quality for a few percent.
+
+`tools.html` is the index that ties the two together.
 
 ---
 

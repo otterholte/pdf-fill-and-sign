@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Simple Tools by Eli Otterholt — Free, No Account, Nothing Uploaded</title>
+<meta name="description" content="Small, free web tools that do one thing well and run entirely on your own device. Fill and sign a PDF, shrink an image. No account, no upload, no paywall.">
+<meta name="author" content="Eli Otterholt">
+<meta name="theme-color" content="#0f1216" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="site.css">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Simple Tools by Eli Otterholt">
+<meta property="og:description" content="Small free tools that run entirely on your device. No account, no upload, no paywall.">
+<meta property="og:image" content="icons/og.png">
+<meta name="twitter:card" content="summary_large_image">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "CollectionPage",
+  "name": "Simple Tools by Eli Otterholt",
+  "description": "Free web tools that run entirely on the visitor's own device. Nothing is uploaded and no account is required.",
+  "author": { "@type": "Person", "name": "Eli Otterholt", "email": "otterholteli@gmail.com" },
+  "hasPart": [
+    { "@type": "WebApplication", "name": "Fill & Sign", "url": "index.html",
+      "applicationCategory": "BusinessApplication", "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "description": "Fill out and sign a PDF on your phone or computer. Nothing is uploaded." },
+    { "@type": "WebApplication", "name": "Shrink", "url": "shrink.html",
+      "applicationCategory": "MultimediaApplication", "isAccessibleForFree": true,
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "description": "Make an image file smaller, to a size you choose. Nothing is uploaded." }
+  ]
+}
+</script>
+</head>
+<body>
+
+<main class="page-wrap">
+  <div class="head">
+    <a class="brand" href="tools.html">
+      <svg class="brand-mark" viewBox="0 0 512 512" aria-hidden="true">
+        <rect width="512" height="512" rx="112" fill="#12161c"/>
+        <circle cx="176" cy="176" r="46" fill="#ffffff"/>
+        <circle cx="336" cy="176" r="46" fill="#1b4fd8"/>
+        <circle cx="176" cy="336" r="46" fill="#0f8a5f"/>
+        <circle cx="336" cy="336" r="46" fill="#ffffff" opacity=".35"/>
+      </svg>
+      <span class="brand-name">Simple Tools</span>
+    </a>
+
+    <h1 class="hero-title">Simple tools that just work</h1>
+    <p class="hero-sub">Small, free tools that each do one thing. They run in your browser, on your device — nothing you open is ever uploaded anywhere.</p>
+
+    <p class="free-line"><strong>Free forever.</strong> No account, no payment, no trial, no watermark.</p>
+    <ul class="free-chips">
+      <li>No sign-up</li>
+      <li>No card</li>
+      <li>No upload</li>
+      <li>Works offline</li>
+    </ul>
+  </div>
+
+  <div class="tool-list">
+    <a class="tool-card" href="index.html">
+      <svg class="mark" viewBox="0 0 512 512" aria-hidden="true">
+        <rect width="512" height="512" rx="112" fill="#1b4fd8"/>
+        <path d="M136 356c58-152 116-224 151-224 25 0 29 27 11 65-20 41-56 82-56 107 0 16 12 25 30 25 34 0 65-23 97-61" fill="none" stroke="#ffffff" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M300 392h96" fill="none" stroke="#9dbcff" stroke-width="28" stroke-linecap="round"/>
+      </svg>
+      <span class="tc-text">
+        <h2>Fill &amp; Sign</h2>
+        <p>Open a PDF someone sent you, type on the lines, sign it, black out anything private, and send it back.</p>
+      </span>
+      <svg class="go" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+
+    <a class="tool-card" href="shrink.html">
+      <svg class="mark" viewBox="0 0 512 512" aria-hidden="true">
+        <rect width="512" height="512" rx="112" fill="#0f8a5f"/>
+        <rect x="118" y="118" width="276" height="276" rx="34" fill="none" stroke="#a7e9cd" stroke-width="26"/>
+        <rect x="196" y="196" width="120" height="120" rx="20" fill="#ffffff"/>
+      </svg>
+      <span class="tc-text">
+        <h2>Shrink</h2>
+        <p>Make a photo small enough to actually send. Pick a size, or pick a level, and get the file back in a second.</p>
+      </span>
+      <svg class="go" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
+
+    <div class="tool-card tool-soon">
+      <svg class="mark" viewBox="0 0 512 512" aria-hidden="true">
+        <rect width="512" height="512" rx="112" fill="#e3e6ea"/>
+        <path d="M256 168v176M168 256h176" fill="none" stroke="#8d95a1" stroke-width="30" stroke-linecap="round"/>
+      </svg>
+      <span class="tc-text">
+        <h2>Something you need?</h2>
+        <p>If your business keeps doing something by hand that a small tool could do for it, tell me what it is. I build these for free.</p>
+      </span>
+    </div>
+  </div>
+
+  <section class="seo">
+    <h2>Why these are free</h2>
+    <p>Every one of these tools runs entirely inside your browser. Your file is opened on your own device, changed on your own device, and saved back to your own device. Nothing is sent to a server, which means there is no server to pay for — so there is nothing to charge you for, no matter how many people use them.</p>
+    <p>I build software for a living. These are the honest version of a portfolio: real tools, doing real work, that you can use today without giving me an email address. If they are useful and you later need something built properly for your business, you will know what my work is like before you ever talk to me.</p>
+
+    <h2>Want one built for your business?</h2>
+    <p>If there is a small, annoying, repetitive job your team does by hand — a form that gets retyped, a report that gets rebuilt every month, a spreadsheet nobody trusts — I will build you something simple that does it. Email <a href="mailto:otterholteli@gmail.com?subject=Building%20something%20simple">otterholteli@gmail.com</a> and describe the job in plain words.</p>
+  </section>
+
+  <footer class="site-foot">
+    <p class="made">Built by <strong>Eli Otterholt</strong></p>
+    <p class="foot-links">
+      <a href="mailto:otterholteli@gmail.com?subject=Building%20something%20simple">otterholteli@gmail.com</a>
+      <span>·</span>
+      <a href="index.html">Fill &amp; Sign</a>
+      <span>·</span>
+      <a href="shrink.html">Shrink</a>
+    </p>
+    <p class="fine">Need something simple built for your business? Email me — I build small tools like this for free.</p>
+    <p class="fine">Free forever. No accounts, no ads, no tracking, no analytics.</p>
+  </footer>
+</main>
+
+</body>
+</html>
