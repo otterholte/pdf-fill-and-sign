@@ -39,7 +39,8 @@
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "isAccessibleForFree": true,
   "featureList": [
-    "Fill in blank lines on a PDF with text",
+    "Fill in real PDF form fields by tapping and typing",
+    "Type on blank lines in PDFs that have no form fields",
     "Sign a PDF by drawing, photographing, or choosing a signature image",
     "Automatic date and time under a signature",
     "Add checkmarks and X marks",
@@ -66,7 +67,9 @@
     { "@type": "Question", "name": "Is my document uploaded anywhere?",
       "acceptedAnswer": { "@type": "Answer", "text": "No. The PDF is opened and edited inside your own browser. There is no server to upload it to." } },
     { "@type": "Question", "name": "Can I fill out a PDF on my phone?",
-      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Fill & Sign is built for phones. Open the PDF, tap where you want to type, sign it, then save or share it back." } }
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Fill & Sign is built for phones. Open the PDF, tap where you want to type, sign it, then save or share it back." } },
+    { "@type": "Question", "name": "Can I fill in a PDF that already has form fields?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Fillable fields are highlighted, and you tap one and type. On saving, the values are written into the form and flattened so the recipient cannot type over them." } }
   ]
 }
 </script>
@@ -121,13 +124,14 @@
     <h2>The free PDF tool that lets you finish your document and leave</h2>
     <p>Someone sent you a PDF. You need to fill in a few blank lines, sign it, and send it back. That is the whole job, and that is the whole app. There is no account to make, no trial to start, no watermark, and no payment screen waiting at the download button.</p>
     <ul>
-      <li><strong>Type on the lines</strong> — tap anywhere to drop a text box, then drag or resize it until it sits right.</li>
+        <li><strong>Fill a real form</strong> — if the PDF has proper fillable fields, they highlight and you just tap one and type. Checkboxes, radio buttons and dropdowns too.</li>
+      <li><strong>Type on the lines</strong> — and if it has none, tap near a blank line and the text lands on it at the right size. Or drop a text box anywhere and drag it.</li>
       <li><strong>Sign it</strong> — draw your signature with a finger, photograph one you wrote on paper, or pick an image you already have. The date and time go underneath automatically.</li>
       <li><strong>Check a box</strong> — a clean checkmark or an X, sized for a normal checkbox.</li>
       <li><strong>Black something out</strong> — drag a solid black box over anything private. It is baked permanently into the finished page.</li>
       <li><strong>Send it back</strong> — save the PDF or hand it straight to Gmail, Outlook, Messages, Drive, or whatever else is on your phone.</li>
     </ul>
-    <p>Fill &amp; Sign is not a full PDF editor, and it is not trying to be. It does not convert your document, detect its form fields, read its contents, or change its layout. It puts what you write on top of the page you already have.</p>
+    <p>Fill &amp; Sign is not a full PDF editor, and it is not trying to be. It does not convert your document, read its contents, or change its layout. It puts what you write on top of the page you already have — and where the document itself says a field belongs, it uses that field.</p>
     <p>Add it to your home screen and it keeps working with no signal at all.</p>
   </section>
 

@@ -187,6 +187,31 @@ a:hover{text-decoration:underline;}
 }
 @keyframes snapfade{0%{opacity:.9;}60%{opacity:.55;}100%{opacity:0;}}
 
+/* real form fields declared by the PDF */
+.fields{position:absolute;left:0;top:0;right:0;bottom:0;}
+.editor.arming .fields{pointer-events:none;}
+.fld{
+  position:absolute;margin:0;padding:0 2px;border:0;border-radius:2px;
+  font-family:var(--font-doc);background:rgba(27,79,216,.09);
+  color:#0b0f14;outline:none;box-sizing:border-box;
+  -webkit-appearance:none;appearance:none;
+}
+.fld:hover{background:rgba(27,79,216,.15);}
+.fld:focus{background:rgba(27,79,216,.16);box-shadow:0 0 0 1.5px var(--accent);}
+/* once you change a field, cover whatever the document had printed there */
+.fld.is-changed{
+  background:
+    linear-gradient(rgba(27,79,216,.07), rgba(27,79,216,.07)),
+    var(--fldbg, #fff);
+}
+.fld.is-changed:focus{box-shadow:0 0 0 1.5px var(--accent);}
+textarea.fld{resize:none;overflow:auto;padding:1px 2px;line-height:1.25;}
+.fld-check,.fld-radio{display:grid;place-items:center;color:#0b0f14;cursor:pointer;}
+.fld-radio{border-radius:50%;}
+.fld-check svg,.fld-radio svg{width:82%;height:82%;opacity:0;}
+.fld-check.is-on svg,.fld-radio.is-on svg{opacity:1;}
+select.fld{padding-right:0;}
+
 /* objects */
 .it{position:absolute;touch-action:none;transform-origin:0 0;}
 .it.sel{outline:1.5px solid var(--accent);outline-offset:2px;border-radius:2px;}

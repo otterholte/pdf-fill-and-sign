@@ -11,7 +11,13 @@ No account. No upload. No trial. No watermark. No surprise paywall.
 
 ## What it does
 
-- **Snap to blank lines** — tap near an underscore run or a drawn rule and the text
+- **Real form fields** — if the PDF actually declares fillable fields, they light up
+  and you just tap one and type. Text boxes, multi-line boxes, checkboxes, radio
+  groups and dropdowns. On export the values go back through the document's own
+  form and it is flattened, so the recipient gets a finished page, not a form they
+  can type over.
+- **Snap to blank lines** — for the far more common case of a PDF with no fields
+  at all: tap near an underscore run or a drawn rule and the text
   lands *on* it, left-aligned to its start and sized to match the label beside it.
   No dragging or resizing needed for the common case. Signatures snap the same way.
 - **Text** — tap anywhere to drop a text box; drag it around before or after typing,
@@ -87,6 +93,18 @@ vendor/
 
 Everything is vendored on purpose: no CDN, no third-party request at runtime, and the
 whole app keeps working offline.
+
+## Two different jobs, deliberately
+
+There is an important distinction inside this app. If a PDF *declares* a fillable
+field, that is not a guess — the document is telling you where to type, so
+`readFields()` reads the widget annotations, overlays a real `<input>` on each one,
+and `flattenForm()` writes the values back through pdf-lib's form API. Nothing is
+inferred.
+
+If the PDF declares nothing — which is most of them — the app falls back to
+snapping to visible rules, described below. That is a guess, so it only ever
+positions what you were already placing; it never invents a field.
 
 ## How blank-line snapping works
 

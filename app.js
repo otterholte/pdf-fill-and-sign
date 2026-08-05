@@ -86,6 +86,8 @@ const MAX_BYTES = 100 * 1024 * 1024;
 const S = {
   name: 'Document.pdf', bytes: null, pdf: null,
   pageBox: [], items: [], sel: null, tool: null,
+  fields: {},        // real AcroForm values, keyed by field name
+  fields0: {},       // whatever the document already had in them
   zoom: 1, baseW: 0, past: [], future: [], renderTok: 0,
 };
 
@@ -93,13 +95,14 @@ const pagesEl = $('#pages');
 const stageEl = $('#stage');
 
 /* ------------------------------------------------------------------ history */
-const snap = () => JSON.stringify({ i: S.items, r: S.pageBox.map(p => p.userRot) });
+const snap = () => JSON.stringify({ i: S.items, r: S.pageBox.map(p => p.userRot), f: S.fields });
 function restore(str) {
   const o = JSON.parse(str);
   S.items = o.i;
+  S.fields = o.f || {};
   o.r.forEach((r, i) => { if (S.pageBox[i]) S.pageBox[i].userRot = r; });
   S.sel = null;
-  layoutPages(); paintItems(); syncBars(); renderVisible(); saveSoon();
+  layoutPages(); paintItems(); paintFields(); syncBars(); renderVisible(); saveSoon();
 }
 function push() {
   S.past.push(snap());
@@ -126,6 +129,7 @@ function saveSoon() {
       await DB.set('doc', {
         name: S.name, bytes: S.bytes,
         items: S.items.filter(i => !isText(i) || i.date || i.text.trim()),
+        fields: S.fields,
         rots: S.pageBox.map(p => p.userRot), ts: Date.now(),
       });
     } catch (_) {}
@@ -167,11 +171,13 @@ async function openFile(file) {
   } finally { busy(false); }
 }
 
-async function loadDoc(buf, name, items, rots) {
+async function loadDoc(buf, name, items, rots, fields) {
   S.bytes = buf.slice(0);
   S.name = name;
   S.items = items || [];
   S.sel = null; S.tool = null; S.past = []; S.future = []; S.zoom = 1;
+  S.fields = fields ? { ...fields } : {};
+  S.fields0 = {};
   syncHistory();
 
   S.pdf = await pdfjsLib.getDocument({ data: buf.slice(0), isEvalSupported: false }).promise;
@@ -194,10 +200,12 @@ function closeDoc() {
   pagesEl.innerHTML = '';
   try { S.pdf?.destroy?.(); } catch (_) {}
   S.pdf = null; S.bytes = null; S.items = []; S.sel = null; S.tool = null; lastBlob = null;
+  S.fields = {}; S.fields0 = {}; formToldOnce = false;
   checkResume();
 }
 $('#btnBack').addEventListener('click', () => {
-  if (S.items.length) toast('Draft kept on this device — pick it up any time.');
+  const touched = S.items.length || allFields().some(f => fieldChanged(f.name));
+  if (touched) toast('Draft kept on this device — pick it up any time.');
   closeDoc();
 });
 
@@ -218,20 +226,216 @@ async function buildPages(rots) {
     const cv = document.createElement('canvas');
     const layer = document.createElement('div');
     layer.className = 'layer';
+    const fieldWrap = document.createElement('div');
+    fieldWrap.className = 'fields';
+    layer.append(fieldWrap);
     const num = document.createElement('div');
     num.className = 'page-num'; num.textContent = `${i}/${S.pdf.numPages}`;
     el.append(cv, num, layer);
     pagesEl.append(el);
     S.pageBox.push({
-      page, el, cv, layer,
+      page, el, cv, layer, fieldWrap,
       uw: un.width, uh: un.height,
       baseRot: ((page.rotate || 0) % 360 + 360) % 360,
       userRot: (rots && rots[i - 1]) || 0,
+      fields: await readFields(page),
     });
   }
+  seedFieldValues();
   layoutPages();
   paintItems();
+  paintFields();
   renderVisible();
+  announceForm();
+}
+
+/* ============================================== REAL FORM FIELDS (AcroForm)
+   Some PDFs genuinely declare where you are meant to type. That is not a
+   guess, so honour it: put a real input over each widget and let the keyboard
+   do its job. On export the values go back through the document's own form
+   and get flattened, which is what a recipient expects. */
+
+async function readFields(page) {
+  let anns = [];
+  try { anns = await page.getAnnotations({ intent: 'display' }); } catch (_) { return []; }
+  const out = [];
+  for (const a of anns) {
+    if (a.subtype !== 'Widget' || a.readOnly || a.hidden || a.pushButton) continue;
+    const type = a.fieldType === 'Tx' ? 'text'
+      : a.fieldType === 'Ch' ? 'choice'
+      : a.fieldType === 'Btn' ? (a.radioButton ? 'radio' : a.checkBox ? 'check' : null)
+      : null;
+    if (!type || !a.fieldName) continue;
+    out.push({
+      name: a.fieldName, type, rect: a.rect,
+      fs: a.defaultAppearanceData?.fontSize || 0,
+      color: daColor(a.defaultAppearanceData?.fontColor),
+      bg: rgbOf(a.backgroundColor),
+      align: a.textAlignment || 0,
+      multiline: !!a.multiLine,
+      maxLen: a.maxLen || 0,
+      options: (a.options || []).map(o => (typeof o === 'string' ? o : (o.displayValue ?? o.exportValue ?? ''))),
+      optionValues: (a.options || []).map(o => (typeof o === 'string' ? o : (o.exportValue ?? o.displayValue ?? ''))),
+      on: a.exportValue ?? a.buttonValue ?? 'Yes',
+      was: a.fieldValue,
+    });
+  }
+  return out;
+}
+const rgbOf = c => {
+  if (!c) return null;
+  const v = [c[0], c[1], c[2]];
+  if (v.some(x => typeof x !== 'number')) return null;
+  return `rgb(${v.map(x => Math.round(x <= 1 ? x * 255 : x)).join(',')})`;
+};
+const daColor = c => rgbOf(c) || '#0b0f14';
+
+const allFields = () => S.pageBox.flatMap(p => p.fields || []);
+const hasFields = () => allFields().length > 0;
+
+function seedFieldValues() {
+  S.fields0 = {};
+  for (const f of allFields()) {
+    let v;
+    if (f.type === 'text' || f.type === 'choice') v = typeof f.was === 'string' ? f.was : '';
+    else if (f.type === 'check') v = f.was != null && f.was !== 'Off' && f.was !== false;
+    else v = (typeof f.was === 'string' && f.was !== 'Off') ? f.was : '';
+    if (!(f.name in S.fields0)) S.fields0[f.name] = v;
+    if (!(f.name in S.fields)) S.fields[f.name] = v;
+  }
+}
+const fieldChanged = name => JSON.stringify(S.fields[name]) !== JSON.stringify(S.fields0[name]);
+
+let formToldOnce = false;
+function announceForm() {
+  const n = new Set(allFields().map(f => f.name)).size;
+  const pages = `${S.pdf.numPages} page${S.pdf.numPages > 1 ? 's' : ''}`;
+  $('#docPages').textContent = n
+    ? `${pages} · ${n} fillable field${n > 1 ? 's' : ''}`
+    : `${pages} · stays on this device`;
+  if (n && !formToldOnce) {
+    formToldOnce = true;
+    toast('This form is fillable — tap a highlighted box and type.', 4200);
+  }
+}
+
+/* the page background, so an edited field can cover whatever was in it before */
+function pageBg(p) {
+  if (!p.readyKey) return '#fff';               // nothing painted yet — don't cache black
+  if (p.bg && p.bgKey === p.readyKey) return p.bg;
+  try {
+    const d = p.cv.getContext('2d').getImageData(2, 2, 1, 1).data;
+    p.bg = `rgb(${d[0]},${d[1]},${d[2]})`;
+  } catch (_) { p.bg = '#fff'; }
+  p.bgKey = p.readyKey;
+  return p.bg;
+}
+
+function paintFields() {
+  S.pageBox.forEach(p => {
+    if (!p.fields?.length) return;
+    p.fieldWrap.innerHTML = '';
+    p.fields.forEach(f => {
+      let el;
+      if (f.type === 'text') {
+        el = document.createElement(f.multiline ? 'textarea' : 'input');
+        if (!f.multiline) el.type = 'text';
+        if (f.maxLen) el.maxLength = f.maxLen;
+        el.value = S.fields[f.name] ?? '';
+        el.spellcheck = false;
+        el.addEventListener('input', () => setField(f, el.value));
+        el.addEventListener('focus', () => { markFieldHistory(); select(null); });
+      } else if (f.type === 'choice') {
+        el = document.createElement('select');
+        const blank = document.createElement('option');
+        blank.value = ''; blank.textContent = '—';
+        el.append(blank);
+        f.options.forEach((label, i) => {
+          const o = document.createElement('option');
+          o.value = f.optionValues[i] ?? label; o.textContent = label;
+          el.append(o);
+        });
+        el.value = S.fields[f.name] ?? '';
+        el.addEventListener('change', () => { markFieldHistory(); setField(f, el.value); });
+      } else {
+        el = document.createElement('button');
+        el.type = 'button';
+        el.innerHTML = f.type === 'check'
+          ? `<svg viewBox="0 0 24 24"><path d="M4.5 12.5 9.5 17.5 20 6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+          : `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg>`;
+        el.addEventListener('click', () => {
+          markFieldHistory();
+          setField(f, f.type === 'check' ? !S.fields[f.name] : (S.fields[f.name] === f.on ? '' : f.on));
+        });
+      }
+      el.className = 'fld fld-' + f.type;
+      el.dataset.name = f.name;
+      el.title = f.name;
+      f.el = el;
+      p.fieldWrap.append(el);
+    });
+    reflectFields(p);
+  });
+  layoutFields();
+}
+
+let fieldHistoryPending = false;
+function markFieldHistory() {
+  if (fieldHistoryPending) return;
+  fieldHistoryPending = true;
+  push();
+  setTimeout(() => (fieldHistoryPending = false), 900);
+}
+
+function setField(f, v) {
+  S.fields[f.name] = v;
+  // several widgets can share one field name — keep them in step
+  S.pageBox.forEach(p => (p.fields || []).forEach(g => {
+    if (g.name !== f.name || !g.el) return;
+    if (g.type === 'text' && g.el.value !== v) g.el.value = v;
+    if (g.type === 'choice' && g.el.value !== v) g.el.value = v;
+  }));
+  S.pageBox.forEach(reflectFields);
+  saveSoon();
+}
+
+function reflectFields(p) {
+  (p.fields || []).forEach(f => {
+    if (!f.el) return;
+    const v = S.fields[f.name];
+    const on = f.type === 'check' ? !!v : f.type === 'radio' ? v === f.on : false;
+    f.el.classList.toggle('is-on', on);
+    const changed = fieldChanged(f.name);
+    f.el.classList.toggle('is-changed', changed);
+    f.el.style.setProperty('--fldbg', f.bg || pageBg(p));
+  });
+}
+
+function layoutFields() {
+  S.pageBox.forEach(p => {
+    if (!p.fields?.length) return;
+    const vp = p.page.getViewport({ scale: 1, rotation: 0 });
+    const pxPerPt = p.lw / vp.width;
+    const inset = 1.4 * pxPerPt;
+    p.fields.forEach(f => {
+      if (!f.el) return;
+      const r = vp.convertToViewportRectangle(f.rect);
+      const x = Math.min(r[0], r[2]), y = Math.min(r[1], r[3]);
+      const w = Math.abs(r[2] - r[0]), h = Math.abs(r[3] - r[1]);
+      const st = f.el.style;
+      st.left = (x * pxPerPt + inset) + 'px';
+      st.top = (y * pxPerPt + inset) + 'px';
+      st.width = Math.max(6, w * pxPerPt - inset * 2) + 'px';
+      st.height = Math.max(6, h * pxPerPt - inset * 2) + 'px';
+      if (f.type === 'text' || f.type === 'choice') {
+        const size = f.fs ? f.fs * pxPerPt : Math.min(h * 0.62, 16) * pxPerPt;
+        st.fontSize = Math.max(5, size) + 'px';
+        st.color = f.color;
+        st.textAlign = ['left', 'center', 'right'][f.align] || 'left';
+        if (!f.multiline) st.lineHeight = Math.max(6, h * pxPerPt - inset * 2) + 'px';
+      }
+    });
+  });
 }
 
 function layoutPages() {
@@ -253,6 +457,7 @@ function layoutPages() {
       r === 270 ? `translateY(${p.dh}px) rotate(270deg)` : 'none';
   });
   relayoutItems();
+  layoutFields();
 }
 
 /* Objects are stored in the frame of the page *as it looked when they were
@@ -301,6 +506,7 @@ async function renderVisible() {
       p.task = p.page.render({ canvasContext: p.cv.getContext('2d', { alpha: false }), viewport: vp });
       await p.task.promise;
       p.readyKey = key;                    // line scanning waits for real pixels
+      if (p.fields?.length) reflectFields(p);
     } catch (_) { p.renderKey = null; }
   }
 }
@@ -586,7 +792,7 @@ function sizeItem(it, d) {
 }
 
 function paintItems() {
-  S.pageBox.forEach(p => (p.layer.innerHTML = ''));
+  S.pageBox.forEach(p => p.layer.querySelectorAll('.it').forEach(e => e.remove()));
   S.items.forEach(it => {
     const d = itemEl(it);
     if (S.sel === it.id) d.classList.add('sel');
@@ -679,6 +885,7 @@ const PROMPT = {
 };
 function reflectTool() {
   $$('.tool').forEach(b => b.classList.toggle('is-on', b.dataset.tool === S.tool));
+  $('#editor').classList.toggle('arming', !!S.tool || !!pendingSig);
   $$('.page').forEach(p => p.classList.toggle('arm', !!S.tool || !!pendingSig));
   const on = !!S.tool || !!pendingSig;
   $('#placing').hidden = !on;
@@ -1048,7 +1255,7 @@ $('#btnDateFmt').addEventListener('click', () => {
 
 document.addEventListener('keydown', e => {
   if ($('#editor').hidden) return;
-  if (document.activeElement?.isContentEditable || document.activeElement?.tagName === 'INPUT') return;
+  if (document.activeElement?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) return;
   if ((e.key === 'Backspace' || e.key === 'Delete') && S.sel) { e.preventDefault(); push(); removeItem(S.sel); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
@@ -1342,9 +1549,9 @@ async function loadImg(src) {
 }
 
 /** Render one page unrotated with its objects burned in → PNG bytes. */
-async function rasterPage(pi, items) {
+async function rasterPage(pi, items, doc) {
   const p = S.pageBox[pi];
-  const page = await S.pdf.getPage(pi + 1);
+  const page = await (doc || S.pdf).getPage(pi + 1);
   const scale = clamp(1700 / p.uw, 1.6, 3.2);
   const vp = page.getViewport({ scale, rotation: 0 });
   const c = document.createElement('canvas');
@@ -1382,13 +1589,82 @@ async function rasterPage(pi, items) {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
+/* Write the typed values back into the document's own form and flatten it, so
+   the result is a plain page a recipient cannot un-type. */
+async function flattenForm(bytes) {
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
+  const form = doc.getForm();
+  const done = new Set();
+  for (const f of allFields()) {
+    if (done.has(f.name)) continue;
+    done.add(f.name);
+    const v = S.fields[f.name];
+    if (v === undefined || !fieldChanged(f.name)) continue;
+    if (f.type === 'text') form.getTextField(f.name).setText(String(v ?? ''));
+    else if (f.type === 'check') { const c = form.getCheckBox(f.name); v ? c.check() : c.uncheck(); }
+    else if (f.type === 'radio') { const g = form.getRadioGroup(f.name); if (v) g.select(String(v)); else g.clear(); }
+    else if (f.type === 'choice') {
+      const val = String(v ?? '');
+      let d; try { d = form.getDropdown(f.name); } catch (_) { d = form.getOptionList(f.name); }
+      val ? d.select(val) : d.clear();
+    }
+  }
+  try { form.updateFieldAppearances(await doc.embedFont(StandardFonts.Helvetica)); } catch (_) {}
+  form.flatten();
+  return doc.save({ useObjectStreams: false });
+}
+
+/* If the document's own form refuses to cooperate, fall back to drawing the
+   values ourselves at the field rectangles. */
+function fieldFallbackItems() {
+  const out = [];
+  S.pageBox.forEach((p, pi) => {
+    const vp = p.page.getViewport({ scale: 1, rotation: 0 });
+    (p.fields || []).forEach(f => {
+      const v = S.fields[f.name];
+      if (!v || !fieldChanged(f.name)) return;
+      const r = vp.convertToViewportRectangle(f.rect);
+      const x = Math.min(r[0], r[2]) / vp.width;
+      const y = Math.min(r[1], r[3]) / vp.height;
+      const w = Math.abs(r[2] - r[0]) / vp.width;
+      const h = Math.abs(r[3] - r[1]) / vp.height;
+      if (f.type === 'text' || f.type === 'choice') {
+        const fs = f.fs ? f.fs / vp.height : Math.min(h * 0.62, 0.02);
+        out.push({ id: 'ff' + out.length, page: pi, rot: 0, type: 'text',
+                   x: x + 0.004, y: y + (h - fs * LINEH) / 2, fs, color: f.color, text: String(v) });
+      } else if (f.type === 'check' ? v : v === f.on) {
+        out.push({ id: 'ff' + out.length, page: pi, rot: 0, type: 'check',
+                   x: x + w * 0.1, y: y + h * 0.1, size: Math.min(w, h) * 0.8, color: f.color });
+      }
+    });
+  });
+  return out;
+}
+
 async function buildPdf() {
-  const src = await PDFDocument.load(S.bytes.slice(0), { ignoreEncryption: true });
+  let bytes = S.bytes.slice(0);
+  let rasterDoc = null;
+  let extra = [];
+
+  const touched = allFields().some(f => fieldChanged(f.name));
+  if (touched) {
+    try {
+      bytes = await flattenForm(bytes);
+      rasterDoc = await pdfjsLib.getDocument({ data: bytes.slice(0), isEvalSupported: false }).promise;
+    } catch (e) {
+      console.warn('form flatten unavailable, drawing values instead', e);
+      bytes = S.bytes.slice(0);
+      rasterDoc = null;
+      extra = fieldFallbackItems();
+    }
+  }
+
+  const src = await PDFDocument.load(bytes.slice(0), { ignoreEncryption: true });
   const out = await PDFDocument.create();
   const font = await out.embedFont(StandardFonts.Helvetica);
 
   const byPage = S.pageBox.map(() => []);
-  S.items.forEach(it => { if (!isText(it) || textOf(it).trim()) byPage[it.page].push(it); });
+  [...extra, ...S.items].forEach(it => { if (!isText(it) || textOf(it).trim()) byPage[it.page].push(it); });
 
   const sigImgs = new Map();
   for (const it of S.items) {
@@ -1407,7 +1683,7 @@ async function buildPdf() {
     const badText = items.some(it => isText(it) && !textOf(it).split('\n').every(encodable));
 
     if (hasRedact || badText) {
-      const png = await rasterPage(i, items);
+      const png = await rasterPage(i, items, rasterDoc);
       const img = await out.embedPng(png);
       const p = out.addPage([pb.uw, pb.uh]);
       p.drawImage(img, { x: 0, y: 0, width: pb.uw, height: pb.uh });
@@ -1454,7 +1730,9 @@ async function buildPdf() {
 
   out.setProducer('Fill & Sign — free PDF fill and sign by Eli Otterholt');
   out.setCreator('Fill & Sign');
-  return new Blob([await out.save({ useObjectStreams: false })], { type: 'application/pdf' });
+  const blob = new Blob([await out.save({ useObjectStreams: false })], { type: 'application/pdf' });
+  try { rasterDoc?.destroy?.(); } catch (_) {}
+  return blob;
 }
 
 /* ---------------------------------------------------------- done screen */
@@ -1477,9 +1755,12 @@ $('#btnFinish').addEventListener('click', async () => {
   }
   busy(false);
   const reds = S.items.filter(i => i.type === 'redact').length;
+  const filled = allFields().filter(f => fieldChanged(f.name)).length;
   $('#doneNote').textContent = reds
     ? `Everything you added is now part of the document. ${reds} blackout${reds > 1 ? 's were' : ' was'} baked permanently into the page.`
-    : 'Everything you added is now part of the document. Nothing was uploaded.';
+    : filled
+      ? 'Everything you added is now part of the document, and the form fields are flattened so they can’t be typed over.'
+      : 'Everything you added is now part of the document. Nothing was uploaded.';
   $('#saveName').value = outName();
   $('#btnShare').hidden = !canShareFiles();
   $('#editor').hidden = true;
@@ -1518,7 +1799,9 @@ async function checkResume() {
     const d = await DB.get('doc');
     if (d && Date.now() - (d.ts || 0) > DRAFT_TTL) { await DB.del('doc'); }
     const fresh = await DB.get('doc');
-    const has = fresh && fresh.bytes && (fresh.items?.length || 0) > 0;
+    const anyField = v => v !== '' && v !== false && v != null;
+    const has = fresh && fresh.bytes &&
+      ((fresh.items?.length || 0) > 0 || Object.values(fresh.fields || {}).some(anyField));
     $('#resume').hidden = !has;
     if (has) {
       $('#resumeName').textContent = fresh.name;
@@ -1531,7 +1814,7 @@ $('#btnResume').addEventListener('click', async () => {
   busy(true, 'Opening…');
   try {
     const d = await DB.get('doc');
-    if (d) await loadDoc(d.bytes, d.name, d.items, d.rots);
+    if (d) await loadDoc(d.bytes, d.name, d.items, d.rots, d.fields);
   } catch (_) { toast('That draft could not be restored.'); }
   finally { busy(false); }
 });
@@ -1579,4 +1862,4 @@ if ('launchQueue' in window) {
   }
 })();
 
-window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine };
+window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fieldChanged };
