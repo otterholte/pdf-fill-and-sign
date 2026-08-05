@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<title>Fill &amp; Sign — Free PDF Filler and Signer. No Account, No Upload.</title>
+<meta name="description" content="Fill out and sign a PDF on your phone for free. Add text, a signature, dates, checkmarks and permanent blackouts, then save or send it back. No account, no upload, no watermark, no paywall — your document stays on your device.">
+<meta name="keywords" content="free pdf fill and sign, sign a pdf without an account, fill out a pdf on my phone, free pdf signer, add text to a pdf, sign pdf without uploading, free pdf editor without a paywall, fill pdf on iphone, fill pdf on android, add signature to pdf free">
+<meta name="author" content="Eli Otterholt">
+<meta name="theme-color" content="#0f1216" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="color-scheme" content="light dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Fill &amp; Sign">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="app.css">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="Fill &amp; Sign — Free PDF Filler and Signer">
+<meta property="og:description" content="Open it. Fill it out. Sign it. Send it back. No account, no upload, no paywall.">
+<meta property="og:image" content="icons/og.png">
+<meta name="twitter:card" content="summary_large_image">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  "name": "Fill & Sign",
+  "alternateName": "Free PDF Filler and Signer",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Any device with a web browser",
+  "browserRequirements": "Requires JavaScript.",
+  "description": "A free, mobile-first PDF fill-and-sign tool. Add text, signatures, dates, checkmarks and permanent blackouts to a PDF and send it back. Documents are processed on the device and are never uploaded.",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "isAccessibleForFree": true,
+  "featureList": [
+    "Fill in blank lines on a PDF with text",
+    "Sign a PDF by drawing, photographing, or choosing a signature image",
+    "Automatic date and time under a signature",
+    "Add checkmarks and X marks",
+    "Permanently black out private information",
+    "Rotate pages",
+    "Save or share the finished PDF",
+    "Works offline, no account required"
+  ],
+  "author": {
+    "@type": "Person",
+    "name": "Eli Otterholt",
+    "email": "otterholteli@gmail.com",
+    "jobTitle": "Software Developer"
+  }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    { "@type": "Question", "name": "Is it really free?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. There is no account, no trial, no watermark and no payment screen. The finished PDF downloads in full." } },
+    { "@type": "Question", "name": "Is my document uploaded anywhere?",
+      "acceptedAnswer": { "@type": "Answer", "text": "No. The PDF is opened and edited inside your own browser. There is no server to upload it to." } },
+    { "@type": "Question", "name": "Can I fill out a PDF on my phone?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. Fill & Sign is built for phones. Open the PDF, tap where you want to type, sign it, then save or share it back." } }
+  ]
+}
+</script>
+</head>
+<body>
+
+<!-- ============ HOME ============ -->
+<main id="home" class="home">
+  <div class="home-inner">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 512 512" aria-hidden="true">
+        <rect width="512" height="512" rx="112" fill="var(--ink)"/>
+        <path d="M136 356c58-152 116-224 151-224 25 0 29 27 11 65-20 41-56 82-56 107 0 16 12 25 30 25 34 0 65-23 97-61" fill="none" stroke="var(--ink-contrast)" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M300 392h96" fill="none" stroke="var(--accent)" stroke-width="28" stroke-linecap="round"/>
+      </svg>
+      <span class="brand-name">Fill &amp; Sign</span>
+    </div>
+
+    <h1 class="hero-title">Fill &amp; Sign a PDF</h1>
+    <p class="hero-sub">Add text, signatures, dates, checkmarks, and permanent blackouts to any PDF.</p>
+
+    <div class="drop" id="drop">
+      <button class="btn-primary big" id="btnOpen">Open PDF</button>
+      <p class="drop-hint">or drop a file here</p>
+      <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden>
+    </div>
+
+    <p class="privacy">Your document stays on your device. No account or upload required.</p>
+    <p class="whylink"><button id="btnWhy" class="linkish">Why is this free?</button></p>
+
+    <div class="resume" id="resume" hidden>
+      <div class="resume-text">
+        <strong id="resumeName">Document.pdf</strong>
+        <span id="resumeWhen">Continue your last document?</span>
+      </div>
+      <button class="btn-ghost sm" id="btnResume">Continue</button>
+      <button class="btn-icon-sm" id="btnDiscard" aria-label="Delete saved draft">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <section class="seo">
+    <h2>The free PDF tool that lets you finish your document and leave</h2>
+    <p>Someone sent you a PDF. You need to fill in a few blank lines, sign it, and send it back. That is the whole job, and that is the whole app. There is no account to make, no trial to start, no watermark, and no payment screen waiting at the download button.</p>
+    <ul>
+      <li><strong>Type on the lines</strong> — tap anywhere to drop a text box, then drag or resize it until it sits right.</li>
+      <li><strong>Sign it</strong> — draw your signature with a finger, photograph one you wrote on paper, or pick an image you already have. The date and time go underneath automatically.</li>
+      <li><strong>Check a box</strong> — a clean checkmark or an X, sized for a normal checkbox.</li>
+      <li><strong>Black something out</strong> — drag a solid black box over anything private. It is baked permanently into the finished page.</li>
+      <li><strong>Send it back</strong> — save the PDF or hand it straight to Gmail, Outlook, Messages, Drive, or whatever else is on your phone.</li>
+    </ul>
+    <p>Fill &amp; Sign is not a full PDF editor, and it is not trying to be. It does not convert your document, detect its form fields, read its contents, or change its layout. It puts what you write on top of the page you already have.</p>
+    <p>Add it to your home screen and it keeps working with no signal at all.</p>
+  </section>
+
+  <footer class="site-foot">
+    <p class="made">Built by <strong>Eli Otterholt</strong></p>
+    <p class="foot-links">
+      <a href="mailto:otterholteli@gmail.com?subject=Building%20something%20simple">Work with Eli</a>
+      <span>·</span>
+      <a href="#" id="moreTools">More simple tools by Eli</a>
+    </p>
+    <p class="fine">Free forever. No accounts, no ads, no tracking, no analytics.</p>
+    <p class="fine"><button class="linkish quiet" id="btnWipe">Delete local document data</button></p>
+  </footer>
+</main>
+
+<!-- ============ EDITOR ============ -->
+<div id="editor" class="editor" hidden>
+  <header class="topbar">
+    <button class="btn-icon" id="btnBack" aria-label="Back">
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="topbar-title">
+      <span id="docName">Document.pdf</span>
+      <small id="docPages"></small>
+    </div>
+    <button class="btn-icon" id="btnUndo" aria-label="Undo" disabled>
+      <svg viewBox="0 0 24 24"><path d="M9 7L4.5 11.5 9 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.5 11.5H14a5.5 5.5 0 0 1 0 11h-2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+    <button class="btn-icon" id="btnRedo" aria-label="Redo" disabled>
+      <svg viewBox="0 0 24 24"><path d="M15 7l4.5 4.5L15 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M19.5 11.5H10a5.5 5.5 0 0 0 0 11h2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+    <button class="btn-save" id="btnFinish">Finish</button>
+  </header>
+
+  <div class="stage" id="stage">
+    <div class="pages" id="pages"></div>
+  </div>
+
+  <!-- contextual bar for the selected object -->
+  <div class="selbar" id="selbar" hidden>
+    <div class="selbar-scroll">
+      <div class="swatches" id="swatches">
+        <button class="sw" data-color="#0b0f14" style="--c:#0b0f14" aria-label="Black"></button>
+        <button class="sw" data-color="#1b4fd8" style="--c:#1b4fd8" aria-label="Blue"></button>
+        <button class="sw" data-color="#c8202a" style="--c:#c8202a" aria-label="Red"></button>
+      </div>
+      <span class="sep" id="sepColor"></span>
+      <button class="btn-icon" id="btnSmaller" aria-label="Smaller">
+        <svg viewBox="0 0 24 24"><path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <button class="btn-icon" id="btnBigger" aria-label="Bigger">
+        <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <button class="btn-chip" id="btnStamp" hidden>Date &amp; time</button>
+      <button class="btn-chip" id="btnDateFmt" hidden>08/05/2026</button>
+      <span class="sep"></span>
+      <button class="btn-icon" id="btnFwd" aria-label="Bring forward">
+        <svg viewBox="0 0 24 24"><rect x="4" y="4" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M9 20h9a2 2 0 0 0 2-2V9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="2.5 2.6"/></svg>
+      </button>
+      <button class="btn-icon" id="btnBack2" aria-label="Send backward">
+        <svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M15 4H6a2 2 0 0 0-2 2v9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-dasharray="2.5 2.6"/></svg>
+      </button>
+      <button class="btn-icon" id="btnDupe" aria-label="Duplicate">
+        <svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M15 6.5A2.5 2.5 0 0 0 12.5 4h-6A2.5 2.5 0 0 0 4 6.5v6A2.5 2.5 0 0 0 6.5 15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+      </button>
+      <button class="btn-icon danger" id="btnDelete" aria-label="Delete">
+        <svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5.5A1.5 1.5 0 0 1 11.5 4h1A1.5 1.5 0 0 1 14 5.5V7M7 7l.8 12a2 2 0 0 0 2 1.9h4.4a2 2 0 0 0 2-1.9L17 7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- main tools -->
+  <nav class="toolbar" id="toolbar">
+    <button class="tool" data-tool="text">
+      <svg viewBox="0 0 24 24"><path d="M5 6.5V5h14v1.5M12 5v14M9.5 19h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Text</span>
+    </button>
+    <button class="tool" data-tool="sig">
+      <svg viewBox="0 0 24 24"><path d="M3 17.5c3.5-8.5 6-11.5 7.6-11.5 1.1 0 1.3 1.3.5 3.1-.9 2-2.6 3.9-2.6 5.1 0 .8.6 1.2 1.4 1.2 1.6 0 3-1.1 4.5-2.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M14 20.5h7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <span>Sign</span>
+    </button>
+    <button class="tool" data-tool="date">
+      <svg viewBox="0 0 24 24"><rect x="3.5" y="5.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M3.5 10h17M8 3.5v4M16 3.5v4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+      <span>Date</span>
+    </button>
+    <button class="tool" data-tool="check">
+      <svg viewBox="0 0 24 24"><path d="M4.5 12.5l5 5L20 6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Check</span>
+    </button>
+    <button class="tool" data-tool="x">
+      <svg viewBox="0 0 24 24"><path d="M5.5 5.5l13 13M18.5 5.5l-13 13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+      <span>X</span>
+    </button>
+    <button class="tool" data-tool="redact">
+      <svg viewBox="0 0 24 24"><rect x="3.5" y="7.5" width="17" height="9" rx="1.5" fill="currentColor"/></svg>
+      <span>Blackout</span>
+    </button>
+    <button class="tool" data-tool="rotate">
+      <svg viewBox="0 0 24 24"><path d="M20 11.5a8 8 0 1 1-2.4-5.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20.5 3.5v4.2h-4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Rotate</span>
+    </button>
+  </nav>
+
+  <div class="placing" id="placing" hidden><span id="placingText">Tap the page</span><button id="placingCancel">Cancel</button></div>
+</div>
+
+<!-- ============ SIGNATURE SHEET ============ -->
+<div class="sheet-wrap" id="sigSheet" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet" role="dialog" aria-label="Add your signature">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head">
+      <h2>Your signature</h2>
+      <button class="btn-icon" data-close aria-label="Close">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+
+    <div class="saved-sigs" id="savedSigs" hidden>
+      <p class="lbl">Saved on this device</p>
+      <div class="saved-list" id="savedList"></div>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button class="tab is-on" data-tab="draw">Draw</button>
+      <button class="tab" data-tab="type">Type</button>
+      <button class="tab" data-tab="photo">Photo</button>
+    </div>
+
+    <div class="pane" data-pane="draw">
+      <div class="padwrap">
+        <canvas id="pad"></canvas>
+        <div class="padline"></div>
+        <span class="padhint" id="padHint">Sign with your finger</span>
+      </div>
+      <button class="btn-ghost sm" id="padClear">Clear</button>
+    </div>
+
+    <div class="pane" data-pane="type" hidden>
+      <input type="text" id="typeName" placeholder="Type your name" autocomplete="name" autocapitalize="words">
+      <div class="fontpick" id="fontPick"></div>
+    </div>
+
+    <div class="pane" data-pane="photo" hidden>
+      <p class="photo-help">Take a photo of a signature on white paper, or choose an image you already have. The light background is removed for you.</p>
+      <button class="btn-ghost" id="photoPick">Take a photo or choose an image</button>
+      <input type="file" id="photoInput" accept="image/*" hidden>
+      <div class="photo-prev" id="photoPrev" hidden><img id="photoImg" alt="Signature preview"></div>
+      <label class="slider" id="thrWrap" hidden>Background removal
+        <input type="range" id="thr" min="30" max="95" value="66">
+      </label>
+    </div>
+
+    <div class="sig-colors">
+      <span class="lbl">Ink</span>
+      <button class="sw is-on" data-sigcolor="#0b0f14" style="--c:#0b0f14" aria-label="Black"></button>
+      <button class="sw" data-sigcolor="#1b4fd8" style="--c:#1b4fd8" aria-label="Blue"></button>
+      <button class="sw" data-sigcolor="#c8202a" style="--c:#c8202a" aria-label="Red"></button>
+      <label class="chk"><input type="checkbox" id="sigStamp" checked> Add date &amp; time</label>
+    </div>
+
+    <button class="btn-primary wide" id="sigUse" disabled>Place signature</button>
+  </div>
+</div>
+
+<!-- ============ ROTATE SHEET ============ -->
+<div class="sheet-wrap" id="rotSheet" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet" role="dialog" aria-label="Rotate pages">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head"><h2>Rotate</h2>
+      <button class="btn-icon" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </div>
+    <p class="rot-page" id="rotPage">Page 1</p>
+    <div class="rotgrid">
+      <button class="btn-ghost" data-rot="90">90° right</button>
+      <button class="btn-ghost" data-rot="180">180°</button>
+      <button class="btn-ghost" data-rot="270">90° left</button>
+      <button class="btn-ghost" data-rot="0">Original</button>
+    </div>
+    <label class="chk wide-chk"><input type="checkbox" id="rotAll"> Apply to all pages</label>
+  </div>
+</div>
+
+<!-- ============ WHY FREE SHEET ============ -->
+<div class="sheet-wrap" id="whySheet" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet" role="dialog" aria-label="Why is this free?">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head"><h2>Why is this free?</h2>
+      <button class="btn-icon" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="prose">
+      <p>Most PDF tools let you complete the entire document before asking you to create an account or pay to download it. I wanted to build one that simply works.</p>
+      <p>Fill &amp; Sign is free because it is also an example of the type of software I build: simple, polished tools that solve real problems without unnecessary complexity.</p>
+      <p>It costs me almost nothing to run because your document never touches a server — everything happens inside your own browser.</p>
+      <p>If your business has a repetitive process, outdated workflow, or frustrating task that should be easier, you can contact me about building a custom solution.</p>
+      <p class="sig-line">— Eli Otterholt</p>
+    </div>
+    <a class="btn-ghost wide" href="mailto:otterholteli@gmail.com?subject=Building%20something%20simple">Work with Eli</a>
+  </div>
+</div>
+
+<!-- ============ DONE SCREEN ============ -->
+<div id="done" class="done" hidden>
+  <div class="done-inner">
+    <div class="done-tick">
+      <svg viewBox="0 0 24 24"><path d="M4.5 12.5l5 5L20 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </div>
+    <h2>Your PDF is ready</h2>
+    <p class="done-note" id="doneNote"></p>
+
+    <label class="namefield">File name
+      <input type="text" id="saveName" spellcheck="false">
+    </label>
+
+    <button class="btn-primary wide" id="btnSave">Save PDF</button>
+    <button class="btn-ghost wide" id="btnShare" hidden>Share PDF</button>
+    <button class="linkish center" id="btnContinue">Continue editing</button>
+
+    <div class="pitch-card">
+      <h3>Need a simple tool built for your business?</h3>
+      <p>I build practical software that removes repetitive work, unnecessary steps, and everyday business headaches.</p>
+      <a class="btn-ghost sm" href="mailto:otterholteli@gmail.com?subject=Building%20something%20simple">Work with Eli</a>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<div class="busy" id="busy" hidden><div class="spin"></div><span id="busyText">Working…</span></div>
+
+<script src="vendor/pdf-lib.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
