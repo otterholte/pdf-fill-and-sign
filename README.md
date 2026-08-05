@@ -11,14 +11,23 @@ No account. No upload. No trial. No watermark. No surprise paywall.
 
 ## What it does
 
-- **Text** — tap anywhere to drop a text box; drag, resize, recolour (black / blue / red)
+- **Snap to blank lines** — tap near an underscore run or a drawn rule and the text
+  lands *on* it, left-aligned to its start and sized to match the label beside it.
+  No dragging or resizing needed for the common case. Signatures snap the same way.
+- **Text** — tap anywhere to drop a text box; drag it around before or after typing,
+  resize, recolour (black / blue / red)
 - **Signature** — draw it, type it in a handwriting face, or photograph one on paper
-  (the light background is removed automatically). Saved locally for reuse.
+  (the light background is removed automatically). A thickness slider sets the pen
+  weight, before placing or afterwards on a signature already on the page.
+  Saved locally for reuse.
 - **Signature timestamp** — the local date and time go under the signature
-  automatically, as a grouped object. Switch to date-only or turn it off.
+  automatically. The two behave as one object: drag either and both move.
+  Switch to date-only or turn it off.
 - **Date** — standalone date object in `08/05/2026`, `August 5, 2026`, or `5 August 2026`
-- **Checkmark / X** — sized for a normal checkbox
-- **Blackout** — press and drag a solid black rectangle. On export, any page containing a
+- **Checkmark / X** — sized for a normal checkbox; the tool stays armed so you can
+  tick a whole column in one go, and turns off when you tap it again
+- **Blackout** — press and drag; the box grows under your finger so you can see
+  exactly what you are covering. On export, any page containing a
   blackout is **flattened to an image**, so the hidden text is genuinely destroyed rather
   than merely covered.
 - **Rotate** — 90° / 180° / 270° / original, per page or all pages. Objects rotate with
@@ -78,6 +87,20 @@ vendor/
 
 Everything is vendored on purpose: no CDN, no third-party request at runtime, and the
 whole app keeps working offline.
+
+## How blank-line snapping works
+
+There is no form-field parsing here, and no PDF operator archaeology. The page is
+already rendered to a canvas, so `scanLines()` reads it back and looks for long,
+*thin*, nearly-solid bands of dark pixels with white space directly above and below.
+An underscore run or a drawn rule passes all four tests; a row of type fails at
+least two of them (letters leave gaps, and a text row is tall and crowded).
+`inkHeightLeft()` then walks up from the rule to the nearest ink cluster on its
+left — the field's label — and derives a font size from its height. That is why a
+snapped text box comes out the same size as "Tenant name:" beside it.
+
+The whole scan is cached per page render and only runs the first time you place
+something on that page.
 
 ## How the coordinate system works
 

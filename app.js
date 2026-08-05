@@ -72,7 +72,9 @@ const DB = (() => {
 
 /* --------------------------------------------------------------- state */
 const COLORS = ['#0b0f14', '#1b4fd8', '#c8202a'];
-const DEF = { fs: 0.0165, stampFs: 0.0105, mark: 0.026, sigW: 0.26, redW: 0.30, redH: 0.028 };
+const DEF = { fs: 0.0165, stampFs: 0.0105, mark: 0.026, sigW: 0.26, redW: 0.34, redH: 0.032 };
+/* tools that stay armed so you can tap several in a row */
+const STICKY = new Set(['check', 'x']);
 /* distance from the top of a text line-box down to its baseline, in ems
    (line-height 1.25 on an Arial/Helvetica-metric face). Verified against
    the browser's own rendering — keeps the export pixel-aligned with the editor. */
@@ -122,7 +124,8 @@ function saveSoon() {
     if (!S.bytes) return;
     try {
       await DB.set('doc', {
-        name: S.name, bytes: S.bytes, items: S.items,
+        name: S.name, bytes: S.bytes,
+        items: S.items.filter(i => !isText(i) || i.date || i.text.trim()),
         rots: S.pageBox.map(p => p.userRot), ts: Date.now(),
       });
     } catch (_) {}
@@ -297,6 +300,7 @@ async function renderVisible() {
       p.renderKey = key;
       p.task = p.page.render({ canvasContext: p.cv.getContext('2d', { alpha: false }), viewport: vp });
       await p.task.promise;
+      p.readyKey = key;                    // line scanning waits for real pixels
     } catch (_) { p.renderKey = null; }
   }
 }
@@ -364,6 +368,157 @@ function zoomTo(z, mx, my) {
     } else { lastT = now; lastX = e.clientX; lastY = e.clientY; }
   });
 })();
+
+/* ======================================================= BLANK-LINE SNAPPING
+   Most forms mark a blank with either a run of underscores or a drawn rule.
+   Rather than guess from the PDF's operators, read the page we already
+   rendered: a fill-in line is a long, *thin* band of dark pixels. Text rows
+   never qualify — the gaps between glyphs break the run, and a row of type is
+   far taller than a rule. Everything here is in the page's own display frame,
+   which is exactly the frame objects are placed in. */
+
+const DARK = 150;          // luminance below this counts as ink
+const GAP = 5;             // px of white tolerated inside one run
+
+function scanLines(cv) {
+  const W = cv.width, H = cv.height;
+  let d;
+  try { d = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, W, H).data; }
+  catch (_) { return { W, H, bands: [], data: null }; }
+
+  const minLen = Math.max(30, W * 0.06);
+  const rows = [];
+  for (let y = 0; y < H; y++) {
+    let best = 0, bx0 = 0, bx1 = 0, start = -1, gap = 0, base = y * W * 4;
+    for (let x = 0; x < W; x++) {
+      const i = base + x * 4;
+      const dark = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 < DARK;
+      if (dark) {
+        if (start < 0) start = x;
+        gap = 0;
+        const len = x - start + 1;
+        if (len > best) { best = len; bx0 = start; bx1 = x; }
+      } else if (start >= 0) {
+        if (++gap > GAP) { start = -1; gap = 0; }
+      }
+    }
+    rows.push(best >= minLen ? { x0: bx0, x1: bx1, len: best } : null);
+  }
+
+  // merge vertically adjacent rows into bands; keep only thin ones
+  const maxThick = Math.max(4, Math.round(H * 0.007));
+  const raw = [];
+  let cur = null;
+  for (let y = 0; y <= H; y++) {
+    const r = rows[y];
+    if (r) {
+      if (!cur) cur = { top: y, bot: y, x0: r.x0, x1: r.x1 };
+      else { cur.bot = y; if (r.x1 - r.x0 > cur.x1 - cur.x0) { cur.x0 = r.x0; cur.x1 = r.x1; } }
+    } else if (cur) {
+      if (cur.bot - cur.top + 1 <= maxThick) raw.push(cur);
+      cur = null;
+    }
+  }
+
+  /* A row of type can also produce a long run — letters nearly touch. Two
+     things separate a real rule from a line of text: a rule is almost solid
+     across its whole length, and there is white space directly above and
+     below it. Text is neither. */
+  const density = (y, x0, x1) => {
+    if (y < 0 || y >= H) return 0;
+    let c = 0, base = y * W * 4;
+    for (let x = x0; x <= x1; x++) {
+      const i = base + x * 4;
+      if ((d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 < DARK) c++;
+    }
+    return c / (x1 - x0 + 1);
+  };
+  const bands = raw.filter(b => {
+    let solid = 0;
+    for (let y = b.top; y <= b.bot; y++) solid = Math.max(solid, density(y, b.x0, b.x1));
+    if (solid < 0.80) return false;
+    const above = Math.max(density(b.top - 3, b.x0, b.x1), density(b.top - 5, b.x0, b.x1));
+    const below = Math.max(density(b.bot + 3, b.x0, b.x1), density(b.bot + 5, b.x0, b.x1));
+    return above < 0.28 && below < 0.28;
+  });
+
+  return { W, H, bands, data: d };
+}
+
+/** Height of the label sitting just left of a line — used to match font size.
+    Walks up from the rule and stops at the first clear gap, so the row above
+    (a different field) is never folded into the measurement. */
+function inkHeightLeft(scan, band) {
+  const { W, H, data } = scan;
+  if (!data) return 0;
+  const xEnd = Math.max(0, band.x0 - 3);
+  const xStart = Math.max(0, band.x0 - Math.round(W * 0.32));
+  if (xEnd - xStart < 8) return 0;
+  const inked = y => {
+    if (y < 0) return false;
+    const base = y * W * 4;
+    for (let x = xStart; x < xEnd; x++) {
+      const i = base + x * 4;
+      if ((data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000 < DARK) return true;
+    }
+    return false;
+  };
+  const maxUp = Math.round(H * 0.035);
+  let y = band.top - 1, skipped = 0;
+  while (y >= 0 && skipped < Math.round(H * 0.006) && !inked(y)) { y--; skipped++; }
+  if (y < 0 || !inked(y)) return 0;
+  const bottom = y;
+  let gap = 0;
+  while (y >= 0 && band.top - y < maxUp) {
+    if (inked(y)) gap = 0;
+    else if (++gap >= 3) break;
+    y--;
+  }
+  return bottom - (y + gap) + 1;
+}
+
+function pageLines(p) {
+  const key = p.readyKey;
+  if (!key) return [];
+  if (p.lineKey === key) return p.lines;
+  const scan = scanLines(p.cv);
+  p.lines = scan.bands.map(b => ({
+    y: b.top / scan.H,                       // where a baseline should sit
+    x0: b.x0 / scan.W,
+    x1: b.x1 / scan.W,
+    fs: clamp((inkHeightLeft(scan, b) / 0.72) / scan.H, 0.0085, 0.045) || DEF.fs,
+    hasLabel: inkHeightLeft(scan, b) > 0,
+  }));
+  p.lineKey = key;
+  return p.lines;
+}
+
+/** nearest fill-in line to a tap, or null.
+    `up` is how far above the line a tap still counts — generous, because that
+    is where people aim when they mean to write on it. */
+function findLine(p, x, y, up = 0.028, down = 0.020) {
+  const lines = pageLines(p);
+  let best = null, bd = Infinity;
+  for (const L of lines) {
+    const dy = y - L.y;                       // negative = tapped above the line
+    if (dy < -up || dy > down) continue;
+    if (x < L.x0 - 0.03 || x > L.x1 + 0.03) continue;
+    const d = Math.abs(dy);
+    if (d < bd) { bd = d; best = L; }
+  }
+  return best;
+}
+
+/* the flash sits on the page element, which is already in display space */
+function flashLine(p, L) {
+  const el = document.createElement('div');
+  el.className = 'snapflash';
+  el.style.left = (L.x0 * p.dw) + 'px';
+  el.style.top = (L.y * p.dh - 1) + 'px';
+  el.style.width = ((L.x1 - L.x0) * p.dw) + 'px';
+  p.el.append(el);
+  setTimeout(() => el.remove(), 800);
+}
 
 /* ================================================================== ITEMS */
 const isText = it => it.type === 'text';
@@ -447,6 +602,15 @@ const elOf = id => pagesEl.querySelector(`[data-id="${id}"]`);
 const getSel = () => S.items.find(i => i.id === S.sel);
 
 function select(id) {
+  // flush whatever is being typed before judging whether a box is empty
+  const ae = document.activeElement;
+  if (ae && ae.isContentEditable) ae.blur();
+  // an empty text box you tapped away from was never really wanted
+  const prev = getSel();
+  if (prev && prev.id !== id && isText(prev) && !prev.date && !prev.link && !prev.text.trim()) {
+    S.items.splice(S.items.indexOf(prev), 1);
+    elOf(prev.id)?.remove();
+  }
   S.sel = id;
   $$('.it').forEach(d => d.classList.toggle('sel', d.dataset.id === id));
   syncBars();
@@ -470,7 +634,32 @@ function syncBars() {
   const fmtBtn = $('#btnDateFmt');
   fmtBtn.hidden = !it.date;
   if (it.date) fmtBtn.textContent = shortLabel(it.date.fmt);
+
+  const penWrap = $('#penWrap');
+  penWrap.hidden = !(it.type === 'sig' && it.gen);
+  if (!penWrap.hidden) $('#penSel').value = it.gen.pen;
 }
+
+/* redraw a placed signature at a new pen weight */
+let penT;
+async function repen(it, value) {
+  it.gen.pen = value;
+  it.src = await renderSig(it.gen);
+  const img = new Image(); img.src = it.src; await img.decode();
+  it.ar = img.height / img.width;
+  const d = elOf(it.id);
+  if (d) { d.querySelector('img').src = it.src; sizeItem(it, d); }
+  reseatStamp(it);
+  saveSoon();
+}
+$('#penSel').addEventListener('input', e => {
+  const it = getSel();
+  if (!it || it.type !== 'sig' || !it.gen) return;
+  clearTimeout(penT);
+  const v = +e.target.value;
+  penT = setTimeout(() => repen(it, v), 60);
+});
+$('#penSel').addEventListener('change', () => { const it = getSel(); if (it?.gen) push(); });
 
 /* -------------------------------------------------------------- toolbar */
 $$('.tool').forEach(b => b.addEventListener('click', () => {
@@ -482,11 +671,11 @@ $$('.tool').forEach(b => b.addEventListener('click', () => {
   reflectTool();
 }));
 const PROMPT = {
-  text: 'Tap the page to add a text box',
+  text: 'Tap a blank line to type on it',
   date: 'Tap the page to add the date',
-  check: 'Tap the page to add a checkmark',
-  x: 'Tap the page to add an X',
-  redact: 'Drag on the page to black something out',
+  check: 'Tap to add checkmarks — tap Check again to stop',
+  x: 'Tap to add Xs — tap X again to stop',
+  redact: 'Drag across whatever you want blacked out',
 };
 function reflectTool() {
   $$('.tool').forEach(b => b.classList.toggle('is-on', b.dataset.tool === S.tool));
@@ -520,48 +709,80 @@ pagesEl.addEventListener('pointerdown', e => {
   if (S.sel) select(null);
 });
 
+// tapping the grey area beside the page also deselects
+stageEl.addEventListener('pointerdown', e => {
+  if (!e.isPrimary || e.target.closest('.page')) return;
+  if (S.sel) select(null);
+});
+
 function place(pi, x, y) {
   const p = S.pageBox[pi];
   const rot = totalRot(p);
   const [Wl, Hl] = localDims(p.lw, p.lh, rot);
+  const tool = S.tool;
   const id = uid();
+  const L = pendingSig ? findLine(p, x, y, 0.065, 0.028)
+    : (tool === 'text' || tool === 'date') ? findLine(p, x, y)
+    : null;
   let it;
+
   if (pendingSig) {
-    const w = DEF.sigW;
-    const h = (w * Wl * pendingSig.ar) / Hl;
-    it = { id, page: pi, rot, type: 'sig', x: clamp(x - w / 2, 0, 1 - w), y: clamp(y - h / 2, 0, 1 - h),
-           w, ar: pendingSig.ar, src: pendingSig.src, stampMode: pendingSig.stamp ? 'datetime' : 'none' };
+    const ar = pendingSig.ar;
+    let w = DEF.sigW, sx = clamp(x - w / 2, 0, 1 - w), sy;
+    if (L) {
+      // sit the signature on the line, sized to the label beside it
+      const hWant = clamp(L.fs * 2.6, 0.022, 0.10);
+      w = clamp((hWant * Hl) / (Wl * ar), 0.05, Math.max(0.08, (L.x1 - L.x0) * 0.98));
+      const h = (w * Wl * ar) / Hl;
+      sx = clamp(L.x0 + 0.008, 0, 1 - w);
+      sy = clamp(L.y - h - 0.004, 0, 1);
+    } else {
+      sy = clamp(y - ((w * Wl * ar) / Hl) / 2, 0, 1);
+    }
+    it = { id, page: pi, rot, type: 'sig', x: sx, y: sy, w, ar,
+           src: pendingSig.src, gen: pendingSig.gen || null,
+           stampMode: pendingSig.stamp ? 'datetime' : 'none' };
     push(); S.items.push(it); itemEl(it);
     if (it.stampMode !== 'none') addStamp(it);
+    if (L) flashLine(p, L);
     pendingSig = null; S.tool = null; reflectTool(); select(id);
     saveSoon(); return;
   }
-  if (S.tool === 'text' || S.tool === 'date') {
-    it = { id, page: pi, rot, type: 'text', x: clamp(x, 0, .97), y: clamp(y - DEF.fs * .62, 0, .99),
-           fs: DEF.fs, color: COLORS[0], text: '' };
-    if (S.tool === 'date') it.date = { at: Date.now(), fmt: 0 };
-  } else if (S.tool === 'redact') {
+
+  if (tool === 'text' || tool === 'date') {
+    const fs = L ? L.fs : DEF.fs;
+    // baseline lands just above the rule; otherwise centre the text on the tap
+    const ty = L ? L.y - fs * (BASELINE + 0.06) : y - fs * 0.62;
+    let tx = L ? L.x0 + 0.006 : x;
+    if (L && x - tx > 0.36) tx = x;            // don't yank across a full-width rule
+    it = { id, page: pi, rot, type: 'text', x: clamp(tx, 0, .97), y: clamp(ty, 0, .99),
+           fs, color: COLORS[0], text: '' };
+    if (tool === 'date') it.date = { at: Date.now(), fmt: 0 };
+    if (L) flashLine(p, L);
+  } else if (tool === 'redact') {
     it = { id, page: pi, rot, type: 'redact', x: clamp(x - DEF.redW / 2, 0, 1 - DEF.redW),
            y: clamp(y - DEF.redH / 2, 0, 1 - DEF.redH), w: DEF.redW, h: DEF.redH };
   } else {
     const s = DEF.mark;
-    it = { id, page: pi, rot, type: S.tool, x: clamp(x - (s * Hl / Wl) / 2, 0, 1),
+    it = { id, page: pi, rot, type: tool, x: clamp(x - (s * Hl / Wl) / 2, 0, 1),
            y: clamp(y - s / 2, 0, 1 - s), size: s, color: COLORS[0] };
   }
+
   push();
   S.items.push(it);
   const d = itemEl(it);
-  S.tool = null; reflectTool();
+  if (!STICKY.has(tool)) { S.tool = null; reflectTool(); }
   select(id);
   if (isText(it) && !it.date) edit(d);
 }
 
+/* signature + timestamp behave as one object */
 function addStamp(sig) {
   const [Wl, Hl] = itemFrame(sig);
   const sigH = (sig.w * Wl * sig.ar) / Hl;
   const st = {
     id: uid(), page: sig.page, rot: sig.rot, type: 'text',
-    x: sig.x, y: clamp(sig.y + sigH + 0.004, 0, 1),
+    x: sig.x + 0.004, y: clamp(sig.y + sigH + 0.004, 0, 1),
     fs: DEF.stampFs, color: COLORS[0],
     text: '', link: sig.id,
     date: { at: Date.now(), fmt: sig.stampMode === 'date' ? 1 : 3 },
@@ -569,6 +790,17 @@ function addStamp(sig) {
   S.items.push(st);
   itemEl(st);
   return st;
+}
+
+/** re-seat a signature's timestamp under it (after a move or resize) */
+function reseatStamp(sig) {
+  const st = stampOf(sig);
+  if (!st) return;
+  const [Wl, Hl] = itemFrame(sig);
+  st.x = sig.x + 0.004;
+  st.y = clamp(sig.y + (sig.w * Wl * sig.ar) / Hl + 0.004, 0, 1);
+  const d = elOf(st.id);
+  if (d) sizeItem(st, d);
 }
 const stampOf = sig => S.items.find(i => i.link === sig.id);
 
@@ -591,15 +823,22 @@ function startRubber(e, pi, x0, y0) {
     band.style.height = (Math.abs(y1 - y0) * Hl) + 'px';
   };
   draw();
+  const pid = e.pointerId;
+  try { p.el.setPointerCapture(pid); } catch (_) {}
   const move = ev => {
+    if (ev.pointerId !== pid) return;
+    ev.preventDefault();
     x1 = clamp((ev.clientX - rect.left) / rect.width, 0, 1);
     y1 = clamp((ev.clientY - rect.top) / rect.height, 0, 1);
-    if (Math.abs(x1 - x0) * Wl > 6 || Math.abs(y1 - y0) * Hl > 6) moved = true;
+    if (Math.abs(x1 - x0) * Wl > 4 || Math.abs(y1 - y0) * Hl > 4) moved = true;
     draw();
   };
-  const up = () => {
+  const up = ev => {
+    if (ev && ev.pointerId !== pid) return;
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+    try { p.el.releasePointerCapture(pid); } catch (_) {}
     band.remove();
     if (!moved) return place(pi, x0, y0);
     push();
@@ -611,8 +850,9 @@ function startRubber(e, pi, x0, y0) {
     S.items.push(it); itemEl(it);
     S.tool = null; reflectTool(); select(it.id); saveSoon();
   };
-  window.addEventListener('pointermove', move);
+  window.addEventListener('pointermove', move, { passive: false });
   window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
 }
 
 /* text editing */
@@ -629,7 +869,8 @@ function edit(d) {
     if (!it) return;
     const v = t.innerText.replace(/ /g, ' ').replace(/\n+$/, '');
     if (v !== it.text) { push(); it.text = v; }
-    if (!it.text.trim()) removeItem(it.id);
+    // an empty box is kept so it can still be dragged into place; it is
+    // discarded when you select something else, and never exported.
     saveSoon();
   };
   t.onkeydown = ev => { if (ev.key === 'Escape') t.blur(); };
@@ -649,44 +890,62 @@ function removeItem(id) {
   saveSoon();
 }
 
-/* drag */
+/* drag — works on an empty box that is still being typed into: a real drag
+   (more than a few pixels) takes over, a tap just moves the caret. */
 function startDrag(e, d) {
   const it = S.items.find(i => i.id === d.dataset.id);
   if (!it) return;
   const wasSel = S.sel === it.id;
-  select(it.id);
-  const ce = d.firstChild?.contentEditable;
-  if (ce === 'true' || ce === 'plaintext-only') return;
+  const tnode = d.firstChild;
+  const editing = isText(it) &&
+    (tnode?.contentEditable === 'true' || tnode?.contentEditable === 'plaintext-only');
+
+  if (!editing) { select(it.id); e.preventDefault(); try { d.setPointerCapture(e.pointerId); } catch (_) {} }
 
   const p = S.pageBox[it.page];
   const spin = norm4(totalRot(p) - it.rot);
   const [Wl, Hl] = itemFrame(it);
   const sx = e.clientX, sy = e.clientY;
-  const st = it.type === 'sig' && !stampOf(it)?.detached ? stampOf(it) : null;
-  const o = { x: it.x, y: it.y, sx: st?.x, sy: st?.y };
+  const pid = e.pointerId;
+
+  /* a signature and its timestamp move together, whichever one you grab */
+  const anchor = it.link ? S.items.find(i => i.id === it.link) : it;
+  const partner = anchor === it
+    ? (it.type === 'sig' ? stampOf(it) : null)
+    : anchor;
+  const o = { x: it.x, y: it.y, px: partner?.x, py: partner?.y };
   let moved = false;
-  d.setPointerCapture(e.pointerId);
-  e.preventDefault();
 
   const move = ev => {
-    if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) > 5) { moved = true; push(); }
-    if (!moved) return;
-    const [px, py] = unspin(spin, ev.clientX - sx, ev.clientY - sy);
-    const dx = px / Wl, dy = py / Hl;
+    if (ev.pointerId !== pid) return;
+    if (!moved) {
+      if (Math.hypot(ev.clientX - sx, ev.clientY - sy) <= 6) return;
+      moved = true;
+      if (editing) { tnode.blur(); select(it.id); try { d.setPointerCapture(pid); } catch (_) {} }
+      push();
+    }
+    ev.preventDefault();
+    const [ppx, ppy] = unspin(spin, ev.clientX - sx, ev.clientY - sy);
+    const dx = ppx / Wl, dy = ppy / Hl;
     it.x = clamp(o.x + dx, -0.06, 1.03); it.y = clamp(o.y + dy, -0.03, 1.0);
     sizeItem(it, d);
-    if (st) { st.x = o.sx + dx; st.y = o.sy + dy; const sd = elOf(st.id); if (sd) sizeItem(st, sd); }
+    if (partner) {
+      partner.x = o.px + dx; partner.y = o.py + dy;
+      const pd = elOf(partner.id);
+      if (pd) sizeItem(partner, pd);
+    }
   };
-  const up = () => {
-    d.removeEventListener('pointermove', move);
-    d.removeEventListener('pointerup', up);
-    d.removeEventListener('pointercancel', up);
-    if (!moved && isText(it) && !it.date && wasSel) edit(d);
-    if (moved) { if (it.link) it.detached = true; saveSoon(); }
+  const up = ev => {
+    if (ev && ev.pointerId !== pid) return;
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+    if (!moved && isText(it) && !it.date && wasSel && !editing) edit(d);
+    if (moved) saveSoon();
   };
-  d.addEventListener('pointermove', move);
-  d.addEventListener('pointerup', up);
-  d.addEventListener('pointercancel', up);
+  window.addEventListener('pointermove', move, { passive: false });
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
 }
 
 /* resize */
@@ -712,6 +971,7 @@ function startResize(e, d) {
     else if (it.type === 'redact') { it.w = clamp(o.w + dx, 0.008, 1.2); it.h = clamp(o.h + dy, 0.004, 1.0); }
     else it.size = clamp(o.size + dy, 0.006, 0.35);
     sizeItem(it, d);
+    if (it.type === 'sig') reseatStamp(it);
   };
   const up = () => {
     d.removeEventListener('pointermove', move);
@@ -737,6 +997,7 @@ const bump = f => {
   else if (it.type === 'sig') it.w = clamp(it.w * f, 0.04, 1.2);
   else if (it.type === 'redact') { it.w = clamp(it.w * f, 0.008, 1.2); it.h = clamp(it.h * f, 0.004, 1); }
   else it.size = clamp(it.size * f, 0.006, 0.35);
+  if (it.type === 'sig') reseatStamp(it);
   relayoutItems(); saveSoon();
 };
 $('#btnBigger').addEventListener('click', () => bump(1.15));
@@ -823,7 +1084,7 @@ $$('[data-rot]').forEach(b => b.addEventListener('click', () => {
 const sigSheet = $('#sigSheet');
 const pad = $('#pad');
 let padCtx, strokes = [], cur = null, sigColor = COLORS[0], sigTab = 'draw';
-let typedFont = 'Caveat', photoBmp = null, photoOut = null;
+let typedFont = 'Caveat', photoBmp = null, photoOut = null, pen = 2.6;
 
 const FONTS = [
   { name: 'Caveat', stack: `'FS Caveat', 'Segoe Script', 'Bradley Hand', cursive` },
@@ -832,6 +1093,8 @@ const FONTS = [
 
 function openSig() {
   sigSheet.hidden = false;
+  $('#penPad').value = pen;
+  $('#penWrapSheet').hidden = sigTab === 'photo';
   setupPad(); drawFontOptions(); refreshSaved(); updateUse();
 }
 $$('[data-close]').forEach(b => b.addEventListener('click', () => { b.closest('.sheet-wrap').hidden = true; }));
@@ -839,8 +1102,14 @@ $$('.tab').forEach(t => t.addEventListener('click', () => {
   sigTab = t.dataset.tab;
   $$('.tab').forEach(x => x.classList.toggle('is-on', x === t));
   $$('.pane').forEach(p => (p.hidden = p.dataset.pane !== sigTab));
+  $('#penWrapSheet').hidden = sigTab === 'photo';
   updateUse();
 }));
+$('#penPad').addEventListener('input', e => {
+  pen = +e.target.value;
+  redrawPad();
+  drawFontOptions();
+});
 $$('[data-sigcolor]').forEach(b => b.addEventListener('click', () => {
   sigColor = b.dataset.sigcolor;
   $$('[data-sigcolor]').forEach(x => x.classList.toggle('is-on', x === b));
@@ -863,7 +1132,7 @@ pad.addEventListener('pointermove', e => { if (!cur) return; e.preventDefault();
 ['pointerup', 'pointercancel', 'pointerleave'].forEach(t =>
   pad.addEventListener(t, () => { if (cur) { cur = null; updateUse(); } }));
 
-function redrawPad() { if (!padCtx) return; padCtx.clearRect(0, 0, pad.width, pad.height); strokeAll(padCtx, strokes, sigColor, 2.6); }
+function redrawPad() { if (!padCtx) return; padCtx.clearRect(0, 0, pad.width, pad.height); strokeAll(padCtx, strokes, sigColor, pen); }
 function strokeAll(ctx, sts, color, w) {
   ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = color; ctx.lineWidth = w;
   sts.forEach(s => {
@@ -886,6 +1155,8 @@ function drawFontOptions() {
     const b = document.createElement('button');
     b.className = 'fontopt' + (typedFont === f.name ? ' is-on' : '');
     b.style.fontFamily = f.stack; b.style.color = sigColor; b.textContent = name;
+    const extra = (pen - 2.6) * 0.42;
+    b.style.webkitTextStroke = extra > 0 ? `${extra.toFixed(2)}px ${sigColor}` : '';
     b.onclick = () => { typedFont = f.name; drawFontOptions(); updateUse(); };
     wrap.append(b);
   });
@@ -966,34 +1237,55 @@ function trimCanvas(c) {
   return o;
 }
 
-async function buildSignature() {
-  if (sigTab === 'photo') return photoOut;
+/* Everything needed to redraw a signature at a different weight later. */
+function currentGen() {
   if (sigTab === 'draw') {
-    const r = pad.getBoundingClientRect(), K = 3;
+    const r = pad.getBoundingClientRect();
+    return { kind: 'draw', strokes: strokes.map(st => st.map(pt => [Math.round(pt[0] * 10) / 10, Math.round(pt[1] * 10) / 10])),
+             w: r.width, h: r.height, color: sigColor, pen };
+  }
+  if (sigTab === 'type') {
+    return { kind: 'type', name: $('#typeName').value.trim(), font: typedFont, color: sigColor, pen };
+  }
+  return null;                        // photos are not regenerable
+}
+
+async function renderSig(gen) {
+  if (!gen) return null;
+  if (gen.kind === 'draw') {
+    const K = 3;
     const c = document.createElement('canvas');
-    c.width = Math.round(r.width * K); c.height = Math.round(r.height * K);
+    c.width = Math.max(1, Math.round(gen.w * K)); c.height = Math.max(1, Math.round(gen.h * K));
     const ctx = c.getContext('2d'); ctx.scale(K, K);
-    strokeAll(ctx, strokes, sigColor, 2.6);
+    strokeAll(ctx, gen.strokes, gen.color, gen.pen);
     return trimCanvas(c).toDataURL('image/png');
   }
-  const name = $('#typeName').value.trim();
-  const f = FONTS.find(x => x.name === typedFont);
-  try { await document.fonts.load(`64px ${f.stack.split(',')[0]}`, name); } catch (_) {}
+  const f = FONTS.find(x => x.name === gen.font) || FONTS[0];
+  try { await document.fonts.load(`64px ${f.stack.split(',')[0]}`, gen.name); } catch (_) {}
   const size = 150;
   const m = document.createElement('canvas').getContext('2d');
   m.font = `${size}px ${f.stack}`;
   const c = document.createElement('canvas');
-  c.width = Math.ceil(m.measureText(name).width) + size;
+  c.width = Math.ceil(m.measureText(gen.name).width) + size;
   c.height = Math.round(size * 2.1);
   const ctx = c.getContext('2d');
-  ctx.font = `${size}px ${f.stack}`; ctx.fillStyle = sigColor; ctx.textBaseline = 'middle';
-  ctx.fillText(name, size / 2, c.height / 2);
+  ctx.font = `${size}px ${f.stack}`;
+  ctx.fillStyle = gen.color; ctx.strokeStyle = gen.color;
+  ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.fillText(gen.name, size / 2, c.height / 2);
+  const extra = (gen.pen - 2.6) * 2.4;                 // weight beyond the natural stroke
+  if (extra > 0) { ctx.lineWidth = extra; ctx.strokeText(gen.name, size / 2, c.height / 2); }
   return trimCanvas(c).toDataURL('image/png');
 }
 
-async function armSignature(src, withStamp) {
+async function buildSignature() {
+  if (sigTab === 'photo') return photoOut;
+  return renderSig(currentGen());
+}
+
+async function armSignature(src, withStamp, gen) {
   const img = new Image(); img.src = src; await img.decode();
-  pendingSig = { src, ar: img.height / img.width, stamp: withStamp };
+  pendingSig = { src, ar: img.height / img.width, stamp: withStamp, gen: gen || null };
   sigSheet.hidden = true;
   S.tool = null; reflectTool();
 }
@@ -1002,7 +1294,7 @@ $('#sigUse').addEventListener('click', async () => {
   try {
     const src = await buildSignature();
     if (!src) return;
-    await armSignature(src, $('#sigStamp').checked);
+    await armSignature(src, $('#sigStamp').checked, currentGen());
     await rememberSig(src);
   } finally { busy(false); }
 });
@@ -1020,7 +1312,7 @@ async function refreshSaved() {
     const b = document.createElement('button');
     b.className = 'saved-item';
     b.innerHTML = `<img src="${src}" alt="Saved signature">`;
-    b.onclick = () => armSignature(src, $('#sigStamp').checked);
+    b.onclick = () => armSignature(src, $('#sigStamp').checked, null);
     const del = document.createElement('span');
     del.className = 'saved-del';
     del.innerHTML = `<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>`;
@@ -1287,4 +1579,4 @@ if ('launchQueue' in window) {
   }
 })();
 
-window.__fs = { S, loadDoc, buildPdf, FMTS };
+window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine };

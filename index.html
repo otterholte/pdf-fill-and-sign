@@ -78,9 +78,9 @@
   <div class="home-inner">
     <div class="brand">
       <svg class="brand-mark" viewBox="0 0 512 512" aria-hidden="true">
-        <rect width="512" height="512" rx="112" fill="var(--ink)"/>
-        <path d="M136 356c58-152 116-224 151-224 25 0 29 27 11 65-20 41-56 82-56 107 0 16 12 25 30 25 34 0 65-23 97-61" fill="none" stroke="var(--ink-contrast)" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
-        <path d="M300 392h96" fill="none" stroke="var(--accent)" stroke-width="28" stroke-linecap="round"/>
+        <rect width="512" height="512" rx="112" fill="#1b4fd8"/>
+        <path d="M136 356c58-152 116-224 151-224 25 0 29 27 11 65-20 41-56 82-56 107 0 16 12 25 30 25 34 0 65-23 97-61" fill="none" stroke="#ffffff" stroke-width="34" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M300 392h96" fill="none" stroke="#9dbcff" stroke-width="28" stroke-linecap="round"/>
       </svg>
       <span class="brand-name">Fill &amp; Sign</span>
     </div>
@@ -88,13 +88,21 @@
     <h1 class="hero-title">Fill &amp; Sign a PDF</h1>
     <p class="hero-sub">Add text, signatures, dates, checkmarks, and permanent blackouts to any PDF.</p>
 
+    <p class="free-line"><strong>Free forever.</strong> No account, no payment, no trial, no watermark.</p>
+    <ul class="free-chips">
+      <li>No sign-up</li>
+      <li>No card</li>
+      <li>No upload</li>
+      <li>No paywall at the end</li>
+    </ul>
+
     <div class="drop" id="drop">
       <button class="btn-primary big" id="btnOpen">Open PDF</button>
       <p class="drop-hint">or drop a file here</p>
       <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden>
     </div>
 
-    <p class="privacy">Your document stays on your device. No account or upload required.</p>
+    <p class="privacy">Just start using it. Your document stays on your device.</p>
     <p class="whylink"><button id="btnWhy" class="linkish">Why is this free?</button></p>
 
     <div class="resume" id="resume" hidden>
@@ -173,6 +181,10 @@
       <button class="btn-icon" id="btnBigger" aria-label="Bigger">
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
+      <label class="penwrap" id="penWrap" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17.5c4-9 7-13 9-13 1.4 0 1.6 1.6.6 3.7-1.1 2.3-3.1 4.6-3.1 6 0 .9.7 1.4 1.7 1.4 1.9 0 3.4-1.3 5.2-3.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <input type="range" id="penSel" min="1" max="9" step="0.5" value="2.6" aria-label="Signature thickness">
+      </label>
       <button class="btn-chip" id="btnStamp" hidden>Date &amp; time</button>
       <button class="btn-chip" id="btnDateFmt" hidden>08/05/2026</button>
       <span class="sep"></span>
@@ -257,6 +269,10 @@
       </div>
       <button class="btn-ghost sm" id="padClear">Clear</button>
     </div>
+
+    <label class="slider thick" id="penWrapSheet">Thickness
+      <input type="range" id="penPad" min="1" max="9" step="0.5" value="2.6">
+    </label>
 
     <div class="pane" data-pane="type" hidden>
       <input type="text" id="typeName" placeholder="Type your name" autocomplete="name" autocapitalize="words">
