@@ -171,25 +171,40 @@ a:hover{text-decoration:underline;}
 .topbar-title span{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:-.01em;}
 .topbar-title small{font-size:11px;color:var(--fg-3);}
 
-/* move from blank to blank with no keyboard */
+/* move from blank to blank with no keyboard — loud on purpose, because a
+   bar you overlook is a bar that does not help */
 .jumpbar{
-  flex:none;display:flex;align-items:stretch;gap:6px;
-  padding:6px 8px;background:var(--bg);border-bottom:1px solid var(--line);z-index:6;
+  flex:none;display:flex;align-items:center;gap:8px;
+  padding:8px 10px;background:var(--accent-soft);
+  border-bottom:1px solid var(--line);z-index:6;
 }
 .jump{
-  display:flex;align-items:center;justify-content:center;gap:4px;
-  padding:7px 12px;border-radius:10px;color:var(--fg-2);
-  font-size:13.5px;font-weight:600;letter-spacing:-.01em;flex:none;
+  display:flex;align-items:center;justify-content:center;gap:5px;flex:none;
+  padding:9px 16px;border-radius:999px;
+  background:var(--accent);color:#fff;
+  font-size:14px;font-weight:650;letter-spacing:-.01em;
+  box-shadow:0 1px 2px rgba(15,18,22,.18);
+  transition:transform .12s ease, opacity .12s ease;
 }
 .jump svg{width:18px;height:18px;}
-.jump:active{background:var(--bg-3);}
-.jump:disabled{opacity:.35;}
+.jump:active{transform:scale(.96);opacity:.85;}
+.jump:disabled{opacity:.4;}
+@media (prefers-color-scheme: dark){ .jump{color:#0b1020;} }
+
+/* the middle is a label most of the time, so it stays quiet */
 .jump-mid{
-  flex:1;min-width:0;color:var(--fg-3);font-weight:500;
+  flex:1;min-width:0;background:transparent;box-shadow:none;
+  color:var(--accent);font-weight:600;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
+@media (prefers-color-scheme: dark){ .jump-mid{color:var(--accent);} }
 .jump-mid span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.jump-mid.is-act{color:var(--accent);background:var(--accent-soft);font-weight:650;}
+.jump-mid:active{transform:none;background:rgba(127,127,127,.14);}
+/* …until it is the tick button, and then it is the thing to press */
+.jump-mid.is-act{
+  background:var(--bg);color:var(--accent);font-weight:700;
+  box-shadow:0 0 0 1.6px var(--accent);
+}
 
 /* With the keyboard up there is no room for the tool row, and you are typing,
    not placing — give the space back to the document. Tapping the page brings
@@ -209,6 +224,23 @@ a:hover{text-decoration:underline;}
 .page.arm{cursor:crosshair;}
 /* while a tool is armed the page must own the gesture, or a drag scrolls instead of drawing */
 .page.arm, .page.arm .layer{touch-action:none;}
+
+/* A blank line the document only implies. Faint on purpose — a real form
+   field is a fact, this is a good guess — but solid enough to aim at. */
+.linehint{
+  position:absolute;transform-origin:0 0;pointer-events:none;z-index:1;
+  border-radius:3px 3px 0 0;
+  background:linear-gradient(to top, rgba(27,79,216,.11), rgba(27,79,216,.02));
+  box-shadow:inset 0 -1.5px 0 rgba(27,79,216,.34);
+}
+@media (prefers-color-scheme: dark){
+  .linehint{
+    background:linear-gradient(to top, rgba(123,160,255,.16), rgba(123,160,255,.03));
+    box-shadow:inset 0 -1.5px 0 rgba(123,160,255,.42);
+  }
+}
+/* while a tool is armed you are aiming yourself — get out of the way */
+.editor.arming .linehint{opacity:.3;}
 
 /* brief highlight of a blank line we snapped to */
 .snapflash{
@@ -269,7 +301,7 @@ textarea.fld{resize:none;overflow:auto;padding:1px 2px;line-height:1.25;}
 select.fld{padding-right:0;}
 
 /* objects */
-.it{position:absolute;touch-action:none;transform-origin:0 0;}
+.it{position:absolute;touch-action:none;transform-origin:0 0;z-index:2;}
 .it.sel{outline:1.5px solid var(--accent);outline-offset:2px;border-radius:2px;}
 .it-text,.it-date,.it-stamp{
   white-space:pre;font-family:var(--font-doc);line-height:1.25;

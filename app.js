@@ -218,6 +218,7 @@ function closeDoc() {
   S.pdf = null; S.bytes = null; S.items = []; S.sel = null; S.tool = null; lastBlob = null;
   S.fields = {}; S.fields0 = {}; formToldOnce = false;
   S.pageBox = [];
+  clearTimeout(hintsT);
   clearBoxCursor();
   KB.pi = 0; KB.key = null; KB.cur = null; KB.at = 0; KB.of = 0;
   checkResume();
@@ -481,7 +482,7 @@ function layoutFields() {
   });
 }
 
-function layoutPages() {
+function layoutPagesInner() {
   const W = Math.round(S.baseW * S.zoom);
   S.pageBox.forEach(p => {
     const r = totalRot(p);
@@ -501,6 +502,11 @@ function layoutPages() {
   });
   relayoutItems();
   layoutFields();
+}
+
+function layoutPages() {
+  layoutPagesInner();
+  layoutHints();          // the blanks are positioned in page pixels too
 }
 
 /* Objects are stored in the frame of the page *as it looked when they were
@@ -579,7 +585,7 @@ async function renderVisible() {
     const y = p.el.offsetTop;
     if (y + p.dh < top || y > bot) continue;
     await renderOne(p, dpr);
-    ensureScan(p);          // warm the blank/tick-box scan for this page
+    ensureScan(p).then(hintsSoon);   // the blanks can be drawn once the scan lands
   }
 }
 stageEl.addEventListener('scroll', renderSoon, { passive: true });
@@ -748,7 +754,49 @@ function scanLines(cv) {
     return above < 0.28 && below < 0.28;
   });
 
-  return { W, H, bands, data: d, mask };
+  /* Two rules of the same width, joined down both sides, are the edges of a
+     drawn rectangle rather than two blanks. That is fine while the rectangle
+     is empty — a boxed input is somewhere to write. But if there is already
+     something inside it, it is a table cell, and offering to type on its
+     border is wrong. Stacked blank lines share an x range too, which is why
+     the test insists on the vertical strokes joining them. */
+  const joined = (a, b) => {
+    const top = Math.min(a.bot, b.bot), bot = Math.max(a.top, b.top);
+    if (bot - top < 6) return false;
+    const col = cx => {
+      let c = 0;
+      for (let y = top; y <= bot; y++) {
+        const base = y * W;
+        if (mask[base + cx] || (cx > 0 && mask[base + cx - 1]) || (cx + 1 < W && mask[base + cx + 1])) c++;
+      }
+      return c / (bot - top + 1);
+    };
+    return col(Math.max(a.x0, b.x0)) > 0.75 && col(Math.min(a.x1, b.x1)) > 0.75;
+  };
+  const written = (a, b) => {
+    const y0 = Math.min(a.bot, b.bot) + 3, y1 = Math.max(a.top, b.top) - 3;
+    const x0 = Math.max(a.x0, b.x0) + 3, x1 = Math.min(a.x1, b.x1) - 3;
+    if (y1 - y0 < 4 || x1 - x0 < 8) return false;
+    let ink = 0, tot = 0;
+    for (let y = y0; y <= y1; y += 2) {
+      const base = y * W;
+      for (let x = x0; x <= x1; x += 2) { tot++; if (mask[base + x]) ink++; }
+    }
+    return tot > 0 && ink / tot > 0.02;
+  };
+  const cellEdge = new Set();
+  for (let i = 0; i < bands.length; i++) {
+    for (let j = i + 1; j < bands.length; j++) {
+      const a = bands[i], b = bands[j];
+      const gap = Math.abs(b.top - a.top);
+      if (gap < 8 || gap > H * 0.3) continue;
+      if (Math.abs(a.x0 - b.x0) > 3 || Math.abs(a.x1 - b.x1) > 3) continue;
+      if (!joined(a, b) || !written(a, b)) continue;
+      cellEdge.add(a); cellEdge.add(b);
+    }
+  }
+
+  return { W, H, bands: bands.filter(b => !cellEdge.has(b)), data: d, mask };
 }
 
 /** Height of the label sitting just left of a line — used to match font size.
@@ -1059,6 +1107,7 @@ function paintItems() {
     const d = itemEl(it);
     if (S.sel === it.id) d.classList.add('sel');
   });
+  hintsSoon();
 }
 function relayoutItems() {
   S.items.forEach(it => {
@@ -1082,6 +1131,7 @@ function select(id) {
   S.sel = id;
   $$('.it').forEach(d => d.classList.toggle('sel', d.dataset.id === id));
   syncBars();
+  if (prev && prev.id !== id) hintsSoon();
 }
 
 function syncBars() {
@@ -1188,6 +1238,10 @@ pagesEl.addEventListener('pointerdown', e => {
   // nothing armed: clicking straight into an empty tick box ticks it
   const B = findBox(p, x, y, 0.002);
   if (B) { e.preventDefault(); clearBoxCursor(); cycleBox(pi, B, 'check'); return void markSpot(pi, boxKey(pi, B)); }
+
+  // …and tapping a marked-up blank line starts typing on it
+  const hint = findHint(p, x, y);
+  if (hint) return armHintTap(e, pi, hint);
 
   focusStage();
   leaveSpot();
@@ -1421,6 +1475,7 @@ function edit(d) {
 }
 
 function removeItem(id) {
+  hintsSoon();
   const i = S.items.findIndex(x => x.id === id);
   if (i < 0) return;
   const it = S.items[i];
@@ -1700,6 +1755,105 @@ function spotsForPage(pi) {
   return rows.flatMap(r => r.items.sort((a, b) => a.x - b.x));
 }
 
+/* ============================================== TAPPABLE BLANKS
+   A declared form field shows you where to type. A blank line does not — so
+   draw one. Every line the scan finds gets a faint box sitting on it, which
+   makes the guess visible and gives you something to aim at: tap it and you
+   are typing, no need to reach for the Text tool first. The Text tool still
+   places a box anywhere you like.
+
+   The boxes are decoration only — `pointer-events: none` — because the page
+   already owns the gesture. Letting them take it would break scrolling. */
+
+/** where you would write on this line, 0-1 in the page's display frame */
+const hintRect = L => ({
+  x0: L.x0, x1: L.x1,
+  y0: L.y - L.fs * 1.45, y1: L.y + 0.002,
+});
+
+function placeHint(p, h) {
+  const rot = totalRot(p);
+  const [Wl, Hl] = localDims(p.lw, p.lh, rot);
+  const [ux, uy] = unrotXY(rot, h.r.x0, h.r.y0);
+  const st = h.el.style;
+  st.left = (ux * p.lw) + 'px';
+  st.top = (uy * p.lh) + 'px';
+  st.width = ((h.r.x1 - h.r.x0) * Wl) + 'px';
+  st.height = ((h.r.y1 - h.r.y0) * Hl) + 'px';
+  st.transform = rot ? `rotate(${-norm4(rot)}deg)` : '';
+}
+
+function paintHints() {
+  S.pageBox.forEach((p, pi) => {
+    p.layer.querySelectorAll('.linehint').forEach(e => e.remove());
+    p.hints = [];
+    if (!S.pdf || !p.scanKey) return;
+    for (const spot of spotsForPage(pi)) {
+      if (spot.kind !== 'line') continue;
+      // once something is on the line, the thing itself is the target
+      if (S.items.some(i => i.page === pi && i.lineKey === spot.key)) continue;
+      const el = document.createElement('div');
+      el.className = 'linehint';
+      const h = { L: spot.L, key: spot.key, r: hintRect(spot.L), el };
+      placeHint(p, h);
+      p.layer.append(el);
+      p.hints.push(h);
+    }
+  });
+}
+function layoutHints() {
+  S.pageBox.forEach(p => (p.hints || []).forEach(h => placeHint(p, h)));
+}
+let hintsT;
+function hintsSoon() { clearTimeout(hintsT); hintsT = setTimeout(paintHints, 40); }
+
+/** the tappable blank under a point, if any */
+function findHint(p, x, y, pad = 0.003) {
+  for (const h of p.hints || []) {
+    if (x >= h.r.x0 - pad && x <= h.r.x1 + pad &&
+        y >= h.r.y0 - pad && y <= h.r.y1 + pad) return h;
+  }
+  return null;
+}
+
+/** start typing on a line — from a tap, from Tab, or from the Next button */
+function textOnLine(pi, L, key, focus = true) {
+  const p = S.pageBox[pi];
+  let it = S.items.find(i => i.page === pi && i.lineKey === key);
+  if (!it) {
+    const rot = totalRot(p), fs = L.fs;
+    it = { id: uid(), page: pi, rot, type: 'text',
+           x: clamp(L.x0 + 0.006, 0, .97),
+           y: clamp(L.y - fs * (BASELINE + 0.06), 0, .99),
+           fs, color: COLORS[0], text: '', lineKey: key };
+    push(); S.items.push(it); itemEl(it); flashLine(p, L); saveSoon();
+  }
+  select(it.id);
+  markSpot(pi, key);
+  hintsSoon();
+  if (focus) { const d = elOf(it.id); if (d) edit(d); }
+  return it;
+}
+
+/** A press on a blank might be the start of a scroll. Wait for the release
+    and only treat it as a tap if the finger stayed put. */
+function armHintTap(e, pi, hint) {
+  const sx = e.clientX, sy = e.clientY, t0 = performance.now(), pid = e.pointerId;
+  const off = () => {
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', off);
+  };
+  const up = ev => {
+    if (ev.pointerId !== pid) return;
+    off();
+    if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 8) return;   // a scroll
+    if (performance.now() - t0 > 700) return;                        // a long press
+    textOnLine(pi, hint.L, hint.key);
+  };
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', off);
+}
+
 /** Move the cursor onto a spot the user just acted on, so Next carries on
     from there. A bare tap on the page deliberately does not do this — it
     should leave you where you were. */
@@ -1816,17 +1970,7 @@ async function enterSpot(s) {
   }
 
   if (s.kind === 'line') {
-    let it = S.items.find(i => i.page === s.page && i.lineKey === s.key);
-    if (!it) {
-      const rot = totalRot(p);
-      const fs = s.L.fs;
-      it = { id: uid(), page: s.page, rot, type: 'text',
-             x: clamp(s.L.x0 + 0.006, 0, .97),
-             y: clamp(s.L.y - fs * (BASELINE + 0.06), 0, .99),
-             fs, color: COLORS[0], text: '', lineKey: s.key };
-      push(); S.items.push(it); itemEl(it); flashLine(p, s.L); saveSoon();
-    }
-    select(it.id);
+    const it = textOnLine(s.page, s.L, s.key, false);
     scrollToSpot(p, s.x, s.y);
     const d = elOf(it.id);
     if (d) edit(d);
@@ -2634,4 +2778,4 @@ if ('launchQueue' in window) {
 
 window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fieldChanged,
                 pageBoxes, findBox, ensureScan, spotsForPage, spotsOf, moveSpot, KB, fitViewport,
-                pageBg, forget };
+                pageBg, forget, paintHints, findHint, textOnLine };

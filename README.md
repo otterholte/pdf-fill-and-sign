@@ -16,10 +16,11 @@ No account. No upload. No trial. No watermark. No surprise paywall.
   groups and dropdowns. On export the values go back through the document's own
   form and it is flattened, so the recipient gets a finished page, not a form they
   can type over.
-- **Snap to blank lines** — for the far more common case of a PDF with no fields
-  at all: tap near an underscore run or a drawn rule and the text
-  lands *on* it, left-aligned to its start and sized to match the label beside it.
-  No dragging or resizing needed for the common case. Signatures snap the same way.
+- **Blank lines you can just tap** — for the far more common case of a PDF with no
+  fields at all, every rule the scan finds gets a faint box drawn on it. Tap one and
+  you are typing, left-aligned to the line's start and sized to match its label — no
+  reaching for the Text tool first, no dragging or resizing. The Text tool still
+  places a box anywhere you like, and signatures snap to lines the same way.
 - **Text** — tap anywhere to drop a text box; drag it around before or after typing,
   resize, recolour (black / blue / red)
 - **Signature** — draw it, type it in a handwriting face, or photograph one on paper
@@ -172,6 +173,26 @@ rather than to the bottom of the clamp; that fallback is the difference between 
 sensible box and a 6pt one.
 
 The whole scan is cached per page and only runs once per rotation.
+
+## Making the guesses visible
+
+A declared form field shows you where to type; a blank line does not. So the app draws
+one. Each line the scan finds gets a faint box sitting on it — which makes the guess
+visible *and* gives you something to aim at. Tapping it starts a text box on that line,
+the same object Tab and the Next button create.
+
+The boxes are decoration only, `pointer-events: none`: the page already owns the
+gesture, and letting an overlay take it would break scrolling. The page's own handler
+hit-tests them, and a press only counts as a tap if the finger stayed within 8px — so a
+scroll that happens to start on a blank is still a scroll.
+
+One consequence of drawing the guesses is that bad ones become obvious. That surfaced a
+real false positive: the borders of a table cell are long, thin, isolated rules and pass
+every line test, so the cell was being offered as somewhere to write — with the box drawn
+over the text already in it. Two rules of the same width joined down both sides are the
+edges of a rectangle rather than two blanks, and if that rectangle already has ink in it,
+it is a table cell and neither edge is offered. An *empty* bordered box still is, because
+that is a real place to write.
 
 ## Reading order
 
