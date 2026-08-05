@@ -252,13 +252,19 @@ async function buildPages(rots) {
     num.className = 'page-num'; num.textContent = `${i}/${S.pdf.numPages}`;
     el.append(cv, num, layer);
     pagesEl.append(el);
-    S.pageBox.push({
+    const box = {
       page, el, cv, layer, fieldWrap,
       uw: un.width, uh: un.height,
       baseRot: ((page.rotate || 0) % 360 + 360) % 360,
       userRot: (rots && rots[i - 1]) || 0,
       fields: await readFields(page),
-    });
+    };
+    /* Browsers may throw a canvas's pixels away under memory pressure and
+       hand it back blank. Say we want it back rather than letting it stay
+       lost, and redraw when it returns. */
+    cv.addEventListener('contextlost', e => { e.preventDefault(); forget(box); });
+    cv.addEventListener('contextrestored', () => { forget(box); renderSoon(); });
+    S.pageBox.push(box);
   }
   seedFieldValues();
   layoutPages();
@@ -346,8 +352,21 @@ function pageBg(p) {
   if (!p.readyKey) return '#fff';               // nothing painted yet — don't cache black
   if (p.bg && p.bgKey === p.readyKey) return p.bg;
   try {
-    const d = p.cv.getContext('2d').getImageData(2, 2, 1, 1).data;
-    p.bg = `rgb(${d[0]},${d[1]},${d[2]})`;
+    /* Sample a few corners and keep the lightest. A single sample lands on
+       ink often enough on a busy page, and if the canvas has been blanked it
+       reads pure black — which is the last colour you want painted behind a
+       form field. */
+    const ctx = p.cv.getContext('2d');
+    const pts = [[2, 2], [p.cv.width - 3, 2], [2, p.cv.height - 3]];
+    let best = null, lum = -1;
+    for (const [x, y] of pts) {
+      if (x < 0 || y < 0) continue;
+      const d = ctx.getImageData(x, y, 1, 1).data;
+      const l = d[0] * 299 + d[1] * 587 + d[2] * 114;
+      if (l > lum) { lum = l; best = `rgb(${d[0]},${d[1]},${d[2]})`; }
+    }
+    // essentially black everywhere means a blanked canvas, not a page colour
+    p.bg = (best && lum > 24000) ? best : '#fff';
   } catch (_) { p.bg = '#fff'; }
   p.bgKey = p.readyKey;
   return p.bg;
@@ -507,6 +526,27 @@ const toUnrot = (p, dx, dy) => unrotXY(totalRot(p), dx, dy);
 
 let renderT;
 function renderSoon() { clearTimeout(renderT); renderT = setTimeout(renderVisible, 140); }
+
+/** drop everything we believe about a page's pixels */
+function forget(p) {
+  p.renderKey = null; p.readyKey = null;
+  p.bg = null; p.bgKey = null;          // the sampled page colour came from those pixels
+}
+
+/* Android reclaims GPU memory from backgrounded tabs, and a canvas created
+   with `alpha: false` reads back as solid black once its backing store is
+   gone — which the app would happily treat as a correctly rendered page, and
+   then sample that black as the page's background colour. Coming back into
+   view, assume nothing and redraw. */
+function refreshOnReturn() {
+  if (!S.pdf || !S.pageBox.length) return;
+  S.pageBox.forEach(forget);
+  renderVisible();
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshOnReturn();
+});
+window.addEventListener('pageshow', refreshOnReturn);
 
 async function renderOne(p, dpr) {
   const key = p.dw + ':' + totalRot(p);
@@ -2593,4 +2633,5 @@ if ('launchQueue' in window) {
 })();
 
 window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fieldChanged,
-                pageBoxes, findBox, ensureScan, spotsForPage, spotsOf, moveSpot, KB, fitViewport };
+                pageBoxes, findBox, ensureScan, spotsForPage, spotsOf, moveSpot, KB, fitViewport,
+                pageBg, forget };

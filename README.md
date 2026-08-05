@@ -194,6 +194,23 @@ or a signature to a line, ticking a box, or grabbing something already placed. A
 tap on the page leaves it where it was, so Next carries on from the field you had open
 rather than from wherever your thumb landed.
 
+## Why the page sometimes came back black
+
+A canvas created with `alpha: false` has no transparent state to fall back on: once
+the browser reclaims its backing store — which Android does routinely to a
+backgrounded tab — reading it gives solid black. The app kept a `renderKey` saying
+"already drawn at this size", so it never redrew, and `pageBg()` then sampled that
+black as the page colour and painted it behind every form field.
+
+Two defences. Coming back into view (`visibilitychange`, `pageshow`) or getting a
+`contextrestored` event throws away everything the app believes about a page's pixels
+and redraws whatever is on screen. And `pageBg()` samples three corners rather than
+one, keeps the lightest, and refuses an essentially-black result outright — a form
+field's backing fill is never legitimately black, so white is the safer answer.
+
+Nothing you typed is affected either way: text, marks and field values live in state
+and the DOM, not on the canvas.
+
 ## Keeping the bars on screen
 
 An on-screen keyboard is two different problems. Chrome honours
