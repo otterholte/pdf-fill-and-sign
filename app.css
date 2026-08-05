@@ -24,6 +24,8 @@
   --accent-soft:#e9eeff;
   --danger:#c8202a;
   --ok:#12855b;
+  --tools:#0f8a5f;          /* the sibling tools share this green */
+  --tools-soft:#e2f5ec;
   --stage:#dfe2e7;
   --sheet:#ffffff;
   --radius:14px;
@@ -40,6 +42,7 @@
     --line:#262c34; --ink:#eef1f5; --ink-contrast:#0f1216;
     --accent:#7ba0ff; --accent-soft:#1a2540;
     --danger:#ff6b6b; --ok:#3ecf8e; --stage:#08090c; --sheet:#161a20;
+    --tools:#3ecf8e; --tools-soft:#123227;
     --shadow:0 1px 2px rgba(0,0,0,.4), 0 10px 30px rgba(0,0,0,.45);
   }
 }
@@ -155,7 +158,9 @@ a:hover{text-decoration:underline;}
 .fine{margin:0 0 6px;font-size:12.5px;color:var(--fg-3);}
 
 /* ---------- editor ---------- */
-.editor{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--stage);}
+/* left/right/top rather than inset, so the visual-viewport fallback can set
+   top and height without fighting a bottom:0 it cannot see */
+.editor{position:fixed;left:0;right:0;top:0;height:100%;display:flex;flex-direction:column;background:var(--stage);}
 .editor[hidden]{display:none;}
 .topbar{
   flex:none;display:flex;align-items:center;gap:4px;
@@ -169,7 +174,7 @@ a:hover{text-decoration:underline;}
 /* move from blank to blank with no keyboard */
 .jumpbar{
   flex:none;display:flex;align-items:stretch;gap:6px;
-  padding:6px 8px;background:var(--bg);border-bottom:1px solid var(--line);z-index:4;
+  padding:6px 8px;background:var(--bg);border-bottom:1px solid var(--line);z-index:6;
 }
 .jump{
   display:flex;align-items:center;justify-content:center;gap:4px;
@@ -185,6 +190,12 @@ a:hover{text-decoration:underline;}
 }
 .jump-mid span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .jump-mid.is-act{color:var(--accent);background:var(--accent-soft);font-weight:650;}
+
+/* With the keyboard up there is no room for the tool row, and you are typing,
+   not placing — give the space back to the document. Tapping the page brings
+   it straight back. */
+.editor.kb .toolbar,
+.editor.kb .kbhint{display:none;}
 
 .stage{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:14px 0 0;}
 .pages{display:flex;flex-direction:column;align-items:center;gap:14px;padding-bottom:24px;width:max-content;min-width:100%;}
@@ -397,7 +408,27 @@ select.fld{padding-right:0;}
 .namefield input{display:block;width:100%;margin-top:8px;padding:13px;font-size:15px;border-radius:12px;border:1px solid var(--line);background:var(--bg-2);color:var(--fg);outline:none;text-transform:none;letter-spacing:normal;font-weight:400;}
 .namefield input:focus{border-color:var(--accent);}
 #btnShare{margin-top:10px;}
-.pitch-card{margin-top:52px;padding:20px;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg-2);}
+/* where to go once the job is done — one quiet group, three clear exits */
+.next-up{margin-top:34px;padding-top:22px;border-top:1px solid var(--line);}
+.next-lead{margin:0 0 12px;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);}
+.next-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;}
+.next-tile{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+  padding:16px 8px;border-radius:14px;border:1px solid transparent;
+  font-size:12.5px;font-weight:650;letter-spacing:-.01em;text-align:center;line-height:1.2;
+  transition:transform .12s ease, opacity .12s ease;
+}
+.next-tile:hover{text-decoration:none;opacity:.85;}
+.next-tile:active{transform:scale(.97);}
+.next-tile svg{width:21px;height:21px;}
+.t-new{background:var(--accent-soft);color:var(--accent);}
+.t-tools{background:var(--tools-soft);color:var(--tools);}
+.t-home{background:var(--bg-2);border-color:var(--line);color:var(--fg-2);}
+
+.confetti{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:5;}
+.confetti[hidden]{display:none;}
+
+.pitch-card{margin-top:34px;padding:20px;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg-2);}
 .pitch-card h3{font-size:15.5px;margin:0 0 8px;letter-spacing:-.01em;}
 .pitch-card p{font-size:14px;line-height:1.6;color:var(--fg-2);margin:0 0 14px;}
 

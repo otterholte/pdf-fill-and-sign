@@ -193,12 +193,15 @@ async function loadDoc(buf, name, items, rots, fields) {
   clearBoxCursor();
   KB.pi = 0; KB.key = null; KB.cur = null; KB.at = 0; KB.of = 0;
   syncJump();
+  fitViewport();
   focusStage();
   saveSoon();
 }
 
 function closeDoc() {
+  stopConfetti();
   $('#editor').hidden = true;
+  fitViewport();
   $('#done').hidden = true;
   $('#home').hidden = false;
   pagesEl.innerHTML = '';
@@ -1659,6 +1662,44 @@ async function moveSpot(dir) {
   toast('Nothing obvious to fill in here — use the toolbar to add a text box.', 3200);
 }
 
+/* ============================================== KEEPING THE BARS ON SCREEN
+   An on-screen keyboard is handled two different ways. Chrome honours
+   `interactive-widget=resizes-content` in the viewport meta and shrinks the
+   layout viewport, so the flex column simply gets shorter and every bar stays
+   put. Safari does not: it leaves the layout viewport alone, shrinks the
+   *visual* viewport and scrolls it, which slides a fixed element's top edge
+   off the screen — taking Back / Next with it. So follow the visual viewport
+   directly and keep the editor inside whatever is actually visible. */
+const vp = window.visualViewport;
+
+function fitViewport() {
+  const v = window.visualViewport;
+  const ed = $('#editor');
+  if (!v || !ed) return;
+  if (ed.hidden) { ed.style.height = ''; ed.style.top = ''; ed.classList.remove('kb'); return; }
+  ed.style.height = v.height + 'px';
+  ed.style.top = v.offsetTop + 'px';
+
+  /* Two ways to know a keyboard is up. Safari leaves the layout viewport
+     alone, so a big gap between the two heights gives it away. Chrome
+     resizes the layout viewport instead, which closes that gap — there,
+     something editable having focus on a touch device is the signal. */
+  const shrunk = window.innerHeight - v.height > 150;
+  const ae = document.activeElement;
+  const typing = !HAS_KEYBOARD && !!ae && ed.contains(ae) &&
+    (ae.isContentEditable || ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
+  ed.classList.toggle('kb', shrunk || typing);
+}
+
+if (vp) {
+  vp.addEventListener('resize', fitViewport);
+  vp.addEventListener('scroll', fitViewport);
+  window.addEventListener('orientationchange', () => setTimeout(fitViewport, 250));
+}
+// focus and blur move the keyboard; the viewport event can lag behind them
+document.addEventListener('focusin', () => setTimeout(fitViewport, 60), true);
+document.addEventListener('focusout', () => setTimeout(fitViewport, 60), true);
+
 /* ---------------------------------------------------------- the jump bar */
 const SPOT_LABEL = { field: 'Form field', line: 'Blank line', box: 'Tick this box' };
 
@@ -2344,9 +2385,94 @@ $('#btnFinish').addEventListener('click', async () => {
   $('#btnShare').hidden = !canShareFiles();
   $('#editor').hidden = true;
   $('#done').hidden = false;
+  confetti();
 });
 
-$('#btnContinue').addEventListener('click', () => { $('#done').hidden = true; $('#editor').hidden = false; });
+$('#btnContinue').addEventListener('click', () => {
+  stopConfetti();
+  $('#done').hidden = true; $('#editor').hidden = false;
+  fitViewport();
+});
+$('#btnHome').addEventListener('click', () => { stopConfetti(); closeDoc(); });
+$('#btnNewDoc').addEventListener('click', () => {
+  stopConfetti();
+  closeDoc();
+  $('#fileInput').click();          // still inside the click, so the picker opens
+});
+
+/* ------------------------------------------------------------- confetti
+   A small reward for finishing, drawn in about forty lines: paper
+   rectangles thrown upward, pulled down by gravity, spinning and flipping
+   edge-on as they fall. Skipped entirely when the reader asked for less
+   motion. */
+const CONFETTI = ['#1b4fd8', '#0f8a5f', '#f5a524', '#c8202a', '#8b5cf6', '#ec4899', '#06b6d4'];
+let confettiRun = 0;
+
+function stopConfetti() {
+  confettiRun++;
+  const cv = $('#confetti');
+  if (cv) cv.hidden = true;
+}
+
+function confetti() {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const cv = $('#confetti');
+  if (!cv) return;
+  cv.hidden = false;                            // lay it out before measuring
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (!W || !H) { cv.hidden = true; return; }
+  const dpr = clamp(window.devicePixelRatio || 1, 1, 2);
+  cv.width = Math.round(W * dpr);
+  cv.height = Math.round(H * dpr);
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const bits = [];
+  const n = Math.round(clamp(W / 4.5, 70, 140));
+  for (let i = 0; i < n; i++) {
+    bits.push({
+      x: W * (0.12 + Math.random() * 0.76),
+      y: H * 0.26 + Math.random() * 24,
+      vx: (Math.random() - 0.5) * 7.5,
+      vy: -5.5 - Math.random() * 8,
+      w: 5 + Math.random() * 5,
+      h: 8 + Math.random() * 6,
+      rot: Math.random() * Math.PI,
+      vr: (Math.random() - 0.5) * 0.32,
+      spin: 0.05 + Math.random() * 0.18,
+      phase: Math.random() * 6,
+      c: CONFETTI[(Math.random() * CONFETTI.length) | 0],
+    });
+  }
+
+  const run = ++confettiRun;
+  const t0 = performance.now();
+  const step = now => {
+    if (run !== confettiRun) return;
+    const t = now - t0;
+    ctx.clearRect(0, 0, W, H);
+    let alive = 0;
+    for (const b of bits) {
+      b.vy += 0.30;                              // gravity
+      b.vx *= 0.995;                             // a little drag
+      b.x += b.vx; b.y += b.vy;
+      b.rot += b.vr; b.phase += b.spin;
+      if (b.y > H + 40) continue;
+      alive++;
+      ctx.save();
+      ctx.globalAlpha = clamp(1 - (t - 1700) / 1100, 0, 1);
+      ctx.translate(b.x, b.y);
+      ctx.rotate(b.rot);
+      ctx.scale(1, Math.abs(Math.cos(b.phase)) * 0.8 + 0.2);   // twisting paper
+      ctx.fillStyle = b.c;
+      ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h);
+      ctx.restore();
+    }
+    if (alive && t < 3200) requestAnimationFrame(step);
+    else { ctx.clearRect(0, 0, W, H); cv.hidden = true; }
+  };
+  requestAnimationFrame(step);
+}
 
 function finalName() {
   let n = ($('#saveName').value || outName()).replace(/[\\/:*?"<>|]/g, '').trim() || outName();
@@ -2438,4 +2564,4 @@ if ('launchQueue' in window) {
 })();
 
 window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fieldChanged,
-                pageBoxes, findBox, ensureScan, spotsForPage, spotsOf, moveSpot, KB };
+                pageBoxes, findBox, ensureScan, spotsForPage, spotsOf, moveSpot, KB, fitViewport };

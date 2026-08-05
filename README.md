@@ -52,7 +52,9 @@ No account. No upload. No trial. No watermark. No surprise paywall.
   the page, and objects added to an already-sideways page land upright.
 - **Undo / redo**, duplicate, bring forward, send backward
 - **Save or Share** — download the PDF, or hand it to the device share sheet (Gmail,
-  Outlook, Messages, Drive, Files, …)
+  Outlook, Messages, Drive, Files, …). The finished screen also offers three clear
+  exits — start another PDF, the other tools, or home — and a little confetti, which
+  is skipped for anyone who asked for reduced motion.
 - **Installable PWA** — add to home screen, works fully offline
 - **Android share target** — share a PDF *into* Fill &amp; Sign from any app
 - **Desktop file handler** — set as the default opener for `.pdf`
@@ -168,6 +170,22 @@ rather than to the bottom of the clamp; that fallback is the difference between 
 sensible box and a 6pt one.
 
 The whole scan is cached per page and only runs once per rotation.
+
+## Keeping the bars on screen
+
+An on-screen keyboard is two different problems. Chrome honours
+`interactive-widget=resizes-content` and shrinks the *layout* viewport, so the editor's
+flex column simply gets shorter and every bar stays where it was. Safari ignores that:
+it leaves the layout viewport alone, shrinks the *visual* viewport and scrolls it —
+which slides a `position: fixed` element's top edge off the screen, taking Back / Next
+with it. So the editor also follows `visualViewport` directly, setting its own `top` and
+`height` to whatever is actually visible.
+
+Detecting the keyboard differs for the same reason: on Safari the gap between
+`innerHeight` and `visualViewport.height` gives it away, while on Chrome that gap closes,
+so focus on an editable element on a touch device is the signal instead. Either way the
+tool row hides while typing — you are writing, not placing, and the space is better spent
+on the document.
 
 ## How the coordinate system works
 
