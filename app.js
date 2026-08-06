@@ -171,6 +171,7 @@ async function openFile(file) {
   try {
     const buf = await file.arrayBuffer();
     await loadDoc(buf, file.name || 'Document.pdf', [], null);
+    askView(file.name || 'Document.pdf');
   } catch (err) {
     console.error(err);
     const locked = err?.name === 'PasswordException' || /password/i.test(err?.message || '');
@@ -192,10 +193,14 @@ async function loadDoc(buf, name, items, rots, fields) {
   S.pdf = await pdfjsLib.getDocument({ data: buf.slice(0), isEvalSupported: false }).promise;
 
   $('#docName').textContent = name;
+  $('#simName').textContent = name;
   $('#docPages').textContent = `${S.pdf.numPages} page${S.pdf.numPages > 1 ? 's' : ''} · stays on this device`;
   $('#home').hidden = true;
   $('#done').hidden = true;
+  $('#pick').hidden = true;
+  $('#simple').hidden = true;
   $('#editor').hidden = false;
+  SIM = { qs: [], scanned: false, built: false };
 
   await buildPages(rots);
   syncBars();
@@ -218,6 +223,10 @@ function closeDoc() {
   S.pdf = null; S.bytes = null; S.items = []; S.sel = null; S.tool = null; lastBlob = null;
   S.fields = {}; S.fields0 = {}; formToldOnce = false;
   S.pageBox = [];
+  SIM = { qs: [], scanned: false, built: false };
+  simSignTarget = null;
+  $('#simple').hidden = true;
+  $('#pick').hidden = true;
   clearTimeout(hintsT);
   clearBoxCursor();
   KB.pi = 0; KB.key = null; KB.cur = null; KB.at = 0; KB.of = 0;
@@ -1695,16 +1704,22 @@ const KB = { pi: 0, key: null, box: null, el: null, cur: null, at: 0, of: 0 };
 const lineKey = (pi, L) => `l:${pi}:${Math.round(L.y * 1e4)}:${Math.round(L.x0 * 1e4)}`;
 const boxKey  = (pi, B) => `b:${pi}:${Math.round(B.cy * 1e4)}:${Math.round(B.cx * 1e4)}`;
 
-/** where a form field sits on the page as displayed, 0–1 */
+/** Where a form field sits on the page as displayed, 0–1.
+
+    Taken from the PDF's own coordinates rather than the overlay's measured
+    box. Measuring the DOM meant the answer depended on the editor being on
+    screen — with it hidden every rect came back zero, every field spot
+    vanished, and the blank lines underneath got offered in their place. It
+    also removes the sub-pixel drift you get from reading a rect mid-scroll. */
 function fieldRect(p, f) {
-  if (!f.el) return null;
-  const pr = p.el.getBoundingClientRect();
-  if (!pr.width || !pr.height) return null;
-  const fr = f.el.getBoundingClientRect();
-  return {
-    x0: (fr.left - pr.left) / pr.width, y0: (fr.top - pr.top) / pr.height,
-    x1: (fr.right - pr.left) / pr.width, y1: (fr.bottom - pr.top) / pr.height,
-  };
+  try {
+    const vp = p.page.getViewport({ scale: 1, rotation: totalRot(p) });
+    const r = vp.convertToViewportRectangle(f.rect);
+    return {
+      x0: Math.min(r[0], r[2]) / vp.width, x1: Math.max(r[0], r[2]) / vp.width,
+      y0: Math.min(r[1], r[3]) / vp.height, y1: Math.max(r[1], r[3]) / vp.height,
+    };
+  } catch (_) { return null; }
 }
 
 function spotsForPage(pi) {
@@ -1753,6 +1768,142 @@ function spotsForPage(pi) {
     else rows.push({ cy: s.cy, h: s.h, items: [s] });
   }
   return rows.flatMap(r => r.items.sort((a, b) => a.x - b.x));
+}
+
+/* ================================================ READING THE QUESTIONS
+   To lay a form out as a plain list, each blank needs the words that belong
+   to it. The PDF already carries its text with positions, so this is
+   measurement rather than guesswork: pull the words, glue adjacent ones back
+   into phrases, and for every spot take the phrase that reads as its label.
+
+   Forms label things in three places and only three. Beside it on the same
+   row — "Phone: ______". Above it — a heading over a ruled blank. And for a
+   tick box, to its right — "☐ I agree to the terms". Look in that order.
+
+   A page with no text at all is a scan. Nothing here fails; the blanks are
+   simply numbered instead, and stay just as fillable. */
+
+const LABEL_MAX = 78;
+
+/** every word on a page, in the same 0–1 display frame as everything else */
+async function pageWords(p) {
+  const key = 'w' + totalRot(p);
+  if (p.wordKey === key) return p.words;
+  p.wordKey = key;
+  p.words = [];
+  try {
+    const vp = p.page.getViewport({ scale: 1, rotation: totalRot(p) });
+    const tc = await p.page.getTextContent();
+    const out = [];
+    for (const it of tc.items) {
+      if (!it.str || !it.str.trim()) continue;
+      const m = pdfjsLib.Util.transform(vp.transform, it.transform);
+      const h = Math.hypot(m[2], m[3]) || 8;
+      const w = it.width * Math.hypot(vp.transform[0], vp.transform[1]) || 0;
+      out.push({
+        s: it.str,
+        x0: m[4] / vp.width,
+        x1: (m[4] + w) / vp.width,
+        cy: (m[5] - h * 0.35) / vp.height,     // middle of the glyphs, not the baseline
+        h: h / vp.height,
+      });
+    }
+    // glue neighbouring words back into the phrase a person would read
+    out.sort((a, b) => a.cy - b.cy || a.x0 - b.x0);
+    const runs = [];
+    for (const w of out) {
+      const r = runs[runs.length - 1];
+      if (r && Math.abs(r.cy - w.cy) < Math.max(r.h, w.h) * 0.6 &&
+          w.x0 - r.x1 < Math.max(r.h, w.h) * 1.2 && w.x0 >= r.x0) {
+        r.s += (w.x0 - r.x1 > r.h * 0.18 ? ' ' : '') + w.s;
+        r.x1 = Math.max(r.x1, w.x1);
+      } else runs.push({ ...w });
+    }
+    p.words = runs;
+  } catch (_) { p.words = []; }
+  return p.words;
+}
+
+/** tidy a captured phrase into something that reads as a question */
+function tidyLabel(s) {
+  let t = (s || '').replace(/\s+/g, ' ').trim();
+  t = t.replace(/[\s._:\-–—]+$/, '');            // trailing colons, dashes, dot leaders
+  t = t.replace(/^[\s._:\-–—•*]+/, '');
+  if (t.length > LABEL_MAX) t = t.slice(0, LABEL_MAX - 1).replace(/\s\S*$/, '') + '…';
+  return t;
+}
+
+/** the words belonging to one spot, or null if the page has nothing to read */
+function labelFor(words, sp, skipRight) {
+  if (!words.length) return null;
+  const rowTol = Math.max(0.008, sp.h * 0.9);
+
+  // a tick box is labelled to its right, and nothing else comes close
+  const ticky = !skipRight && (sp.kind === 'box' ||
+    (sp.kind === 'field' && (sp.f?.type === 'check' || sp.f?.type === 'radio')));
+  if (ticky) {
+    let best = null, bd = 0.10;
+    for (const r of words) {
+      if (Math.abs(r.cy - sp.cy) > rowTol) continue;
+      const d = r.x0 - sp.x;
+      if (d < -0.004 || d > bd) continue;
+      bd = d; best = r;
+    }
+    if (best) return tidyLabel(best.s);
+  }
+
+  // beside it, on the same row
+  let best = null, bd = 0.30;
+  for (const r of words) {
+    if (Math.abs(r.cy - sp.cy) > rowTol) continue;
+    const d = sp.x - r.x1;
+    if (d < -0.004 || d > bd) continue;
+    bd = d; best = r;
+  }
+  if (best) return tidyLabel(best.s);
+
+  /* Above it. A row of blanks shares one row of headings, so height alone
+     ties — "State" and "ZIP code" sit at exactly the same distance. Score
+     horizontal distance too, or every blank in the row takes the last
+     heading it saw. */
+  let ab = null, best2 = Infinity;
+  for (const r of words) {
+    const dy = sp.cy - r.cy;
+    if (dy <= 0 || dy > 0.055) continue;
+    if (r.x1 < sp.x - 0.02 || r.x0 > sp.x + 0.35) continue;
+    const score = dy + Math.abs(r.x0 - sp.x) * 0.6;
+    if (score < best2) { best2 = score; ab = r; }
+  }
+  return ab ? tidyLabel(ab.s) : '';
+}
+
+/** every spot in the document, in reading order, with its question */
+async function readQuestions() {
+  const out = [];
+  let seen = 0;
+  for (let pi = 0; pi < S.pageBox.length; pi++) {
+    const p = S.pageBox[pi];
+    await ensureScan(p);
+    const words = await pageWords(p);
+    seen += words.length;
+    for (const sp of spotsForPage(pi)) {
+      out.push({
+        ...sp,
+        label: labelFor(words, sp),
+        // what a *group* of buttons is asking, as opposed to one button's own text
+        askLabel: labelFor(words, sp, true),
+      });
+    }
+  }
+  // no readable text anywhere means a scan, not a page that happens to be bare
+  const scanned = seen === 0;
+  out.forEach((q, i) => {
+    q.n = i + 1;
+    if (!q.label) q.label = `Blank ${i + 1}`;
+    q.sign = /\bsign(ature|ed)?\b/i.test(q.label) && q.kind !== 'box';
+    q.dateish = /\bdate\b|\bd\.?o\.?b\.?\b|birth/i.test(q.label) && q.kind !== 'box';
+  });
+  return { questions: out, scanned };
 }
 
 /* ============================================== TAPPABLE BLANKS
@@ -2334,7 +2485,20 @@ $('#sigUse').addEventListener('click', async () => {
   try {
     const src = await buildSignature();
     if (!src) return;
-    await armSignature(src, $('#sigStamp').checked, currentGen());
+    if (simSignTarget) {
+      const t = simSignTarget; simSignTarget = null;
+      const img = new Image(); img.src = src; await img.decode();
+      sigSheet.hidden = true;
+      const old = simSigItem(t.q);
+      if (old) removeItem(old.id);
+      const it = placeSigOnLine(t.q.page, t.q.L, {
+        src, ar: img.height / img.width, stamp: $('#sigStamp').checked, gen: currentGen(),
+      });
+      it.sigLine = t.q.key;
+      t.paint();
+    } else {
+      await armSignature(src, $('#sigStamp').checked, currentGen());
+    }
     await rememberSig(src);
   } finally { busy(false); }
 });
@@ -2711,6 +2875,392 @@ $('#btnShare').addEventListener('click', async () => {
   }
 });
 
+
+/* ================================================ SIMPLE VIEW
+   The same document, laid out as one tall column of questions.
+
+   Nothing is converted. A card writes into exactly the object the page view
+   already draws — a declared field's value, a text item pinned to a blank
+   line, a mark inside a tick box — so Review is a change of view, and the
+   export path never learns this screen exists. */
+
+const simEl = () => $('#simple');
+let SIM = { qs: [], scanned: false, built: false };
+let simSignTarget = null;
+
+/* ---- reading and writing one question, whatever kind it is ---- */
+const simLineItem = q => S.items.find(i => i.page === q.page && i.lineKey === q.key);
+
+function simGet(q) {
+  if (q.kind === 'field') return S.fields[q.f.name];
+  if (q.kind === 'line') { const it = simLineItem(q); return it ? (it.text || '') : ''; }
+  return markInBox(q.page, q.B)?.type || null;
+}
+
+function simSetLine(q, v) {
+  let it = simLineItem(q);
+  if (!it) {
+    if (!v) return;
+    const p = S.pageBox[q.page], fs = q.L.fs;
+    it = { id: uid(), page: q.page, rot: totalRot(p), type: 'text',
+           x: clamp(q.L.x0 + 0.006, 0, .97),
+           y: clamp(q.L.y - fs * (BASELINE + 0.06), 0, .99),
+           fs, color: COLORS[0], text: '', lineKey: q.key };
+    markFieldHistory();
+    S.items.push(it);
+    itemEl(it);
+    hintsSoon();
+  }
+  it.text = v;
+  const d = elOf(it.id);
+  if (d && d.firstChild) d.firstChild.textContent = v;
+  saveSoon();
+}
+
+function simSetBox(q, type) {
+  const cur = markInBox(q.page, q.B);
+  if (cur && cur.type === type) return;
+  markFieldHistory();
+  if (cur) removeItem(cur.id);
+  if (type) placeInBox(q.page, q.B, type, false);
+  select(null);
+  saveSoon();
+}
+
+/* ---- placing a signature straight onto its line, no tapping about ---- */
+function placeSigOnLine(pi, L, sig) {
+  const p = S.pageBox[pi];
+  const rot = totalRot(p);
+  const [Wl, Hl] = localDims(p.lw, p.lh, rot);
+  const ar = sig.ar;
+  const hWant = clamp(L.fs * 2.6, 0.022, 0.10);
+  const w = clamp((hWant * Hl) / (Wl * ar), 0.05, Math.max(0.08, (L.x1 - L.x0) * 0.98));
+  const h = (w * Wl * ar) / Hl;
+  const it = {
+    id: uid(), page: pi, rot, type: 'sig',
+    x: clamp(L.x0 + 0.008, 0, 1 - w), y: clamp(L.y - h - 0.004, 0, 1),
+    w, ar, src: sig.src, gen: sig.gen || null,
+    stampMode: sig.stamp ? 'datetime' : 'none',
+  };
+  push();
+  S.items.push(it);
+  itemEl(it);
+  if (it.stampMode !== 'none') addStamp(it);
+  saveSoon();
+  return it;
+}
+const simSigItem = q => S.items.find(i => i.type === 'sig' && i.page === q.page && i.sigLine === q.key);
+
+/* ---- the cards ---- */
+function qCard(q, i) {
+  const d = document.createElement('div');
+  d.className = 'q-card';
+  d.dataset.q = q.key;
+
+  const labelText = (txt, forId) => {
+    const l = document.createElement(forId ? 'label' : 'span');
+    l.className = 'q-label';
+    if (forId) l.htmlFor = forId;
+    l.innerHTML = `<span class="q-num">${q.n}.</span> `;
+    l.append(document.createTextNode(txt));
+    return l;
+  };
+
+  /* a tick box, declared or drawn — one tap, and a way to swap the mark */
+  if (q.kind === 'box' || (q.kind === 'field' && q.f.type === 'check')) {
+    const on = () => q.kind === 'box' ? !!simGet(q) : !!S.fields[q.f.name];
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'q-toggle';
+    row.append(labelText(q.label));
+    const mark = document.createElement('span');
+    mark.className = 'q-mark';
+    mark.innerHTML = `<svg viewBox="0 0 24 24"><path d="M4.5 12.5 9.5 17.5 20 6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    row.append(mark);
+    d.append(row);
+
+    let alt = null;
+    if (q.kind === 'box') {
+      alt = document.createElement('button');
+      alt.type = 'button';
+      alt.className = 'q-alt';
+      alt.hidden = true;
+    }
+    const paint = () => {
+      const v = q.kind === 'box' ? simGet(q) : (on() ? 'check' : null);
+      d.classList.toggle('is-on', !!v);
+      mark.innerHTML = v === 'x'
+        ? `<svg viewBox="0 0 24 24"><path d="M5.5 5.5 18.5 18.5 M18.5 5.5 5.5 18.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>`
+        : `<svg viewBox="0 0 24 24"><path d="M4.5 12.5 9.5 17.5 20 6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      if (alt) {
+        alt.hidden = !v;
+        alt.textContent = v === 'x' ? 'Use a checkmark instead' : 'Use an ✗ instead';
+      }
+    };
+    row.addEventListener('click', () => {
+      if (q.kind === 'box') simSetBox(q, simGet(q) ? null : 'check');
+      else { markFieldHistory(); setField(q.f, !S.fields[q.f.name]); }
+      paint();
+    });
+    if (alt) {
+      d.append(alt);
+      alt.addEventListener('click', () => { simSetBox(q, simGet(q) === 'x' ? 'check' : 'x'); paint(); });
+    }
+    paint();
+    return d;
+  }
+
+  /* a radio group is one question with several answers */
+  if (q.kind === 'field' && q.f.type === 'radio') {
+    d.append(labelText(q.groupLabel || q.label));
+    const wrap = document.createElement('div');
+    wrap.className = 'q-opts';
+    q.group.forEach(g => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'q-opt';
+      b.textContent = g.label || g.f.on;
+      b.addEventListener('click', () => {
+        markFieldHistory();
+        setField(g.f, S.fields[g.f.name] === g.f.on ? '' : g.f.on);
+        [...wrap.children].forEach((c, k) =>
+          c.classList.toggle('is-on', S.fields[q.f.name] === q.group[k].f.on));
+      });
+      b.classList.toggle('is-on', S.fields[q.f.name] === g.f.on);
+      wrap.append(b);
+    });
+    d.append(wrap);
+    return d;
+  }
+
+  /* a dropdown the document declared */
+  if (q.kind === 'field' && q.f.type === 'choice') {
+    const id = 'qc' + i;
+    d.append(labelText(q.label, id));
+    const sel = document.createElement('select');
+    sel.id = id;
+    const blank = document.createElement('option');
+    blank.value = ''; blank.textContent = '—';
+    sel.append(blank);
+    q.f.options.forEach((label, k) => {
+      const o = document.createElement('option');
+      o.value = q.f.optionValues[k] ?? label; o.textContent = label;
+      sel.append(o);
+    });
+    sel.value = S.fields[q.f.name] ?? '';
+    sel.addEventListener('change', () => { markFieldHistory(); setField(q.f, sel.value); });
+    d.append(sel);
+    return d;
+  }
+
+  /* somewhere to sign */
+  if (q.sign && q.kind === 'line') {
+    d.append(labelText(q.label));
+    const row = document.createElement('div');
+    row.className = 'q-sign';
+    const prev = document.createElement('div');
+    prev.className = 'q-sig-prev';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-ghost sm';
+    const paint = () => {
+      const sig = simSigItem(q);
+      prev.innerHTML = '';
+      if (sig) { const im = new Image(); im.src = sig.src; im.alt = 'Your signature'; prev.append(im); }
+      btn.textContent = sig ? 'Change' : 'Add signature';
+    };
+    btn.addEventListener('click', () => { simSignTarget = { q, paint }; openSig(); });
+    row.append(prev, btn);
+    d.append(row);
+    paint();
+    return d;
+  }
+
+  /* everything else is words on a line */
+  const id = 'qi' + i;
+  d.append(labelText(q.label, id));
+  const multi = q.kind === 'field' && q.f.multiline;
+  const inp = document.createElement(multi ? 'textarea' : 'input');
+  if (!multi) inp.type = 'text';
+  inp.id = id;
+  inp.spellcheck = false;
+  if (q.kind === 'field' && q.f.maxLen) inp.maxLength = q.f.maxLen;
+  inp.value = simGet(q) ?? '';
+  inp.addEventListener('input', () => {
+    markFieldHistory();
+    if (q.kind === 'field') setField(q.f, inp.value);
+    else simSetLine(q, inp.value);
+  });
+
+  if (q.dateish && !multi) {
+    const row = document.createElement('div');
+    row.className = 'q-row';
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'q-chip';
+    chip.textContent = 'Today';
+    chip.addEventListener('click', () => {
+      inp.value = FMTS[0].f(new Date());
+      inp.dispatchEvent(new Event('input'));
+    });
+    row.append(inp, chip);
+    d.append(row);
+  } else d.append(inp);
+  return d;
+}
+
+/* ---- building the list ---- */
+function groupQuestions(qs) {
+  const out = [];
+  for (let i = 0; i < qs.length; i++) {
+    const q = qs[i];
+    if (q.kind === 'field' && q.f.type === 'radio') {
+      const name = q.f.name;
+      const group = [];
+      let j = i;
+      while (j < qs.length && qs[j].kind === 'field' && qs[j].f?.name === name) group.push(qs[j++]);
+      // the group's own question is whatever labels the first widget from further out
+      out.push({ ...q, group,
+                 groupLabel: group.length > 1 ? (q.askLabel || labelLeftOf(q)) : q.label });
+      i = j - 1;
+      continue;
+    }
+    out.push(q);
+  }
+  return out;
+}
+/* last resort for an unlabelled group: the field's own name, made readable */
+const labelLeftOf = q => {
+  const n = q.f?.name;
+  if (!n) return q.label;
+  const t = n.replace(/[_\-.]+/g, ' ').replace(/([a-z])([A-Z])/g, '$1 $2').trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+async function buildSimple() {
+  busy(true, 'Reading the form…');
+  try {
+    const r = await readQuestions();
+    SIM.qs = groupQuestions(r.questions);
+    SIM.qs.forEach((q, i) => {
+      q.n = i + 1;                                 // a radio group is one question
+      if (/^Blank \d+$/.test(q.label)) q.label = `Blank ${q.n}`;
+    });
+    SIM.scanned = r.scanned;
+  } finally { busy(false); }
+
+  const list = $('#simList');
+  list.innerHTML = '';
+  let page = -1;
+  SIM.qs.forEach((q, i) => {
+    if (q.page !== page && S.pageBox.length > 1) {
+      page = q.page;
+      const h = document.createElement('p');
+      h.className = 'q-page';
+      h.textContent = `Page ${page + 1} of ${S.pageBox.length}`;
+      list.append(h);
+    }
+    list.append(qCard(q, i));
+  });
+
+  const n = SIM.qs.length;
+  $('#simMeta').textContent = n
+    ? `${n} thing${n > 1 ? 's' : ''} to fill in · stays on this device`
+    : 'Nothing obvious to fill in';
+  $('#simEndNote').textContent = SIM.scanned
+    ? 'This document is a scan, so the blanks could not be named. They are still in the order they appear on the page.'
+    : 'Everything you type here lands on the real page. Review it before you save.';
+  SIM.built = true;
+}
+
+/* ---- moving between the two views ---- */
+function showSimple() {
+  $('#pick').hidden = true;
+  $('#editor').hidden = true;
+  $('#done').hidden = true;
+  $('#home').hidden = true;
+  simEl().hidden = false;
+  fitViewport();
+  if (!SIM.built) buildSimple();
+}
+function showPage() {
+  $('#pick').hidden = true;
+  simEl().hidden = true;
+  $('#done').hidden = true;
+  $('#home').hidden = true;
+  $('#editor').hidden = false;
+  fitViewport();
+  layoutPages(); renderVisible();
+}
+
+$('#simBack').addEventListener('click', () => {
+  const touched = S.items.length || allFields().some(f => fieldChanged(f.name));
+  if (touched) toast('Draft kept on this device — pick it up any time.');
+  simEl().hidden = true;
+  closeDoc();
+});
+$('#simReview').addEventListener('click', showPage);
+$('#btnSimple').addEventListener('click', () => {
+  if (SIM.built) rebuildSimpleValues();
+  showSimple();
+});
+
+/* Coming back from the page view, the cards have to show what is now on the
+   page — you may have typed into a field or ticked a box while you were
+   there. Rebuilding from state is cheaper than trying to track it. */
+function rebuildSimpleValues() {
+  const list = $('#simList');
+  if (!list.children.length) return;
+  SIM.built = false;
+  buildSimple();
+}
+$('#simDone').addEventListener('click', showPage);
+$('#simToPage').addEventListener('click', showPage);
+
+/* ---- the chooser ----
+   Show it the moment the file opens, then fill in what was found. Reading
+   the form takes a second on a long document and there is nothing to gain
+   from making someone watch a spinner before they can even choose. */
+async function askView(name) {
+  $('#pickName').textContent = name;
+  $('#pickMeta').textContent =
+    `${S.pdf.numPages} page${S.pdf.numPages > 1 ? 's' : ''} · nothing is uploaded`;
+  $('#pickSimpleSub').textContent = 'Reading the form…';
+  $('#pickNote').textContent = '';
+  $('#home').hidden = true;
+  $('#editor').hidden = true;
+  simEl().hidden = true;
+  $('#pick').hidden = false;
+
+  let r;
+  try { r = await readQuestions(); } catch (_) { r = { questions: [], scanned: false }; }
+  if ($('#pick').hidden) return;                 // they already chose
+  const n = r.questions.length;
+  const named = r.questions.filter(q => !/^Blank \d+$/.test(q.label)).length;
+  $('#pickSimpleSub').textContent = n
+    ? `${n} thing${n > 1 ? 's' : ''} to fill in, one at a time`
+    : 'One question at a time, filling the screen';
+  $('#pickNote').textContent =
+    !n ? 'No blanks were found in this document — page view lets you put text anywhere.'
+    : r.scanned ? 'This document is a scan, so the blanks are numbered rather than named. They still work.'
+    : named < n ? `${named} of ${n} blanks could be named from the document’s own text.`
+    : '';
+}
+
+function showPick(name, counts) {
+  $('#pickName').textContent = name;
+  $('#pickMeta').textContent = counts.meta;
+  $('#pickSimpleSub').textContent = counts.sub;
+  $('#pickNote').textContent = counts.note;
+  $('#home').hidden = true;
+  $('#editor').hidden = true;
+  simEl().hidden = true;
+  $('#pick').hidden = false;
+}
+$('#pickSimple').addEventListener('click', showSimple);
+$('#pickPage').addEventListener('click', showPage);
+$('#pickCancel').addEventListener('click', () => { $('#pick').hidden = true; closeDoc(); });
+
 /* ============================================================ DRAFTS / OPEN */
 async function checkResume() {
   try {
@@ -2757,6 +3307,7 @@ async function checkShared() {
     await c.delete('shared.pdf');
     busy(true, 'Opening…');
     await loadDoc(buf, name, [], null);
+    askView(name);
     busy(false);
     return true;
   } catch (_) { return false; }
@@ -2778,4 +3329,6 @@ if ('launchQueue' in window) {
 
 window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fieldChanged,
                 pageBoxes, findBox, ensureScan, spotsForPage, spotsOf, moveSpot, KB, fitViewport,
-                pageBg, forget, paintHints, findHint, textOnLine };
+                pageBg, forget, paintHints, findHint, textOnLine,
+                readQuestions, pageWords, labelFor,
+                buildSimple, showSimple, showPage, askView, SIMof: () => SIM };

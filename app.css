@@ -169,7 +169,7 @@ a:hover{text-decoration:underline;}
 }
 .topbar-title{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.2;padding:0 4px;}
 .topbar-title span{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:-.01em;}
-.topbar-title small{font-size:11px;color:var(--fg-3);}
+.topbar-title small{font-size:11px;color:var(--fg-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
 /* move from blank to blank with no keyboard — loud on purpose, because a
    bar you overlook is a bar that does not help */
@@ -479,3 +479,109 @@ select.fld{padding-right:0;}
 @keyframes sp{to{transform:rotate(360deg);}}
 
 @media (prefers-reduced-motion: reduce){ *{animation-duration:.01ms !important;transition-duration:.01ms !important;} }
+
+/* ================================================ CHOOSING A VIEW
+   Two ways to fill the same document, given equal weight — the right one
+   depends on the form and on the person, so neither is preselected. */
+.pick{position:fixed;inset:0;z-index:25;background:var(--bg);overflow:auto;display:flex;}
+.pick[hidden]{display:none;}
+.pick-inner{
+  margin:auto;width:100%;max-width:560px;
+  padding:calc(var(--safe-t) + 40px) 24px calc(var(--safe-b) + 40px);
+  text-align:center;
+}
+.pick-file{margin:0 0 26px;font-size:13.5px;color:var(--fg-3);display:flex;flex-direction:column;gap:3px;}
+.pick-file strong{
+  font-size:15px;color:var(--fg);font-weight:600;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.pick-q{font-size:clamp(22px,6vw,27px);letter-spacing:-.03em;line-height:1.2;margin:0 0 22px;}
+.pick-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media (max-width:430px){ .pick-grid{grid-template-columns:1fr;} }
+.pick-card{
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  padding:20px 14px 18px;border-radius:18px;
+  background:var(--bg-2);border:1.5px solid var(--line);text-align:center;
+  transition:transform .12s ease, border-color .12s ease, box-shadow .12s ease;
+}
+.pick-card:hover{border-color:var(--accent);box-shadow:var(--shadow);}
+.pick-card:active{transform:scale(.98);}
+.pick-card strong{font-size:16px;font-weight:650;letter-spacing:-.02em;}
+.pick-sub{font-size:12.5px;line-height:1.4;color:var(--fg-2);max-width:22ch;}
+.pick-art{display:block;width:100%;max-width:132px;}
+.pick-art svg{width:100%;height:auto;display:block;}
+.pa-box{fill:var(--accent);opacity:.22;}
+.pa-dim{fill:var(--fg-3);opacity:.55;}
+.pa-rule{fill:var(--accent);opacity:.5;}
+.pa-page{fill:var(--bg);stroke:var(--line);stroke-width:1.5;}
+.pick-note{margin:18px 0 0;font-size:12.5px;line-height:1.5;color:var(--fg-3);}
+.pick-note:empty{display:none;}
+
+/* ================================================ SIMPLE VIEW
+   The same document as one tall column of questions. Everything typed here
+   goes straight into the objects the page view draws, so Review is a change
+   of view rather than a conversion. */
+.simple{position:fixed;left:0;right:0;top:0;height:100%;display:flex;flex-direction:column;background:var(--bg-2);}
+.simple[hidden]{display:none;}
+.simple-scroll{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
+.simple-list{max-width:620px;margin:0 auto;padding:14px 16px 0;display:flex;flex-direction:column;gap:10px;}
+
+.q-card{background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:14px 15px;}
+.q-page{
+  max-width:620px;margin:18px auto 4px;padding:0 16px;
+  font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);
+}
+.q-label{
+  display:block;font-size:14px;font-weight:600;letter-spacing:-.01em;
+  color:var(--fg);margin-bottom:9px;line-height:1.35;
+}
+.q-num{color:var(--fg-3);font-weight:500;}
+.q-card input[type=text],.q-card textarea,.q-card select{
+  display:block;width:100%;font:inherit;font-size:16px;   /* 16px stops iOS zooming in */
+  color:var(--fg);background:var(--bg-2);
+  padding:12px 13px;border-radius:12px;border:1.5px solid var(--line);outline:none;
+}
+.q-card textarea{min-height:92px;resize:vertical;line-height:1.45;}
+.q-card input:focus,.q-card textarea:focus,.q-card select:focus{border-color:var(--accent);background:var(--bg);}
+.q-row{display:flex;gap:8px;align-items:center;}
+.q-row input{flex:1;min-width:0;}
+.q-chip{
+  flex:none;padding:9px 13px;border-radius:999px;font-size:13px;font-weight:600;
+  background:var(--accent-soft);color:var(--accent);
+}
+.q-chip:active{opacity:.8;}
+
+/* a tick box reads as a switch, not a form control */
+.q-toggle{display:flex;align-items:center;gap:12px;width:100%;text-align:left;}
+.q-toggle .q-label{margin:0;flex:1;}
+.q-mark{
+  flex:none;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;
+  border:1.8px solid var(--line);background:var(--bg-2);color:transparent;
+}
+.q-mark svg{width:22px;height:22px;}
+.q-card.is-on .q-mark{background:var(--accent);border-color:var(--accent);color:#fff;}
+@media (prefers-color-scheme: dark){ .q-card.is-on .q-mark{color:#0b1020;} }
+.q-alt{
+  margin-top:10px;font-size:12.5px;font-weight:600;color:var(--fg-3);
+  padding:5px 10px;border-radius:999px;background:var(--bg-2);
+}
+.q-card.is-on .q-alt{color:var(--accent);}
+
+/* one card for a whole radio group */
+.q-opts{display:flex;flex-wrap:wrap;gap:7px;}
+.q-opt{
+  padding:10px 14px;border-radius:999px;font-size:14px;font-weight:600;
+  background:var(--bg-2);border:1.5px solid var(--line);color:var(--fg-2);
+}
+.q-opt.is-on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
+
+.q-sign{display:flex;align-items:center;gap:12px;}
+.q-sign .btn-ghost{flex:none;}
+.q-sig-prev{
+  flex:1;min-width:0;height:46px;display:flex;align-items:center;
+  border-radius:10px;background:var(--bg-2);padding:4px 8px;
+}
+.q-sig-prev img{max-height:38px;max-width:100%;object-fit:contain;}
+
+.simple-end{max-width:620px;margin:0 auto;padding:26px 16px calc(var(--safe-b) + 34px);}
+.simple-end-note{margin:0 0 14px;font-size:13px;line-height:1.5;color:var(--fg-3);text-align:center;}

@@ -148,6 +148,70 @@
   </footer>
 </main>
 
+<!-- ============ CHOOSE A VIEW ============ -->
+<div id="pick" class="pick" hidden>
+  <div class="pick-inner">
+    <p class="pick-file"><strong id="pickName">Document.pdf</strong><span id="pickMeta"></span></p>
+    <h2 class="pick-q">How do you want to fill this in?</h2>
+
+    <div class="pick-grid">
+      <button class="pick-card" id="pickSimple">
+        <span class="pick-art" aria-hidden="true">
+          <svg viewBox="0 0 88 64">
+            <rect x="8" y="8" width="34" height="5" rx="2.5" class="pa-dim"/>
+            <rect x="8" y="17" width="72" height="13" rx="4" class="pa-box"/>
+            <rect x="8" y="36" width="26" height="5" rx="2.5" class="pa-dim"/>
+            <rect x="8" y="45" width="72" height="13" rx="4" class="pa-box"/>
+          </svg>
+        </span>
+        <strong>Simple view</strong>
+        <span class="pick-sub" id="pickSimpleSub">One question at a time, filling the screen</span>
+      </button>
+
+      <button class="pick-card" id="pickPage">
+        <span class="pick-art" aria-hidden="true">
+          <svg viewBox="0 0 88 64">
+            <rect x="25" y="4" width="38" height="56" rx="3" class="pa-page"/>
+            <rect x="30" y="12" width="16" height="3" rx="1.5" class="pa-dim"/>
+            <rect x="30" y="19" width="28" height="2" rx="1" class="pa-rule"/>
+            <rect x="30" y="27" width="13" height="3" rx="1.5" class="pa-dim"/>
+            <rect x="30" y="34" width="28" height="2" rx="1" class="pa-rule"/>
+            <rect x="30" y="42" width="20" height="3" rx="1.5" class="pa-dim"/>
+            <rect x="30" y="49" width="28" height="2" rx="1" class="pa-rule"/>
+          </svg>
+        </span>
+        <strong>Page view</strong>
+        <span class="pick-sub">The document exactly as it looks</span>
+      </button>
+    </div>
+
+    <p class="pick-note" id="pickNote"></p>
+    <button class="linkish center" id="pickCancel">Open a different file</button>
+  </div>
+</div>
+
+<!-- ============ SIMPLE VIEW ============ -->
+<div id="simple" class="simple" hidden>
+  <header class="topbar">
+    <button class="btn-icon" id="simBack" aria-label="Back">
+      <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="topbar-title">
+      <span id="simName">Document.pdf</span>
+      <small id="simMeta"></small>
+    </div>
+    <button class="btn-save" id="simReview">Review</button>
+  </header>
+  <div class="simple-scroll" id="simScroll">
+    <div class="simple-list" id="simList"></div>
+    <div class="simple-end">
+      <p class="simple-end-note" id="simEndNote"></p>
+      <button class="btn-primary wide" id="simDone">Review the filled-in page</button>
+      <button class="linkish center" id="simToPage">Switch to page view instead</button>
+    </div>
+  </div>
+</div>
+
 <!-- ============ EDITOR ============ -->
 <div id="editor" class="editor" hidden>
   <header class="topbar">
@@ -158,6 +222,9 @@
       <span id="docName">Document.pdf</span>
       <small id="docPages"></small>
     </div>
+    <button class="btn-icon" id="btnSimple" aria-label="Simple view" title="Simple view">
+      <svg viewBox="0 0 24 24"><path d="M4 6h5M4 12h5M4 18h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><rect x="12" y="4.2" width="8" height="3.6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="12" y="10.2" width="8" height="3.6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="12" y="16.2" width="8" height="3.6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+    </button>
     <button class="btn-icon" id="btnUndo" aria-label="Undo" disabled>
       <svg viewBox="0 0 24 24"><path d="M9 7L4.5 11.5 9 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.5 11.5H14a5.5 5.5 0 0 1 0 11h-2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </button>

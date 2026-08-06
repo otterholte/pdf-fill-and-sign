@@ -62,6 +62,53 @@ No account. No upload. No trial. No watermark. No surprise paywall.
 - **Android share target** — share a PDF *into* Fill &amp; Sign from any app
 - **Desktop file handler** — set as the default opener for `.pdf`
 
+## Two ways to fill the same document
+
+Opening a PDF asks how you want to fill it in. Neither is the default, because
+which one is better depends on the form and on the person.
+
+**Page view** is the document exactly as it looks — the original app, described above.
+
+**Simple view** lays the same document out as one tall column of questions, full width,
+one after another. It suits a phone and a long form: no pinching, no hunting for the next
+blank. Each card carries the words the document itself uses, so it reads like a normal
+web form.
+
+Nothing is converted between them. A card writes into precisely the object the page view
+already draws: a declared field's value, a text item pinned to a blank line, a mark inside
+a tick box. *Review* is a change of view, not an export, and `buildPdf()` never learns
+this screen exists. You can move between the two as often as you like.
+
+### Where the questions come from
+
+Each blank needs the words that belong to it, and the PDF already carries its text with
+positions — so this is measurement, not guesswork. `pageWords()` pulls every text item,
+converts it to the same 0–1 display frame everything else uses, and glues neighbouring
+words back into the phrases a person would read.
+
+Forms label things in three places and only three, so `labelFor()` looks in that order:
+
+- **beside it**, ending to the left on the same row — `Phone: ______`
+- **above it**, overlapping the blank's own width — a heading over a ruled blank
+- **to its right**, for a tick box or checkbox — `☐ I agree to the terms`
+
+A row of blanks shares one row of headings, so height alone ties: *State* and *ZIP code*
+sit at exactly the same distance above their rules. Horizontal distance is scored too, or
+every blank in the row takes the last heading it saw.
+
+A radio group asks one question with several answers, so the group takes the text to its
+left while each button takes the text to its right.
+
+On the fixtures: 8/8 on printed lines with headings above, 15/15 on lines plus tick boxes,
+9/10 on a declared AcroForm. The misses are blanks with no label anywhere on the page.
+
+### Scans
+
+A scanned page has no text layer, so there is nothing to read. Detection still works —
+lines and tick boxes come from pixels, not text — so the blanks are all there and all
+fillable; they are simply numbered rather than named, and the chooser says so. Reading
+them properly needs OCR, which is the next piece of work.
+
 ## Privacy
 
 There is no server and no database. `pdf.js` renders the document and `pdf-lib` writes the
