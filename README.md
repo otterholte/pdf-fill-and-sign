@@ -469,6 +469,20 @@ taking its undo step off the stack with it: a pinch should leave no trace, not s
 to undo. The same guard covers tapping a blank, which would otherwise open a text box in
 the middle of a zoom.
 
+## A tick grows around itself
+
+Objects are stored by their top-left corner, so changing a mark's size alone grows it down
+and to the right — and a tick you enlarged because it was too small for its box has now
+walked out of the box. Every resize cost a drag to put it back, which is most of the value
+of resizing gone. A mark now keeps its middle where it is and grows around it, whether you
+use the size buttons or drag the corner handle.
+
+Two things surfaced while proving it. `setPointerCapture` was called unguarded when a
+resize starts, so a refused capture threw and the resize silently did nothing. And the
+resize listened on the element rather than the window, which only works *while* capture
+holds — the first drag past the edge of a small tick would otherwise leave the element
+behind and stop. A drag belongs to the gesture, not to whatever it happens to be over.
+
 ## Who is allowed to move the page
 
 Only Back / Next and Tab. They centre what you land on, because asking to be taken

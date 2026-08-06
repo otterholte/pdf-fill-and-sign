@@ -1982,6 +1982,19 @@ pagesEl.addEventListener('pointerdown', e => {
 /* ------------------------------------------------------------- tick boxes */
 const isMark = it => it.type === 'check' || it.type === 'x';
 
+/* A mark is stored by its top-left corner, so changing its size alone grows
+   it down and to the right and it walks off whatever it was sitting on. That
+   is wrong for a tick: you sized it because it was too small for the box, not
+   because you wanted it somewhere else, and every resize then cost a drag to
+   put it back. Keep the middle where it is and the mark grows around itself. */
+function resizeMark(it, size) {
+  const [Wl, Hl] = itemFrame(it);
+  const cx = it.x + (it.size * Hl / Wl) / 2, cy = it.y + it.size / 2;
+  it.size = clamp(size, 0.006, 0.35);
+  it.x = cx - (it.size * Hl / Wl) / 2;
+  it.y = cy - it.size / 2;
+}
+
 /** the mark already sitting in this box, if any */
 function markInBox(pi, B) {
   return S.items.find(it => {
@@ -2374,16 +2387,20 @@ function startResize(e, d) {
   const [Wl, Hl] = itemFrame(it);
   const sx = e.clientX, sy = e.clientY;
   const st = it.type === 'sig' ? stampOf(it) : null;
-  const o = { fs: it.fs, w: it.w, h: it.h, size: it.size };
+  const o = { fs: it.fs, w: it.w, h: it.h, size: it.size, x: it.x, y: it.y };
+  const pid = e.pointerId;
   let started = false;
-  d.setPointerCapture(e.pointerId);
+  // capture can be refused; a resize that silently does nothing is worse
+  try { d.setPointerCapture(e.pointerId); } catch (_) {}
   e.preventDefault(); e.stopPropagation();
 
   const move = ev => {
+    if (ev.pointerId !== pid) return;
     // a second finger means a pinch: give back the size it had and get out
     if (pinching(ev)) {
       if (started) {
         it.fs = o.fs; it.w = o.w; it.h = o.h; it.size = o.size;
+        it.x = o.x; it.y = o.y;              // a mark moves as it grows now
         if (st) st.fs = stampFsFor(it.w);
         sizeItem(it, d);
         if (it.type === 'sig') reseatStamp(it);
@@ -2401,19 +2418,25 @@ function startResize(e, d) {
       if (st) st.fs = stampFsFor(it.w);          // the date follows, down to a readable floor
     }
     else if (it.type === 'redact') { it.w = clamp(o.w + dx, 0.008, 1.2); it.h = clamp(o.h + dy, 0.004, 1.0); }
-    else it.size = clamp(o.size + dy, 0.006, 0.35);
+    else resizeMark(it, o.size + dy);          // grows about its middle
     sizeItem(it, d);
     if (it.type === 'sig') reseatStamp(it);
   };
-  const up = () => {
-    d.removeEventListener('pointermove', move);
-    d.removeEventListener('pointerup', up);
-    d.removeEventListener('pointercancel', up);
+  const up = ev => {
+    if (ev && ev.pointerId !== pid) return;
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
     saveSoon();
   };
-  d.addEventListener('pointermove', move);
-  d.addEventListener('pointerup', up);
-  d.addEventListener('pointercancel', up);
+  /* On the window, not on the element. Listening on the element only works
+     while pointer capture holds it, and capture can be refused — then the
+     first drag past the edge of a small tick leaves the element behind and
+     the resize quietly stops. A drag belongs to the gesture, not to whatever
+     it happens to be over. */
+  window.addEventListener('pointermove', move, { passive: false });
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
 }
 
 /* selection bar */
@@ -2434,7 +2457,7 @@ const bump = f => {
     if (st) st.fs = stampFsFor(it.w);
   }
   else if (it.type === 'redact') { it.w = clamp(it.w * f, 0.008, 1.2); it.h = clamp(it.h * f, 0.004, 1); }
-  else it.size = clamp(it.size * f, 0.006, 0.35);
+  else resizeMark(it, it.size * f);            // grows about its middle
   if (it.type === 'sig') reseatStamp(it);
   relayoutItems(); saveSoon();
 };
@@ -4427,4 +4450,4 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 wordsOrOcr, ocrPage,
                 buildSimple, showSimple, showPage, askView, SIMof: () => SIM,
                 scanLines, findCells, totalRot, scanBoxes, layoutPages, revealFocused,
-                scanCanvas, shotsToPdf, SCANof: () => SCAN };
+                scanCanvas, shotsToPdf, SCANof: () => SCAN, select, resizeMark };
