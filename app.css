@@ -600,3 +600,18 @@ select.fld{padding-right:0;}
 
 .simple-end{max-width:620px;margin:0 auto;padding:26px 16px calc(var(--safe-b) + 34px);}
 .simple-end-note{margin:0 0 14px;font-size:13px;line-height:1.5;color:var(--fg-3);text-align:center;}
+
+/* text written in a table cell sits in the middle of the box */
+.it.in-cell .it-text{text-align:center;}
+/* and the blank itself is the whole box, not a line to rest on */
+.linehint.is-cell{
+  border-radius:3px;
+  background:rgba(27,79,216,.09);
+  box-shadow:inset 0 0 0 1.5px rgba(27,79,216,.26);
+}
+@media (prefers-color-scheme: dark){
+  .linehint.is-cell{
+    background:rgba(123,160,255,.13);
+    box-shadow:inset 0 0 0 1.5px rgba(123,160,255,.34);
+  }
+}

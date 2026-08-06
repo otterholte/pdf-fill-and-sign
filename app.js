@@ -670,7 +670,42 @@ function zoomTo(z, mx, my) {
    far taller than a rule. Everything here is in the page's own display frame,
    which is exactly the frame objects are placed in. */
 
-const DARK = 150;          // luminance below this counts as ink
+/* NOT WIRED IN — kept because the reasoning is worth not repeating.
+
+   What counts as ink ought to depend on the page: software draws pure black
+   on pure white, but a scan of the same form has soft grey rules, and a fixed
+   cutoff catches those only in patches. Otsu's method looked like the answer.
+
+   It is not, for this kind of document. A form with solid black section
+   banners gives Otsu two strong populations — banner and everything else —
+   so it splits there and throws away the grey rules entirely. Measured on a
+   scanned employment application it took detected table cells from 7 to 1.
+
+   The fix, when it comes, is probably a *local* threshold — a window around
+   each candidate rule rather than one number for the page. */
+function inkThreshold(d) {
+  const hist = new Uint32Array(256);
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    hist[(d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 | 0]++;
+    n++;
+  }
+  let sum = 0;
+  for (let t = 0; t < 256; t++) sum += t * hist[t];
+  let sumB = 0, wB = 0, best = 150, bestVar = -1;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (!wB) continue;
+    const wF = n - wB;
+    if (!wF) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB, mF = (sum - sumB) / wF;
+    const v = wB * wF * (mB - mF) * (mB - mF);
+    if (v > bestVar) { bestVar = v; best = t; }
+  }
+  // a page with almost no ink gives a meaningless split; keep it sensible
+  return clamp(best, 90, 205);
+}
 const GAP = 5;             // px of white tolerated inside one run
 
 function scanLines(cv) {
@@ -681,6 +716,7 @@ function scanLines(cv) {
 
   /* one pass to a 1-byte-per-pixel ink mask — every scan below reads this
      instead of re-deriving luminance, which keeps the box pass cheap */
+  const DARK = 150;              // luminance below this counts as ink
   const mask = new Uint8Array(W * H);
   for (let i = 0, m = 0; m < mask.length; m++, i += 4) {
     mask[m] = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 < DARK ? 1 : 0;
@@ -799,8 +835,32 @@ function scanLines(cv) {
      faster than the overlap test tolerates. Stitching collinear neighbours
      back together costs little and is the difference between a scanned form
      working and not. */
+  /* Two fragments belong to one rule if the ink actually carries on between
+     them. Distance alone cannot decide it: a skewed table rule can break with
+     an 80px hole, while "City ____  State __" are two real blanks 50px apart.
+     So walk the gap along the line the two fragments imply and see whether
+     there is something there. */
+  const carriesOn = (a, b) => {
+    const L = a.x1 <= b.x1 ? a : b, R = L === a ? b : a;
+    const gx0 = Math.min(L.x1, R.x1), gx1 = Math.max(L.x0, R.x0);
+    if (gx1 <= gx0 + 1) return true;                       // already overlapping
+    const ya = (L.top + L.bot) / 2, yb = (R.top + R.bot) / 2;
+    const steps = clamp(Math.round((gx1 - gx0) / 5), 4, 40);
+    let hit = 0;
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      const x = Math.round(gx0 + (gx1 - gx0) * t);
+      const y = Math.round(ya + (yb - ya) * t);
+      for (let dy = -3; dy <= 3; dy++) {
+        const yy = y + dy;
+        if (yy >= 0 && yy < H && mask[yy * W + x]) { hit++; break; }
+      }
+    }
+    return hit >= (steps - 1) * 0.85;
+  };
   const stitch = list => {
-    const near = Math.max(3, Math.round(H * 0.004));
+    const near = Math.max(4, Math.round(H * 0.006));
+    const reach = W * 0.35;
     let again = true;
     while (again) {
       again = false;
@@ -810,7 +870,7 @@ function scanLines(cv) {
           const a = list[i], b = list[j];
           if (Math.abs(b.top - a.top) > near) continue;
           const gap = Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1);
-          if (gap > Math.max(6, W * 0.012)) continue;      // same rule, not a neighbour
+          if (gap > reach || !carriesOn(a, b)) continue;
           a.top = Math.min(a.top, b.top); a.bot = Math.max(a.bot, b.bot);
           a.x0 = Math.min(a.x0, b.x0);    a.x1 = Math.max(a.x1, b.x1);
           list.splice(j, 1);
@@ -839,7 +899,11 @@ function scanLines(cv) {
     }
   }
 
-  return { W, H, bands: inner.filter(b => !cellEdge.has(b)), data: d, mask };
+  /* `allBands` is every rule; `bands` is what is left after discarding the
+     edges of written-in rectangles. Grid detection needs the former — the
+     rejection below is a blunt instrument that, faced with a whole table,
+     removes every rule in it and leaves nothing to build cells from. */
+  return { W, H, allBands: inner, bands: inner.filter(b => !cellEdge.has(b)), data: d, mask };
 }
 
 /** Height of the label sitting just left of a line — used to match font size.
@@ -981,12 +1045,156 @@ function scanBoxes(scan) {
   return out;
 }
 
+/* ------------------------------------------------------------ TABLE CELLS
+   A ruled table is the one place on a form where the blank is a box rather
+   than a line, and where the answer belongs in the middle of it rather than
+   sitting on a rule. Finding them needs the vertical rules the line scan
+   ignores: with both sets, a cell is the gap between two neighbouring
+   uprights, closed off by two of the horizontals that span it. */
+
+function scanVRules(scan) {
+  const { W, H, mask } = scan;
+  if (!mask) return [];
+  const minLen = Math.max(14, Math.round(H * 0.014));
+  const maxThick = Math.max(4, Math.round(W * 0.006));
+
+  const cols = new Array(W).fill(null);
+  for (let x = 0; x < W; x++) {
+    let list = null, start = -1, last = -1, gap = 0;
+    const close = () => {
+      if (start >= 0 && last - start + 1 >= minLen) (list || (list = [])).push({ y0: start, y1: last });
+      start = -1; last = -1; gap = 0;
+    };
+    for (let y = 0; y < H; y++) {
+      if (mask[y * W + x]) { if (start < 0) start = y; last = y; gap = 0; }
+      else if (start >= 0 && ++gap > GAP) close();
+    }
+    close();
+    cols[x] = list;
+  }
+
+  const share = (a, b) => {
+    const ov = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0) + 1;
+    return ov <= 0 ? 0 : ov / Math.min(a.y1 - a.y0 + 1, b.y1 - b.y0 + 1);
+  };
+  const raw = [];
+  let open = [];
+  for (let x = 0; x <= W; x++) {
+    const list = cols[x] || [];
+    const taken = new Set();
+    const next = [];
+    for (const b of open) {
+      let pick = -1, best = 0.6;
+      for (let i = 0; i < list.length; i++) {
+        if (taken.has(i)) continue;
+        const v = share(b, list[i]);
+        if (v > best) { best = v; pick = i; }
+      }
+      if (pick < 0) { if (b.x1 - b.x0 + 1 <= maxThick) raw.push(b); continue; }
+      taken.add(pick);
+      const r = list[pick];
+      b.x1 = x;
+      if (r.y1 - r.y0 > b.y1 - b.y0) { b.y0 = r.y0; b.y1 = r.y1; }
+      next.push(b);
+    }
+    for (let i = 0; i < list.length; i++) {
+      if (!taken.has(i)) next.push({ x0: x, x1: x, y0: list[i].y0, y1: list[i].y1 });
+    }
+    open = next;
+  }
+
+  // a stroke of type is crowded; a rule is thin and alone
+  const dens = (x, y0, y1) => {
+    if (x < 0 || x >= W) return 0;
+    let c = 0;
+    for (let y = y0; y <= y1; y++) if (mask[y * W + x]) c++;
+    return c / (y1 - y0 + 1);
+  };
+  const edge = Math.max(2, Math.round(W * 0.012));
+  const kept = raw.filter(b => {
+    if (b.x0 < edge || b.x1 > W - edge) return false;
+    let solid = 0;
+    for (let x = b.x0; x <= b.x1; x++) solid = Math.max(solid, dens(x, b.y0, b.y1));
+    if (solid < 0.80) return false;
+    const l = Math.max(dens(b.x0 - 3, b.y0, b.y1), dens(b.x0 - 5, b.y0, b.y1));
+    const r = Math.max(dens(b.x1 + 3, b.y0, b.y1), dens(b.x1 + 5, b.y0, b.y1));
+    return l < 0.28 && r < 0.28;
+  });
+
+  // a skewed scan splits an upright too
+  const near = Math.max(3, Math.round(W * 0.004));
+  let again = true;
+  while (again) {
+    again = false;
+    kept.sort((a, b) => a.x0 - b.x0 || a.y0 - b.y0);
+    for (let i = 0; i < kept.length && !again; i++) {
+      for (let j = i + 1; j < kept.length; j++) {
+        const a = kept[i], b = kept[j];
+        if (Math.abs(b.x0 - a.x0) > near) continue;
+        if (Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1) > Math.max(6, H * 0.012)) continue;
+        a.x0 = Math.min(a.x0, b.x0); a.x1 = Math.max(a.x1, b.x1);
+        a.y0 = Math.min(a.y0, b.y0); a.y1 = Math.max(a.y1, b.y1);
+        kept.splice(j, 1); again = true; break;
+      }
+    }
+  }
+  return kept;
+}
+
+/** the boxes of a ruled grid, and which horizontals were spent building them */
+function findCells(hs, vs, W, H, mask) {
+  const cells = [], usedH = new Set();
+  const V = [...vs].sort((a, b) => a.x0 - b.x0);
+  const Hh = [...hs].sort((a, b) => a.top - b.top);
+  const minW = W * 0.025, minH = H * 0.012;
+
+  for (let i = 0; i < V.length; i++) {
+    for (let j = i + 1; j < V.length; j++) {
+      const L = V[i], R = V[j];
+      const x0 = L.x1 + 1, x1 = R.x0 - 1;
+      if (x1 - x0 < minW) continue;
+      const vy0 = Math.max(L.y0, R.y0), vy1 = Math.min(L.y1, R.y1);
+      if (vy1 - vy0 < minH) continue;
+
+      // an upright in between means R is not L's neighbour
+      let blocked = false;
+      for (let k = i + 1; k < j && !blocked; k++) {
+        const M = V[k];
+        if (M.x0 > x0 && M.x1 < x1 &&
+            Math.min(M.y1, vy1) - Math.max(M.y0, vy0) > (vy1 - vy0) * 0.55) blocked = true;
+      }
+      if (blocked) continue;
+
+      const spans = Hh.filter(h =>
+        h.x0 <= x0 + 5 && h.x1 >= x1 - 5 && h.bot >= vy0 - 5 && h.top <= vy1 + 5);
+      for (let a = 0; a + 1 < spans.length; a++) {
+        const T = spans[a], B = spans[a + 1];
+        if (B.top - T.bot < minH) continue;
+        usedH.add(T); usedH.add(B);
+        let ink = 0, tot = 0;
+        for (let y = T.bot + 3; y < B.top - 2; y += 2) {
+          const base = y * W;
+          for (let x = x0 + 3; x < x1 - 2; x += 2) { tot++; if (mask[base + x]) ink++; }
+        }
+        cells.push({
+          x0: x0 / W, x1: x1 / W, y0: T.bot / H, y1: B.top / H,
+          cx: (x0 + x1) / 2 / W, cy: (T.bot + B.top) / 2 / H,
+          w: (x1 - x0) / W, h: (B.top - T.bot) / H,
+          filled: tot > 0 && ink / tot > 0.02,
+        });
+      }
+      break;                                    // R was the nearest neighbour
+    }
+  }
+  return { cells, usedH };
+}
+
 /* Scanning runs on its own small render rather than the on-screen canvas, so
    the answer is the same whether you are zoomed out on a phone or zoomed
    right in on a desktop — and a 6× zoom never means scanning a 12000px
    bitmap. The canvas is thrown away immediately; only the measurements are
    kept, in memory, in this tab. */
-const EMPTY_SCAN = { lines: [], boxes: [] };
+const EMPTY_SCAN = { lines: [], boxes: [], cells: [] };
 const SCAN_W = 1000;
 const scanKeyOf = p => 'r' + totalRot(p);
 
@@ -995,6 +1203,7 @@ function pageScan(p) {
 }
 const pageLines = p => pageScan(p).lines;
 const pageBoxes = p => pageScan(p).boxes;
+const pageCells = p => pageScan(p).cells;
 
 function ensureScan(p) {
   const key = scanKeyOf(p);
@@ -1014,8 +1223,15 @@ function ensureScan(p) {
         viewport: vp,
       }).promise;
       const scan = scanLines(cv);
+      /* Rules spent on a table are not blanks to write on — the cells they
+         bound are. Work those out first, then keep only the leftovers. */
+      const vs = scanVRules(scan);
+      const { cells, usedH } = findCells(scan.allBands, vs, scan.W, scan.H, scan.mask);
+      const free = scan.bands.filter(b => !usedH.has(b));
       p.scanned = {
-        lines: scan.bands.map(b => {
+        cells: cells.filter(c => !c.filled),
+        cellsAll: cells, vrules: vs.length, bands: scan.bands.length,
+        lines: free.map(b => {
           /* Match the label if we found one. With no label to measure, a
              sensible default beats the bottom of the clamp — that is what
              used to make an unlabelled blank get 6pt text. */
@@ -1030,7 +1246,8 @@ function ensureScan(p) {
         }),
         boxes: scanBoxes(scan),
       };
-    } catch (_) {
+    } catch (err) {
+      console.warn('page scan failed', err);
       p.scanned = EMPTY_SCAN;
     }
     cv.width = cv.height = 0;                       // release the bitmap
@@ -1086,7 +1303,8 @@ const textOf = it => (it.date ? renderDate(it) : it.text);
 function itemEl(it) {
   const p = S.pageBox[it.page];
   const d = document.createElement('div');
-  d.className = 'it it-' + it.type + (it.date ? ' it-date' : '') + (it.boxed ? ' is-boxed' : '');
+  d.className = 'it it-' + it.type + (it.date ? ' it-date' : '') +
+                (it.boxed ? ' is-boxed' : '') + (it.cell ? ' in-cell' : '');
   d.dataset.id = it.id;
 
   if (isText(it)) {
@@ -1132,7 +1350,10 @@ function sizeItem(it, d) {
   d.style.transform = it.rot ? `rotate(${-norm4(it.rot)}deg)` : '';
   if (isText(it)) {
     d.firstChild.style.fontSize = (it.fs * Hl) + 'px';
-    d.style.width = ''; d.style.height = '';
+    if (it.cell) {
+      d.style.width = ((it.cell.x1 - it.cell.x0) * Wl) + 'px';
+      d.style.height = '';
+    } else { d.style.width = ''; d.style.height = ''; }
   } else if (it.type === 'sig') {
     const w = it.w * Wl;
     d.style.width = w + 'px'; d.style.height = (w * it.ar) + 'px';
@@ -1737,6 +1958,7 @@ document.addEventListener('keydown', e => {
 const KB = { pi: 0, key: null, box: null, el: null, cur: null, at: 0, of: 0 };
 const lineKey = (pi, L) => `l:${pi}:${Math.round(L.y * 1e4)}:${Math.round(L.x0 * 1e4)}`;
 const boxKey  = (pi, B) => `b:${pi}:${Math.round(B.cy * 1e4)}:${Math.round(B.cx * 1e4)}`;
+const cellKey = (pi, C) => `c:${pi}:${Math.round(C.cy * 1e4)}:${Math.round(C.cx * 1e4)}`;
 
 /** Where a form field sits on the page as displayed, 0–1.
 
@@ -1789,6 +2011,11 @@ function spotsForPage(pi) {
     if (!free(B.x0, B.y0, B.x1, B.y1)) return;
     out.push({ kind: 'box', page: pi, B, x: B.x0, y: B.y1,
                cy: B.cy, h: B.h, key: boxKey(pi, B) });
+  });
+  pageCells(p).forEach(C => {
+    if (!free(C.x0, C.y0, C.x1, C.y1)) return;
+    out.push({ kind: 'cell', page: pi, C, x: C.x0, y: C.y1,
+               cy: C.cy, h: C.h, key: cellKey(pi, C) });
   });
 
   /* Reading order: build rows top to bottom, joining anything whose middle is
@@ -1974,12 +2201,16 @@ function paintHints() {
     p.hints = [];
     if (!S.pdf || !p.scanKey) return;
     for (const spot of spotsForPage(pi)) {
-      if (spot.kind !== 'line') continue;
+      if (spot.kind !== 'line' && spot.kind !== 'cell') continue;
       // once something is on the line, the thing itself is the target
       if (S.items.some(i => i.page === pi && i.lineKey === spot.key)) continue;
       const el = document.createElement('div');
-      el.className = 'linehint';
-      const h = { L: spot.L, key: spot.key, r: hintRect(spot.L), el };
+      el.className = spot.kind === 'cell' ? 'linehint is-cell' : 'linehint';
+      const h = { L: spot.L, C: spot.C, kind: spot.kind, key: spot.key,
+                  r: spot.kind === 'cell'
+                    ? { x0: spot.C.x0, x1: spot.C.x1, y0: spot.C.y0, y1: spot.C.y1 }
+                    : hintRect(spot.L),
+                  el };
       placeHint(p, h);
       p.layer.append(el);
       p.hints.push(h);
@@ -1999,6 +2230,27 @@ function findHint(p, x, y, pad = 0.003) {
         y >= h.r.y0 - pad && y <= h.r.y1 + pad) return h;
   }
   return null;
+}
+
+/** Start typing in a table cell. The text is centred in the box rather than
+    resting on a rule, because that is what a person writing in a table does
+    and what makes the finished page look right. */
+function textInCell(pi, C, key, focus = true) {
+  const p = S.pageBox[pi];
+  let it = S.items.find(i => i.page === pi && i.lineKey === key);
+  if (!it) {
+    const fs = clamp(C.h * 0.52, 0.0085, 0.03);
+    it = { id: uid(), page: pi, rot: totalRot(p), type: 'text',
+           x: C.x0, y: clamp(C.cy - fs * 0.62, 0, .99),
+           fs, color: COLORS[0], text: '', lineKey: key,
+           cell: { x0: C.x0, x1: C.x1, y0: C.y0, y1: C.y1 } };
+    push(); S.items.push(it); itemEl(it); saveSoon();
+  }
+  select(it.id);
+  markSpot(pi, key);
+  hintsSoon();
+  if (focus) { const d = elOf(it.id); if (d) edit(d); }
+  return it;
 }
 
 /** start typing on a line — from a tap, from Tab, or from the Next button */
@@ -2033,7 +2285,8 @@ function armHintTap(e, pi, hint) {
     off();
     if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 8) return;   // a scroll
     if (performance.now() - t0 > 700) return;                        // a long press
-    textOnLine(pi, hint.L, hint.key);
+    if (hint.kind === 'cell') textInCell(pi, hint.C, hint.key);
+    else textOnLine(pi, hint.L, hint.key);
   };
   window.addEventListener('pointerup', up);
   window.addEventListener('pointercancel', off);
@@ -2118,7 +2371,7 @@ document.addEventListener('focusin', () => setTimeout(() => { fitViewport(); rec
 document.addEventListener('focusout', () => setTimeout(fitViewport, 60), true);
 
 /* ---------------------------------------------------------- the jump bar */
-const SPOT_LABEL = { field: 'Form field', line: 'Blank line', box: 'Tick this box' };
+const SPOT_LABEL = { field: 'Form field', line: 'Blank line', box: 'Tick this box', cell: 'Table cell' };
 
 function syncJump() {
   const s = KB.cur;
@@ -2155,8 +2408,10 @@ async function enterSpot(s) {
     return;
   }
 
-  if (s.kind === 'line') {
-    const it = textOnLine(s.page, s.L, s.key, false);
+  if (s.kind === 'line' || s.kind === 'cell') {
+    const it = s.kind === 'cell'
+      ? textInCell(s.page, s.C, s.key, false)
+      : textOnLine(s.page, s.L, s.key, false);
     scrollToSpot(p, s.x, s.cy, s.h);
     const d = elOf(it.id);
     if (d) edit(d);
@@ -2753,7 +3008,13 @@ async function buildPdf() {
         const fs = it.fs * Hl;
         textOf(it).split('\n').forEach((ln, k) => {
           if (!ln) return;
-          const a = anchor(it, it.x, it.y + it.fs * BASELINE + k * it.fs * LINEH);
+          let lx = it.x;
+          if (it.cell) {
+            // sit it in the middle of the box, the way you would write it
+            const wide = font.widthOfTextAtSize(ln, fs) / Wl;
+            lx = it.cell.x0 + ((it.cell.x1 - it.cell.x0) - wide) / 2;
+          }
+          const a = anchor(it, lx, it.y + it.fs * BASELINE + k * it.fs * LINEH);
           p.drawText(ln, { x: a.x, y: a.y, size: fs, font, color: hex2rgb(it.color), rotate: spin });
         });
       } else if (it.type === 'sig') {
@@ -2964,6 +3225,19 @@ function simSetLine(q, v) {
   saveSoon();
 }
 
+function simSetCell(q, v) {
+  let it = simLineItem(q);
+  if (!it) {
+    if (!v) return;
+    markFieldHistory();
+    it = textInCell(q.page, q.C, q.key, false);
+  }
+  it.text = v;
+  const d = elOf(it.id);
+  if (d && d.firstChild) d.firstChild.textContent = v;
+  saveSoon();
+}
+
 function simSetBox(q, type) {
   const cur = markInBox(q.page, q.B);
   if (cur && cur.type === type) return;
@@ -3123,7 +3397,7 @@ function qCard(q, i) {
     return d;
   }
 
-  /* everything else is words on a line */
+  /* everything else is words on a line, or in a table cell */
   const id = 'qi' + i;
   d.append(labelText(q.label, id));
   const multi = q.kind === 'field' && q.f.multiline;
@@ -3136,6 +3410,7 @@ function qCard(q, i) {
   inp.addEventListener('input', () => {
     markFieldHistory();
     if (q.kind === 'field') setField(q.f, inp.value);
+    else if (q.kind === 'cell') simSetCell(q, inp.value);
     else simSetLine(q, inp.value);
   });
 
@@ -3377,5 +3652,5 @@ if ('launchQueue' in window) {
 window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fieldChanged,
                 pageBoxes, findBox, ensureScan, spotsForPage, spotsOf, moveSpot, KB, fitViewport,
                 pageBg, forget, paintHints, findHint, textOnLine,
-                readQuestions, pageWords, labelFor,
+                readQuestions, pageWords, labelFor, pageCells, scanVRules, textInCell,
                 buildSimple, showSimple, showPage, askView, SIMof: () => SIM };

@@ -102,6 +102,25 @@ left while each button takes the text to its right.
 On the fixtures: 8/8 on printed lines with headings above, 15/15 on lines plus tick boxes,
 9/10 on a declared AcroForm. The misses are blanks with no label anywhere on the page.
 
+### Tables
+
+A ruled table is the one place on a form where the blank is a box rather than a line,
+and where the answer belongs in the middle of it. Finding them needs the vertical rules
+the line scan ignores; with both sets, a cell is the gap between two neighbouring
+uprights, closed off by two of the horizontals that span it. Cells that already have
+something in them are the headings, so only the empty ones are offered.
+
+Text typed into a cell is centred in the box on screen and centred again on export,
+where pdf-lib measures the string and places it. Tab walks a grid the way you would
+read it — across the row, then down — because grid order and reading order are the same
+thing, and the ordering code already did that.
+
+Rules spent on a table are no longer offered as blanks to write on. That ordering
+matters: an earlier heuristic discarded the edges of any written-in rectangle, and faced
+with a whole table it removed every rule in it, leaving nothing to build cells from. Grid
+detection now runs on the full set of rules and the blunt rejection only sees what is
+left over.
+
 ### Scans and skew
 
 A photographed or scanned page is never perfectly square, and a rule that drifts a
