@@ -1,5 +1,5 @@
 /* Fill & Sign service worker — offline shell + Android share-target intake. */
-const V = 'fillandsign-v2';
+const V = 'fillandsign-v3';
 const SHARE = 'fillandsign-share';
 const SHELL = [
   './', 'index.html', 'app.css', 'app.js', 'manifest.webmanifest',
@@ -48,18 +48,28 @@ self.addEventListener('fetch', e => {
 
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
 
+  /* The libraries and the icons never change without changing their name, so
+     serving those from the cache is free. The app itself is a different
+     matter: cache-first handed everyone the *previous* build on every visit
+     and only picked up a fix on the visit after, which meant a bug could be
+     fixed and still be there the next morning. So the app asks the network
+     first and falls back to the cache, which keeps it working offline while
+     making a plain refresh enough to get the current version. */
+  const frozen = /\/(vendor|icons)\//.test(url.pathname) ||
+                 url.pathname.endsWith('.woff2') || url.pathname.endsWith('.webmanifest');
+
   e.respondWith((async () => {
-    const cached = await caches.match(e.request, { ignoreSearch: true });
-    if (cached) {
-      fetch(e.request).then(r => { if (r.ok) caches.open(V).then(c => c.put(e.request, r.clone())); }).catch(() => {});
-      return cached;
+    if (frozen) {
+      const hit = await caches.match(e.request, { ignoreSearch: true });
+      if (hit) return hit;
     }
     try {
       const r = await fetch(e.request);
       if (r.ok) (await caches.open(V)).put(e.request, r.clone());
       return r;
     } catch (_) {
-      return (await caches.match('index.html')) || Response.error();
+      return (await caches.match(e.request, { ignoreSearch: true })) ||
+             (await caches.match('index.html')) || Response.error();
     }
   })());
 });

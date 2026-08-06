@@ -321,7 +321,11 @@ select.fld{padding-right:0;}
   white-space:pre;font-family:var(--font-doc);line-height:1.25;
   padding:0;margin:0;outline:none;min-width:3.4em;min-height:1em;caret-color:var(--accent);
 }
-.it-text:empty::before{content:attr(data-ph);color:#b9c0c9;}
+/* An empty box has nothing to show, which makes it invisible — and an
+   invisible box cannot be dragged into place. The placeholder gives it a
+   body to grab, and goes the moment you type a character. */
+.it-text:empty::before{content:attr(data-ph);color:#98a2ae;}
+.it.sel > .it-text:empty{background:rgba(27,79,216,.07);border-radius:2px;}
 .it-sig img{width:100%;height:100%;display:block;pointer-events:none;}
 .it-redact{background:#000;}
 .it-mark svg{width:100%;height:100%;}

@@ -1697,6 +1697,23 @@ $('#placingCancel').addEventListener('click', () => { S.tool = null; pendingSig 
 /* ------------------------------------------------------- placing / editing */
 let pendingSig = null;
 
+/* Double tap puts a text box exactly where you put your finger.
+
+   The scan is a guess and sometimes it guesses wrong — a blank it did not
+   see, a field the form draws in some way nothing accounts for. Rather than
+   make you go up to the toolbar, arm the Text tool and come back, the second
+   tap is the escape hatch: it drops a box right there, already selected, so
+   the next thing you type goes in it. Browsers spend that gesture on zoom,
+   which this page has no use for — the viewport is fixed. */
+const DBL = { t: 0, x: 0, y: 0 };
+const isDoubleTap = e => {
+  const now = performance.now();
+  const near = Math.hypot(e.clientX - DBL.x, e.clientY - DBL.y) < 28 && now - DBL.t < 420;
+  DBL.t = now; DBL.x = e.clientX; DBL.y = e.clientY;
+  if (near) DBL.t = 0;                       // three taps are not two doubles
+  return near;
+};
+
 pagesEl.addEventListener('pointerdown', e => {
   if (!e.isPrimary) return;
   const pageEl = e.target.closest('.page');
@@ -1707,13 +1724,15 @@ pagesEl.addEventListener('pointerdown', e => {
   const handle = e.target.closest('.handle');
   const itEl = e.target.closest('.it');
   if (handle && itEl) return startResize(e, itEl);
-  if (itEl) return startDrag(e, itEl);
+  if (itEl) { isDoubleTap(e); return startDrag(e, itEl); }
 
   const pi = +pageEl.dataset.i;
   const p = S.pageBox[pi];
   const r = pageEl.getBoundingClientRect();
   // the page as the user sees it right now is the frame we place into
   const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+
+  const twice = isDoubleTap(e);
 
   if (S.tool === 'redact') { e.preventDefault(); return startRubber(e, pi, x, y); }
 
@@ -1731,6 +1750,12 @@ pagesEl.addEventListener('pointerdown', e => {
   // …and tapping a marked-up blank line starts typing on it
   const hint = findHint(p, x, y);
   if (hint) return armHintTap(e, pi, hint);
+
+  /* Nothing here — which is exactly when the second tap means something. It
+     never gets to overrule a tick box or a blank the scan already found:
+     those do the right thing already, and a quick double tap on one of them
+     is just an impatient single tap. */
+  if (twice) { e.preventDefault(); return placeLooseText(pi, x, y); }
 
   focusStage();
   leaveSpot();
@@ -1796,6 +1821,29 @@ stageEl.addEventListener('pointerdown', e => {
   focusStage();
   if (S.sel) select(null);
 });
+
+/* A text box placed by hand, at the spot and nowhere else. It does not snap
+   to a rule: you double tapped because the rule you wanted was not offered,
+   so moving the box somewhere else would be answering the wrong question.
+   Sized to the blank underneath if there is one, since that is only a guess
+   about how big your writing should be, not about where it goes. */
+function placeLooseText(pi, x, y) {
+  const p = S.pageBox[pi];
+  const near = findLine(p, x, y);
+  const fs = near ? near.fs : DEF.fs;
+  const it = { id: uid(), page: pi, rot: totalRot(p), type: 'text',
+               x: clamp(x, 0, .97), y: clamp(y - fs * 0.62, 0, .99),
+               fs, color: COLORS[0], text: '' };
+  push();
+  S.items.push(it);
+  const d = itemEl(it);
+  select(it.id);
+  edit(d);
+  // the tap that made it is still in flight; don't let its click steal the caret
+  requestAnimationFrame(() => { if (S.sel === it.id && !it.text) edit(d); });
+  saveSoon();
+  return it;
+}
 
 function place(pi, x, y) {
   const p = S.pageBox[pi];
@@ -2032,6 +2080,14 @@ function startDrag(e, d) {
     window.removeEventListener('pointerup', up);
     window.removeEventListener('pointercancel', up);
     if (!moved && isText(it) && !it.date && wasSel && !editing) edit(d);
+    /* Dragging a box you were typing into hands the caret back when you let
+       go. You moved it because it was in the wrong place, not because you
+       changed your mind about writing in it — having to tap it again to carry
+       on is a step that exists for no reason. An empty box counts even if the
+       caret had already slipped away: an empty box is one nobody has written
+       in yet, and there is nothing else it could be for. */
+    if (moved && isText(it) && !it.date &&
+        (editing || !it.text.trim())) edit(d);
     // tapping a mark that already sits in a tick box moves it on round the cycle
     if (!moved && wasSel && isMark(it)) {
       const [Wl, Hl] = itemFrame(it);
@@ -2674,7 +2730,7 @@ function markSpot(pi, key) {
   if (i < 0) return;
   KB.pi = pi; KB.key = key; KB.at = i + 1; KB.of = list.length; KB.cur = list[i];
   syncJump();
-  recentre();
+  revealSpot();
 }
 
 async function spotsOf(pi) {
@@ -2740,7 +2796,7 @@ if (vp) {
   window.addEventListener('orientationchange', () => setTimeout(fitViewport, 250));
 }
 // focus and blur move the keyboard; the viewport event can lag behind them
-document.addEventListener('focusin', () => setTimeout(() => { fitViewport(); recentre(); }, 90), true);
+document.addEventListener('focusin', () => setTimeout(() => { fitViewport(); revealSpot(); }, 90), true);
 document.addEventListener('focusout', () => setTimeout(fitViewport, 60), true);
 
 /* ---------------------------------------------------------- the jump bar */
@@ -2764,10 +2820,16 @@ $('#btnSpotAct').addEventListener('click', () => {
   enterSpot(KB.cur);                                   // put me back where I was
 });
 
+/* Back / Next and Tab are the only things that move the page, because they
+   are the only things where you asked to be taken somewhere. */
 async function enterSpot(s) {
   const p = S.pageBox[s.page];
   clearBoxCursor();
   KB.cur = s;
+  KB.nav = true;
+  try { return await enterSpotInner(s, p); } finally { KB.nav = false; }
+}
+async function enterSpotInner(s, p) {
 
   if (s.kind === 'field') {
     select(null);
@@ -2816,13 +2878,26 @@ function scrollToSpot(p, x, cy, h = 0) {
     stageEl.scrollLeft = clamp(p.el.offsetLeft + x * p.dw - stageEl.clientWidth * 0.4, 0, maxX);
   }
 }
-/* re-centre whatever the cursor is on — after a tap, or once a keyboard
-   has opened and taken half the screen */
-function recentre() {
+/* When you tapped the thing yourself you are already looking at it, and
+   moving the page under your finger is disorienting — you lose your place
+   mid-sentence. So do nothing unless the spot is genuinely out of sight,
+   which really happens when a keyboard opens over it, and then scroll by the
+   least that brings it back rather than re-centring the whole page. */
+function revealSpot() {
   const s = KB.cur;
-  if (!s || $('#editor').hidden) return;
+  if (KB.nav || !s || $('#editor').hidden) return;   // Back / Next is already moving us
   const p = S.pageBox[s.page];
-  if (p) scrollToSpot(p, s.x, s.cy, s.h);
+  if (!p) return;
+  const view = stageEl.clientHeight;
+  const top = p.el.offsetTop + (s.cy - s.h / 2) * p.dh - stageEl.scrollTop;
+  const bot = top + Math.max(s.h * p.dh, 24);
+  const pad = Math.min(56, view * 0.12);
+  let by = 0;
+  if (top < pad) by = top - pad;
+  else if (bot > view - pad) by = bot - (view - pad);
+  if (Math.abs(by) < 4) return;
+  const max = Math.max(0, stageEl.scrollHeight - view);
+  stageEl.scrollTo({ top: clamp(stageEl.scrollTop + by, 0, max), behavior: 'smooth' });
 }
 
 function paintBoxCursor(p, B) {

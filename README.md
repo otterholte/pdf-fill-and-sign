@@ -398,6 +398,47 @@ field's backing fill is never legitimately black, so white is the safer answer.
 Nothing you typed is affected either way: text, marks and field values live in state
 and the DOM, not on the canvas.
 
+## Shipping a fix that actually arrives
+
+The service worker was cache-first for everything, which is the standard recipe and the
+wrong one here. It served the stored copy and refreshed in the background, so every visit
+showed the *previous* build and a fix only appeared the visit after — a bug could be
+fixed, deployed, and still be there the next morning. The libraries and icons stay
+cache-first, since they never change without changing their name. The app itself now asks
+the network first and falls back to the cache, so it still works offline and a plain
+refresh is enough to be on the current version.
+
+## Who is allowed to move the page
+
+Only Back / Next and Tab. They centre what you land on, because asking to be taken
+somewhere and being taken there is the whole point of pressing them.
+
+Nothing else scrolls on purpose. Tapping a blank used to re-centre it, which reads as the
+page lurching under your finger just as you start typing — you lose your place mid-word,
+and it happens on every field. A tap already put the thing in front of you; there is
+nothing to fix. The one real exception is a keyboard opening over what you just tapped,
+so a tap scrolls only when the spot is genuinely out of sight, and then by the least that
+brings it back rather than re-centring the page.
+
+## Double tap puts a box where you want it
+
+The scan is a guess. It misses things — a blank drawn in some way nothing accounts for, a
+box the grid logic could not close. The answer is not to make you go up to the toolbar,
+arm the Text tool, and come back: the second tap drops a text box exactly where your
+finger is, already selected, so the next thing you type goes in it. Browsers spend that
+gesture on zoom; this page has no use for it, the viewport is fixed.
+
+It never overrules something the scan *did* find. A tick box or a marked blank under your
+finger does its own thing, and a quick double tap on one of those is just an impatient
+single tap.
+
+An empty box shows a placeholder, which is what makes it draggable — an empty box with
+nothing in it is invisible, and you cannot take hold of something you cannot see. The
+placeholder is drawn by CSS from `data-ph`, so it is never content: typing does not have
+to delete it first, and it can never reach the exported PDF. Drag the box and the caret
+comes back when you let go, because you moved it to write in it. Tap somewhere else
+without typing and it is gone.
+
 ## Keeping the bars on screen
 
 An on-screen keyboard is two different problems. Chrome honours
