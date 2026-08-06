@@ -102,6 +102,12 @@ left while each button takes the text to its right.
 On the fixtures: 8/8 on printed lines with headings above, 15/15 on lines plus tick boxes,
 9/10 on a declared AcroForm. The misses are blanks with no label anywhere on the page.
 
+OCR does not know a tick box is a control: it sees a small square and reads it as letters,
+then runs them into the label beside it, so "Renewal" arrives as "OC Renewal" and "REAL ID"
+as "CJ REAL ID". Spelling cannot settle which prefixes are junk without eating real ones —
+"Do you…", "ID Number" — but geometry can, so the strip only happens when the captured word
+actually overlaps a box the scan found.
+
 ### What counts as ink
 
 A PDF drawn by software puts pure black on pure white; a scan of the same form has soft
@@ -119,6 +125,44 @@ Otsu's method was the obvious thing to try first and it is the wrong tool here: 
 with solid black section banners gives it two strong populations to split on, and it
 discards the grey rules entirely — 7 cells down to 1. That reasoning is kept in the
 source so nobody repeats it.
+
+### Captioned boxes
+
+The blank-line model — a rule with a label beside it — covers most of a printed form and
+almost none of a government one. A DMV application is a grid, and the caption is printed
+*inside* each box, in the top-left, with the room underneath left for the answer. "Last",
+"City", "ZIP", "Eye Color" are all drawn that way.
+
+Treating any box with ink in it as already filled threw that whole pattern away. On a DMV
+application it found twenty things to fill in out of about fifty, and because it then had
+to guess the labels from whatever text sat nearest, it asked for "ft", "in" and "lbs"
+instead of Height and Weight. So the question is not whether a cell has ink but *where*:
+the first band of ink, with a clear run under it, is a caption, and the answer goes in
+the clear part. That caption is also the field's name — read straight out of the box,
+with nothing to infer.
+
+Three failures had to be fixed before that paid off, and each cost a whole class of field:
+
+- **A section banner is drawn as two rules six pixels apart.** Each one saw the other,
+  called it a row of text, and both were thrown away — along with every cell on that row.
+  Nearly-solid across the same width is the tell; type never is.
+- **`findCells` stopped at the first neighbour it found for each upright.** But "nearest
+  neighbour" is a property of an upright *on a given row*: the left border of a form
+  meets a different divider in every band it passes through. Breaking after the first
+  match lost the leftmost cell of every other row.
+- **The outer border is the upright most likely to be missing.** It runs the whole page,
+  so any fold or soft edge in a scan breaks it into pieces too short to register. The
+  rules crossing it all stop at the same place, though, and enough of them agreeing is
+  better evidence of an edge than one faint column of pixels — so the border the rows
+  imply is used where the real one is absent. Only on a page that is already plainly a
+  grid: guessing an edge on a page of plain blank lines would turn the blanks into
+  borders.
+
+A rule with an upright at each end is a border, not a blank — it is drawn to divide the
+page. Offering those as blanks put a text box through the middle of the grid.
+
+On the DMV application: 20 fields found before, 58 after, and the ones that carry a
+printed caption now carry its exact words.
 
 ### Tables
 

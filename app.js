@@ -840,9 +840,18 @@ function scanLines(cv) {
       if (v >= 0.55) core++;
     }
     if (solid < 0.80) return false;
-    const above = Math.max(density(b.top - 3, b.x0, b.x1), density(b.top - 5, b.x0, b.x1));
-    const below = Math.max(density(b.bot + 3, b.x0, b.x1), density(b.bot + 5, b.x0, b.x1));
-    if (above >= 0.28 || below >= 0.28) return false;
+    /* White space above and below is what separates a rule from a row of
+       type. But *another rule* is not type, and a section banner is drawn as
+       two rules six pixels apart — each one saw the other, called it text,
+       and both were thrown away, taking every cell on that row with them.
+       Nearly-solid across the same width is the tell: text never is. */
+    const clear = dir => {
+      const at = g => density(dir < 0 ? b.top - g : b.bot + g, b.x0, b.x1);
+      if (at(3) < 0.28 && at(5) < 0.28) return true;          // open paper
+      for (let g = 2; g <= 7; g++) if (at(g) > 0.90) return true;  // another rule
+      return false;
+    };
+    if (!clear(-1) || !clear(1)) return false;
     /* A rule is thin. A heavy word like "Phone Number:" is not — but across
        its whole x-height the letters nearly join, so every row of it reads as
        a run and the whole word arrives as one eight-pixel "rule" that tops out
@@ -1199,7 +1208,41 @@ function scanVRules(scan) {
 /** the boxes of a ruled grid, and which horizontals were spent building them */
 function findCells(hs, vs, W, H, mask) {
   const cells = [], usedH = new Set();
-  const V = [...vs].sort((a, b) => a.x0 - b.x0);
+  /* A form's outer border is the one upright most likely to be missing: it
+     runs the whole page, so any fold, shadow or soft edge in a scan breaks it
+     into pieces too short to register. Losing it costs the leftmost cell of
+     every single row — Last, Height, City, Contact Name, the entire first
+     column. But the rules crossing it all start and stop at the same place,
+     and enough of them agreeing is better evidence of an edge than one faint
+     column of pixels. So take the border the rows imply. */
+  const wideH = hs.filter(h => h.x1 - h.x0 > W * 0.5);
+  const implied = [];
+  /* Only on a page that is plainly a grid, and only where the border is
+     actually absent. Guessing an edge on a page of plain blank lines turns
+     the blanks into cell borders and the form stops working; patching the
+     gaps in an upright that is merely broken cannot. */
+  if (wideH.length >= 4 && vs.length >= 6) {
+    for (const side of ['x0', 'x1']) {
+      /* Where most of them end — the count that agrees, not the middle of the
+         list. A median is pulled about by the rules that are themselves
+         broken, and a border guessed a fifth of the way across the page is
+         worse than no guess at all. */
+      const at = wideH.map(h => h[side]).sort((a, b) => a - b);
+      let x = -1, most = 3;                                // fewer than 4 is not evidence
+      for (const c of at) {
+        const n = at.filter(v => Math.abs(v - c) <= 6).length;
+        if (n > most) { most = n; x = c; }
+      }
+      if (x < 0) continue;
+      const have = vs.filter(v => Math.abs(v.x0 - x) <= 8).sort((a, b) => a.y0 - b.y0);
+      let y = 0;
+      for (const v of have.concat([{ y0: H, y1: H }])) {
+        if (v.y0 - y > H * 0.02) implied.push({ x0: x, x1: x, y0: y, y1: v.y0 - 1, implied: true });
+        y = Math.max(y, v.y1 + 1);
+      }
+    }
+  }
+  const V = [...vs, ...implied].sort((a, b) => a.x0 - b.x0);
   const Hh = [...hs].sort((a, b) => a.top - b.top);
   const minW = W * 0.025, minH = H * 0.012;
 
@@ -1211,37 +1254,99 @@ function findCells(hs, vs, W, H, mask) {
       const vy0 = Math.max(L.y0, R.y0), vy1 = Math.min(L.y1, R.y1);
       if (vy1 - vy0 < minH) continue;
 
-      // an upright in between means R is not L's neighbour
-      let blocked = false;
-      for (let k = i + 1; k < j && !blocked; k++) {
+      /* An upright standing between these two means they are not neighbours —
+         but only across the rows it actually crosses. Judged over the whole
+         height of the pair, a divider one row tall never reaches the
+         threshold, and the page's two outer borders pair up into a single
+         cell swallowing everything between them. So ask the question of each
+         candidate cell instead. */
+      const between = [];
+      for (let k = i + 1; k < j; k++) {
         const M = V[k];
-        if (M.x0 > x0 && M.x1 < x1 &&
-            Math.min(M.y1, vy1) - Math.max(M.y0, vy0) > (vy1 - vy0) * 0.55) blocked = true;
+        if (M.x0 > x0 && M.x1 < x1) between.push(M);
       }
-      if (blocked) continue;
+      const split = (top, bot) => between.some(M =>
+        Math.min(M.y1, bot) - Math.max(M.y0, top) >
+        Math.min(bot - top, M.y1 - M.y0) * 0.5);
 
+      /* How closely a rule has to reach the uprights to be counted as this
+         cell's lid. Five pixels is right for a drawn table and too strict for
+         a scan, where a rule fades out before it meets the border — miss by a
+         hair and the whole row of cells vanishes. */
+      const reach = Math.max(5, Math.round(W * 0.015));
       const spans = Hh.filter(h =>
-        h.x0 <= x0 + 5 && h.x1 >= x1 - 5 && h.bot >= vy0 - 5 && h.top <= vy1 + 5);
+        h.x0 <= x0 + reach && h.x1 >= x1 - reach && h.bot >= vy0 - 5 && h.top <= vy1 + 5);
       for (let a = 0; a + 1 < spans.length; a++) {
         const T = spans[a], B = spans[a + 1];
         if (B.top - T.bot < minH) continue;
+        if (split(T.bot, B.top)) continue;
         usedH.add(T); usedH.add(B);
-        let ink = 0, tot = 0;
-        for (let y = T.bot + 3; y < B.top - 2; y += 2) {
+        /* Where the ink sits inside the box matters more than whether there
+           is any. A government form prints the caption *inside* the cell, at
+           the top, and leaves the room below it for the answer — "Last",
+           "City", "ZIP", "Eye Color" are all drawn that way. Treating any
+           inked cell as already filled threw that entire pattern away: on a
+           DMV application it discarded better than thirty real fields and
+           left the form looking almost empty. So read the rows: a caption up
+           top with clear paper under it is a labelled box, and the answer
+           belongs in the clear part. */
+        const iy0 = T.bot + 3, iy1 = B.top - 3, ix0 = x0 + 3, ix1 = x1 - 3;
+        const wide = ix1 - ix0 + 1;
+        const tall = iy1 - iy0;
+        const inked = [];
+        for (let y = iy0; y <= iy1; y++) {
+          let c = 0;
           const base = y * W;
-          for (let x = x0 + 3; x < x1 - 2; x += 2) { tot++; if (mask[base + x]) ink++; }
+          for (let x = ix0; x <= ix1; x++) if (mask[base + x]) c++;
+          /* An absolute floor as well as a fraction: a scan leaves a couple of
+             stray dark pixels on most rows, and a pure percentage reads those
+             as writing and calls every wide cell already full. */
+          inked.push(c >= Math.max(4, wide * 0.02));
         }
+        /* The caption is the first band of ink, allowing for the gap between
+           a word's body and its descenders. What matters after it is the
+           clear run — that is the paper left for the answer. Whether there is
+           anything *further* down does not decide it: "Height ___ ft ___ in"
+           has rules near the bottom and is still a captioned box. Insisting
+           the whole cell below the caption be clear marked every one of those
+           as filled. */
+        let capA = inked.indexOf(true), capB = -1, gapEnd = 0;
+        if (capA >= 0) {
+          capB = capA;
+          for (let i = capA + 1, hole = 0; i < inked.length; i++) {
+            if (inked[i]) { capB = i; hole = 0; }
+            else if (++hole > 2) break;
+          }
+          gapEnd = capB + 1;
+          while (gapEnd < inked.length && !inked[gapEnd]) gapEnd++;
+        }
+        const capped = capA >= 0 && capA < tall * 0.4 &&
+                       gapEnd - capB - 1 >= Math.max(9, H * 0.011);
+        const wy0 = capped ? iy0 + capB + 2 : T.bot;         // where you write
         cells.push({
-          x0: x0 / W, x1: x1 / W, y0: T.bot / H, y1: B.top / H,
-          cx: (x0 + x1) / 2 / W, cy: (T.bot + B.top) / 2 / H,
-          w: (x1 - x0) / W, h: (B.top - T.bot) / H,
-          filled: tot > 0 && ink / tot > 0.02,
+          x0: x0 / W, x1: x1 / W, y0: wy0 / H, y1: B.top / H,
+          cx: (x0 + x1) / 2 / W, cy: (wy0 + B.top) / 2 / H,
+          w: (x1 - x0) / W, h: (B.top - wy0) / H,
+          box: { x0: x0 / W, x1: x1 / W, y0: T.bot / H, y1: B.top / H },
+          cap: capped
+            ? { x0: x0 / W, x1: x1 / W, y0: (iy0 + capA - 2) / H, y1: (iy0 + capB + 2) / H }
+            : null,
+          // something further down the box: rules to fill, or an answer already there
+          body: capped && gapEnd < inked.length,
+          filled: capA >= 0 && !capped,
         });
       }
-      break;                                    // R was the nearest neighbour
+      /* Don't stop here. "Nearest neighbour" is not a property of an upright,
+         it is a property of an upright *on a given row*: the form's left
+         border neighbours a different divider in every band it passes
+         through. Breaking after the first match paired the border with one
+         row and lost the leftmost cell of every other — Last, Height, City,
+         Contact Name, the whole first column of a DMV form. The blocked test
+         above already refuses a pair with an upright standing between them,
+         which is the thing the break was reaching for. */
     }
   }
-  return { cells, usedH };
+  return { cells, usedH, uprights: V };
 }
 
 /* Scanning runs on its own small render rather than the on-screen canvas, so
@@ -1281,8 +1386,18 @@ function ensureScan(p) {
       /* Rules spent on a table are not blanks to write on — the cells they
          bound are. Work those out first, then keep only the leftovers. */
       const vs = scanVRules(scan);
-      const { cells, usedH } = findCells(scan.allBands, vs, scan.W, scan.H, scan.mask);
-      const free = scan.bands.filter(b => !usedH.has(b));
+      const { cells, usedH, uprights } = findCells(scan.allBands, vs, scan.W, scan.H, scan.mask);
+      /* A rule with an upright standing at each end is a border — the side of
+         a box, the line between two rows of a grid. It is drawn to divide the
+         page, not to be written on, and offering it as a blank puts a text
+         box across the middle of somebody's table. The rules a person fills
+         in are open at least at one end. */
+      const bounded = b => {
+        const at = x => uprights.some(v =>
+          Math.abs(v.x0 - x) <= 6 && v.y0 <= b.top + 4 && v.y1 >= b.bot - 4);
+        return b.x1 - b.x0 > scan.W * 0.35 && at(b.x0) && at(b.x1);
+      };
+      const free = scan.bands.filter(b => !usedH.has(b) && !bounded(b));
       /* How much empty room sits above a rule. It matters because on a dense
          form the next thing up is often a section banner or a caption, and a
          writing box drawn blindly upwards lands squarely on that heading's own
@@ -1309,26 +1424,52 @@ function ensureScan(p) {
         }
         return (b.top - y) / scan.H;
       };
+      /* The underside of a solid section banner is a long, thin, perfectly
+         solid rule and passes every test a blank has to pass — but there is
+         nowhere to write on it, because the banner is pressed right up
+         against it. Room above is what makes a rule a blank. */
+      const lines = free.filter(b => clearAbove(b) * scan.H >= 8).map(b => {
+        /* Match the label if we found one. With no label to measure, a
+           sensible default beats the bottom of the clamp — that is what
+           used to make an unlabelled blank get 6pt text. */
+        const ink = inkHeightLeft(scan, b);
+        const clr = clearAbove(b);
+        const want = ink ? clamp((ink / 0.72) / scan.H, 0.0085, 0.045) : DEF.fs;
+        return {
+          y: b.top / scan.H,                     // where a baseline should sit
+          x0: b.x0 / scan.W,
+          x1: b.x1 / scan.W,
+          fs: Math.max(0.0085, Math.min(want, clr / 0.95)),
+          clr,
+          hasLabel: ink > 0,
+        };
+      });
+      const boxes = scanBoxes(scan);
+      /* A captioned box that already has rules or tick boxes drawn in it is
+         not one place to write but several — "Height ___ ft. ___ in." is two
+         blanks, and a yes/no column is a pair of boxes. Offer the finer thing
+         and drop the box around it, or the page gets two overlapping targets
+         that fight each other for the same tap. */
+      const inside = (c, x, y) => x > c.x0 && x < c.x1 && y > c.y0 - 0.004 && y < c.y1 + 0.004;
+      const split = c => {
+        if (!c.cap) return false;
+        const mine = lines.filter(L => inside(c, (L.x0 + L.x1) / 2, L.y));
+        const tick = boxes.filter(B => inside(c, B.cx, B.cy));
+        /* The caption still belongs to whatever is in the box — "Height" is
+           the name of both rules under it, not of the box around them. Hand
+           it down before dropping the box, or the rules fall back to the only
+           other words nearby, which are the units printed after them, and the
+           form comes out asking for "ft", "in" and "lbs". */
+        mine.forEach(L => (L.cap = c.cap));
+        tick.forEach(B => (B.cap = c.cap));
+        // anything left further down that the rules and boxes do not explain
+        // is somebody's answer, and this is not a blank after all
+        return mine.length > 0 || tick.length > 0 || c.body;
+      };
       p.scanned = {
-        cells: cells.filter(c => !c.filled),
+        cells: cells.filter(c => !c.filled && !split(c)),
         cellsAll: cells, vrules: vs.length, bands: scan.bands.length,
-        lines: free.map(b => {
-          /* Match the label if we found one. With no label to measure, a
-             sensible default beats the bottom of the clamp — that is what
-             used to make an unlabelled blank get 6pt text. */
-          const ink = inkHeightLeft(scan, b);
-          const clr = clearAbove(b);
-          const want = ink ? clamp((ink / 0.72) / scan.H, 0.0085, 0.045) : DEF.fs;
-          return {
-            y: b.top / scan.H,                     // where a baseline should sit
-            x0: b.x0 / scan.W,
-            x1: b.x1 / scan.W,
-            fs: Math.max(0.0085, Math.min(want, clr / 0.95)),
-            clr,
-            hasLabel: ink > 0,
-          };
-        }),
-        boxes: scanBoxes(scan),
+        lines, boxes,
       };
     } catch (err) {
       console.warn('page scan failed', err);
@@ -2282,6 +2423,35 @@ function labelFor(words, sp, skipRight) {
   if (!words.length) return null;
   const rowTol = Math.max(0.008, sp.h * 0.9);
 
+  /* A captioned box carries its own label — the words printed inside it,
+     above the space left for the answer. Reading them out of the box beats
+     every guess below it, because there is nothing to guess: the form has
+     already said which words belong to this field. */
+  const cap = sp.kind === 'cell' ? sp.C?.cap
+            : sp.kind === 'line' ? sp.L?.cap
+            : sp.kind === 'box'  ? sp.B?.cap : null;
+  if (cap) {
+    const said = words
+      .filter(r => r.cy > cap.y0 && r.cy < cap.y1 && r.x1 > cap.x0 && r.x0 < cap.x1)
+      .sort((a, b) => a.x0 - b.x0)
+      .map(r => r.s).join(' ');
+    /* Two rules can share one caption — "Height ____ ft. ____ in." — and then
+       the caption alone names them both. The unit printed just past the rule
+       is what tells them apart, so keep it. */
+    let unit = '';
+    if (sp.kind === 'line' && sp.L) {
+      for (const r of words) {
+        if (Math.abs(r.cy - sp.cy) > rowTol) continue;
+        const d = r.x0 - sp.L.x1;
+        if (d < -0.004 || d > 0.025) continue;
+        const s = r.s.trim();
+        if (s.length <= 5 && /[A-Za-z]/.test(s)) { unit = s; break; }
+      }
+    }
+    const t = tidyLabel(unit ? `${said} ${unit}` : said);
+    if (t) return t;
+  }
+
   // a tick box is labelled to its right, and nothing else comes close
   const ticky = !skipRight && (sp.kind === 'box' ||
     (sp.kind === 'field' && (sp.f?.type === 'check' || sp.f?.type === 'radio')));
@@ -2294,14 +2464,26 @@ function labelFor(words, sp, skipRight) {
       if (d < -0.004 || d > bd) continue;
       bd = d; best = r;
     }
-    const t = best && tidyLabel(best.s);
+    /* OCR does not know a tick box is a control: it sees a small square and
+       reads it as letters, then runs them into the label beside it — "Renewal"
+       comes back as "OC Renewal", "REAL ID" as "CJ REAL ID". Spelling cannot
+       settle which prefixes are junk without eating real ones ("Do you…", "ID
+       Number"), but geometry can: only strip when the captured word actually
+       overlaps the box we detected. */
+    const bx1 = sp.B ? sp.B.x1 : sp.x;
+    const t = best && tidyLabel(
+      best.x0 < bx1 - 0.001 ? best.s.replace(/^\s*\S{1,2}(?=\s)/, '') : best.s);
     if (t) return t;
   }
 
-  // beside it, on the same row
+  /* Beside it, on the same row. How far apart two things can be and still
+     count as one row has to allow for the label's own size: a blank sized at
+     the bottom of the clamp gets a hair-thin tolerance, and then "Signature:"
+     misses the line drawn right next to it and the field ends up named after
+     a stray phrase from the paragraph above. */
   let best = null, bd = 0.30;
   for (const r of words) {
-    if (Math.abs(r.cy - sp.cy) > rowTol) continue;
+    if (Math.abs(r.cy - sp.cy) > Math.max(rowTol, (r.h || 0) * 0.8)) continue;
     const d = sp.x - r.x1;
     if (d < -0.004 || d > bd) continue;
     bd = d; best = r;
@@ -3849,4 +4031,5 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 pageBg, forget, paintHints, findHint, textOnLine,
                 readQuestions, pageWords, labelFor, pageCells, scanVRules, textInCell,
                 wordsOrOcr, ocrPage,
-                buildSimple, showSimple, showPage, askView, SIMof: () => SIM };
+                buildSimple, showSimple, showPage, askView, SIMof: () => SIM,
+                scanLines, findCells, totalRot, scanBoxes };
