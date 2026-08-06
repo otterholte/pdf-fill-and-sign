@@ -102,6 +102,24 @@ left while each button takes the text to its right.
 On the fixtures: 8/8 on printed lines with headings above, 15/15 on lines plus tick boxes,
 9/10 on a declared AcroForm. The misses are blanks with no label anywhere on the page.
 
+### What counts as ink
+
+A PDF drawn by software puts pure black on pure white; a scan of the same form has soft
+grey rules. One fixed cutoff cannot serve both — too high and text bleeds together, too
+low and the rules register only in patches, shred into fragments, and take whole tables
+with them.
+
+Ink is therefore either plainly dark *or* darker than the paper immediately around it.
+The second half needs a local mean, which a summed-area table gives from four lookups
+per pixel. Taking the union rather than replacing keeps it strictly additive: nothing
+that used to register stops registering. On the scanned application it took detected
+table cells from 11 to 24, with both tables found rather than one.
+
+Otsu's method was the obvious thing to try first and it is the wrong tool here: a form
+with solid black section banners gives it two strong populations to split on, and it
+discards the grey rules entirely — 7 cells down to 1. That reasoning is kept in the
+source so nobody repeats it.
+
 ### Tables
 
 A ruled table is the one place on a form where the blank is a box rather than a line,

@@ -716,10 +716,43 @@ function scanLines(cv) {
 
   /* one pass to a 1-byte-per-pixel ink mask — every scan below reads this
      instead of re-deriving luminance, which keeps the box pass cheap */
-  const DARK = 150;              // luminance below this counts as ink
+  /* Ink is either plainly dark, or darker than the paper immediately around
+     it. The first half is the old fixed cutoff and catches everything it
+     always did; the second half is what finds the soft grey rules of a scan,
+     which a single number cannot — too high and text bleeds together, too low
+     and the rules vanish in patches and shred into fragments.
+
+     Comparing each pixel to a local mean needs that mean cheaply, so build a
+     summed-area table once and read any window from four lookups. Taking the
+     union rather than replacing keeps this strictly additive: nothing that
+     used to register stops registering. */
+  const DARK = 150;                                 // plainly dark, whatever the paper
+  const lum = new Uint8Array(W * H);
+  for (let i = 0, m = 0; m < lum.length; m++, i += 4) {
+    lum[m] = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+  }
+  const sum = new Uint32Array((W + 1) * (H + 1));
+  for (let y = 0; y < H; y++) {
+    let run = 0;
+    for (let x = 0; x < W; x++) {
+      run += lum[y * W + x];
+      sum[(y + 1) * (W + 1) + x + 1] = sum[y * (W + 1) + x + 1] + run;
+    }
+  }
+  const R = clamp(Math.round(W / 40), 8, 40);      // half a window
+  const CUT = 18;                                   // how much darker than its paper
   const mask = new Uint8Array(W * H);
-  for (let i = 0, m = 0; m < mask.length; m++, i += 4) {
-    mask[m] = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 < DARK ? 1 : 0;
+  for (let y = 0; y < H; y++) {
+    const y0 = Math.max(0, y - R), y1 = Math.min(H - 1, y + R);
+    for (let x = 0; x < W; x++) {
+      const v = lum[y * W + x];
+      if (v < DARK) { mask[y * W + x] = 1; continue; }
+      const x0 = Math.max(0, x - R), x1 = Math.min(W - 1, x + R);
+      const area = (x1 - x0 + 1) * (y1 - y0 + 1);
+      const tot = sum[(y1 + 1) * (W + 1) + x1 + 1] - sum[y0 * (W + 1) + x1 + 1]
+                - sum[(y1 + 1) * (W + 1) + x0] + sum[y0 * (W + 1) + x0];
+      if (v < tot / area - CUT) mask[y * W + x] = 1;
+    }
   }
 
   /* Every qualifying run on the row, not just the longest one. A form row
@@ -2046,7 +2079,109 @@ function spotsForPage(pi) {
 
 const LABEL_MAX = 78;
 
+/* ------------------------------------------------------------------- OCR
+   A scanned page carries no text, so there is nothing to read a label from.
+   Tesseract fixes that entirely on the device — but it is seven megabytes, so
+   it is fetched only when someone actually opens Simple view on a scan, and
+   cached by the service worker afterwards. Everything downstream is unchanged:
+   OCR produces the same {text, box} shape the text layer does, so the label
+   lookup, the reading order and the cards never learn where the words came
+   from. */
+const OCR_DIR = 'vendor/ocr/';
+const OCR_W = 1700;                    // ~200dpi on Letter; Tesseract wants the pixels
+let ocrWorker = null, ocrBooting = null;
+
+async function ocrReady(onNote) {
+  if (ocrWorker) return ocrWorker;
+  if (ocrBooting) return ocrBooting;
+  ocrBooting = (async () => {
+    onNote?.('Fetching the text reader (one time)…');
+    const mod = await import('./' + OCR_DIR + 'tesseract.esm.min.js');
+    const T = mod.default || mod;          // the ESM build exports the namespace as default
+    onNote?.('Starting the text reader…');
+    ocrWorker = await T.createWorker('eng', 1, {
+      workerPath: new URL(OCR_DIR + 'worker.min.js', location.href).href,
+      corePath: new URL(OCR_DIR + 'tesseract-core-simd-lstm.js', location.href).href,
+      langPath: new URL(OCR_DIR, location.href).href,
+      gzip: false,
+      legacyCore: false,
+      legacyLang: false,
+      /* Load the worker from its real URL. Tesseract wraps it in a blob by
+         default, and a blob worker has a `blob:` base — so the core's own
+         relative fetch for its .wasm has nothing to resolve against and the
+         whole thing hangs. */
+      workerBlobURL: false,
+    });
+    return ocrWorker;
+  })();
+  try { return await ocrBooting; } finally { ocrBooting = null; }
+}
+
+/** read one page with OCR, in the same shape the text layer gives */
+async function ocrPage(p, onNote) {
+  const w = await ocrReady(onNote);
+  const cv = document.createElement('canvas');
+  try {
+    const v0 = p.page.getViewport({ scale: 1, rotation: totalRot(p) });
+    const vp = p.page.getViewport({ scale: OCR_W / v0.width, rotation: totalRot(p) });
+    cv.width = Math.round(vp.width);
+    cv.height = Math.round(vp.height);
+    const ctx = cv.getContext('2d', { alpha: false });
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    await p.page.render({ canvasContext: ctx, viewport: vp }).promise;
+    const res = await w.recognize(cv, {}, { blocks: true });
+    const out = [];
+    const eat = ln => (ln.words || []).forEach(word => {
+      const t = (word.text || '').trim();
+      if (!t || (word.confidence ?? 100) < 45) return;
+      const b = word.bbox || {};
+      out.push({
+        s: t,
+        x0: b.x0 / cv.width, x1: b.x1 / cv.width,
+        cy: ((b.y0 + b.y1) / 2) / cv.height,
+        h: Math.max(1, b.y1 - b.y0) / cv.height,
+      });
+    });
+    (res.data.blocks || []).forEach(bl =>
+      (bl.paragraphs || []).forEach(pa => (pa.lines || []).forEach(eat)));
+    if (!out.length) (res.data.lines || []).forEach(eat);
+    return out;
+  } finally { cv.width = cv.height = 0; }
+}
+
 /** every word on a page, in the same 0–1 display frame as everything else */
+/** glue neighbouring words back into the phrase a person would read */
+function joinWords(out) {
+  out.sort((a, b) => a.cy - b.cy || a.x0 - b.x0);
+  const runs = [];
+  for (const w of out) {
+    const r = runs[runs.length - 1];
+    if (r && Math.abs(r.cy - w.cy) < Math.max(r.h, w.h) * 0.6 &&
+        w.x0 - r.x1 < Math.max(r.h, w.h) * 1.2 && w.x0 >= r.x0) {
+      r.s += (w.x0 - r.x1 > r.h * 0.18 ? ' ' : '') + w.s;
+      r.x1 = Math.max(r.x1, w.x1);
+    } else runs.push({ ...w });
+  }
+  return runs;
+}
+
+/** the page's words, read with OCR if the document carries none */
+async function wordsOrOcr(p, onNote) {
+  const w = await pageWords(p);
+  if (w.length) return w;
+  if (p.ocrKey === 'w' + totalRot(p)) return p.words;
+  try {
+    p.words = joinWords(await ocrPage(p, onNote));
+    p.ocrKey = 'w' + totalRot(p);
+  } catch (err) {
+    console.warn('OCR unavailable', err);
+    p.words = [];
+    p.ocrKey = 'w' + totalRot(p);
+  }
+  return p.words;
+}
+
 async function pageWords(p) {
   const key = 'w' + totalRot(p);
   if (p.wordKey === key) return p.words;
@@ -2069,25 +2204,22 @@ async function pageWords(p) {
         h: h / vp.height,
       });
     }
-    // glue neighbouring words back into the phrase a person would read
-    out.sort((a, b) => a.cy - b.cy || a.x0 - b.x0);
-    const runs = [];
-    for (const w of out) {
-      const r = runs[runs.length - 1];
-      if (r && Math.abs(r.cy - w.cy) < Math.max(r.h, w.h) * 0.6 &&
-          w.x0 - r.x1 < Math.max(r.h, w.h) * 1.2 && w.x0 >= r.x0) {
-        r.s += (w.x0 - r.x1 > r.h * 0.18 ? ' ' : '') + w.s;
-        r.x1 = Math.max(r.x1, w.x1);
-      } else runs.push({ ...w });
-    }
-    p.words = runs;
+    p.words = joinWords(out);
   } catch (_) { p.words = []; }
   return p.words;
 }
 
+/* OCR has no idea an empty tick box is a control — it sees a small rounded
+   shape and reads it as a letter, so labels come back as "O Full-Time" or,
+   for a bare grid cell, just "Oo". Strip a leading glyph, and treat a label
+   that is nothing but glyphs as no label at all. */
+const GLYPHY = /^[\s.·•*O0oQ□◻▢❑☐■\[\]()|]{1,3}$/;
+const stripGlyph = t => t.replace(/^[O0oQ□◻▢❑☐\[\]|]{1,2}[\s.·]+/, '');
+
 /** tidy a captured phrase into something that reads as a question */
 function tidyLabel(s) {
-  let t = (s || '').replace(/\s+/g, ' ').trim();
+  let t = stripGlyph((s || '').replace(/\s+/g, ' ').trim());
+  if (GLYPHY.test(t)) return '';
   t = t.replace(/[\s._:\-–—]+$/, '');            // trailing colons, dashes, dot leaders
   t = t.replace(/^[\s._:\-–—•*]+/, '');
   if (t.length > LABEL_MAX) t = t.slice(0, LABEL_MAX - 1).replace(/\s\S*$/, '') + '…';
@@ -2106,11 +2238,13 @@ function labelFor(words, sp, skipRight) {
     let best = null, bd = 0.10;
     for (const r of words) {
       if (Math.abs(r.cy - sp.cy) > rowTol) continue;
+      if (GLYPHY.test(r.s.trim())) continue;        // that is the box itself
       const d = r.x0 - sp.x;
       if (d < -0.004 || d > bd) continue;
       bd = d; best = r;
     }
-    if (best) return tidyLabel(best.s);
+    const t = best && tidyLabel(best.s);
+    if (t) return t;
   }
 
   // beside it, on the same row
@@ -2139,13 +2273,15 @@ function labelFor(words, sp, skipRight) {
 }
 
 /** every spot in the document, in reading order, with its question */
-async function readQuestions() {
+async function readQuestions(opts = {}) {
   const out = [];
   let seen = 0;
   for (let pi = 0; pi < S.pageBox.length; pi++) {
     const p = S.pageBox[pi];
     await ensureScan(p);
-    const words = await pageWords(p);
+    const words = opts.ocr
+      ? await wordsOrOcr(p, n => opts.note?.(n, pi + 1, S.pageBox.length))
+      : await pageWords(p);
     seen += words.length;
     for (const sp of spotsForPage(pi)) {
       out.push({
@@ -3462,7 +3598,10 @@ const labelLeftOf = q => {
 async function buildSimple() {
   busy(true, 'Reading the form…');
   try {
-    const r = await readQuestions();
+    const r = await readQuestions({
+      ocr: true,
+      note: (msg, n, total) => busy(true, total > 1 ? `${msg} (page ${n} of ${total})` : msg),
+    });
     SIM.qs = groupQuestions(r.questions);
     SIM.qs.forEach((q, i) => {
       q.n = i + 1;                                 // a radio group is one question
@@ -3489,8 +3628,9 @@ async function buildSimple() {
   $('#simMeta').textContent = n
     ? `${n} thing${n > 1 ? 's' : ''} to fill in · stays on this device`
     : 'Nothing obvious to fill in';
-  $('#simEndNote').textContent = SIM.scanned
-    ? 'This document is a scan, so the blanks could not be named. They are still in the order they appear on the page.'
+  const unnamed = SIM.qs.filter(q => /^Blank \d+$/.test(q.label)).length;
+  $('#simEndNote').textContent = unnamed && unnamed === SIM.qs.length
+    ? 'The labels could not be read off this page, so the blanks are numbered in the order they appear. They still work.'
     : 'Everything you type here lands on the real page. Review it before you save.';
   SIM.built = true;
 }
@@ -3564,7 +3704,7 @@ async function askView(name) {
     : 'One question at a time, filling the screen';
   $('#pickNote').textContent =
     !n ? 'No blanks were found in this document — page view lets you put text anywhere.'
-    : r.scanned ? 'This document is a scan, so the blanks are numbered rather than named. They still work.'
+    : r.scanned ? 'This is a scan. Simple view will read the labels off the page — that takes a few seconds the first time.'
     : named < n ? `${named} of ${n} blanks could be named from the document’s own text.`
     : '';
 }
@@ -3653,4 +3793,5 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 pageBoxes, findBox, ensureScan, spotsForPage, spotsOf, moveSpot, KB, fitViewport,
                 pageBg, forget, paintHints, findHint, textOnLine,
                 readQuestions, pageWords, labelFor, pageCells, scanVRules, textInCell,
+                wordsOrOcr, ocrPage,
                 buildSimple, showSimple, showPage, askView, SIMof: () => SIM };
