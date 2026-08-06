@@ -408,6 +408,22 @@ cache-first, since they never change without changing their name. The app itself
 the network first and falls back to the cache, so it still works offline and a plain
 refresh is enough to be on the current version.
 
+## Zooming in must not make the page smaller
+
+The keyboard handling below works by sizing the editor to `visualViewport`, which is
+right for a keyboard and wrong for everything else that shrinks it — and pinch to zoom
+shrinks it too. At 2.6× the visual viewport reports roughly a third of the height, so the
+editor collapsed to a third of the screen, the stage collapsed with it, and zooming in to
+read a line squeezed the whole document into a strip. While the page is scaled the layout
+is left alone and the browser pans over it, which is what zoom is for.
+
+Two smaller things fed the same problem. Re-fitting the page width on every resize meant a
+keyboard — which changes only the height — could still re-fit and throw away your zoom;
+the width is only recomputed when the width actually changed. And `maximum-scale=1` in the
+viewport tag is redundant next to `user-scalable=no` while also telling the browser the
+ideal scale is 1, which is how focusing a text box could snap you straight back out of the
+zoom you had set.
+
 ## Who is allowed to move the page
 
 Only Back / Next and Tab. They centre what you land on, because asking to be taken

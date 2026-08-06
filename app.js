@@ -245,7 +245,7 @@ const totalRot = p => (((p.baseRot + p.userRot) % 360) + 360) % 360;
 async function buildPages(rots) {
   pagesEl.innerHTML = '';
   S.pageBox = [];
-  S.baseW = fitWidth();
+  S.baseW = lastFitW = fitWidth();
 
   for (let i = 1; i <= S.pdf.numPages; i++) {
     const page = await S.pdf.getPage(i);
@@ -599,11 +599,20 @@ async function renderVisible() {
 }
 stageEl.addEventListener('scroll', renderSoon, { passive: true });
 
-let resizeT;
+let resizeT, lastFitW = 0;
 window.addEventListener('resize', () => {
   if (!S.pdf) return;
   clearTimeout(resizeT);
-  resizeT = setTimeout(() => { S.baseW = fitWidth(); layoutPages(); renderVisible(); }, 180);
+  resizeT = setTimeout(() => {
+    /* Only a change in *width* means the page needs re-fitting. A keyboard
+       opening changes the height and nothing else, and re-fitting on that
+       threw away the zoom you had set — you would zoom in to read a line,
+       tap it, and the keyboard would appear over a page that had shrunk back
+       to fit, with the field you were aiming at now too small to read. */
+    const w = fitWidth();
+    if (w !== lastFitW) { lastFitW = w; S.baseW = w; layoutPages(); }
+    renderVisible();
+  }, 180);
 });
 
 /* ------------------------------------------------------------ zoom */
@@ -2769,6 +2778,19 @@ function fitViewport() {
   const ed = $('#editor');
   if (!v || !ed) return;
   if (ed.hidden) { ed.style.height = ''; ed.style.top = ''; ed.classList.remove('kb'); return; }
+
+  /* Pinch to zoom shrinks the visual viewport too, and it is not a keyboard.
+     Sizing the editor to it then means zooming in makes the page smaller: the
+     editor collapses to a fraction of its height, the stage collapses with
+     it, and the next re-fit renders the page at that fraction of its width —
+     you zoom in to read a line and the whole document shrinks away from you.
+     While the page is scaled, leave the layout alone and let the browser pan
+     over it, which is what zoom is for. */
+  if (v.scale > 1.01) {
+    ed.style.height = ''; ed.style.top = '';
+    ed.classList.remove('kb');
+    return;
+  }
   ed.style.height = v.height + 'px';
   ed.style.top = v.offsetTop + 'px';
 
@@ -2783,13 +2805,18 @@ function fitViewport() {
   ed.classList.toggle('kb', shrunk || typing);
 }
 
+/* The keyboard finishes arriving after the focus event that summoned it, so
+   check again once the visible strip has actually settled. */
+let revealT;
+const revealSoon = () => { clearTimeout(revealT); revealT = setTimeout(revealFocused, 140); };
+
 if (vp) {
-  vp.addEventListener('resize', fitViewport);
+  vp.addEventListener('resize', () => { fitViewport(); revealSoon(); });
   vp.addEventListener('scroll', fitViewport);
   window.addEventListener('orientationchange', () => setTimeout(fitViewport, 250));
 }
 // focus and blur move the keyboard; the viewport event can lag behind them
-document.addEventListener('focusin', () => setTimeout(() => { fitViewport(); revealSpot(); }, 90), true);
+document.addEventListener('focusin', () => setTimeout(() => { fitViewport(); revealFocused(); }, 90), true);
 document.addEventListener('focusout', () => setTimeout(fitViewport, 60), true);
 
 /* ---------------------------------------------------------- the jump bar */
@@ -2876,21 +2903,55 @@ function scrollToSpot(p, x, cy, h = 0) {
    mid-sentence. So do nothing unless the spot is genuinely out of sight,
    which really happens when a keyboard opens over it, and then scroll by the
    least that brings it back rather than re-centring the whole page. */
+/* Bring a rectangle inside the visible strip by the least that does it, and
+   without touching the zoom. Both axes matter: zoomed in, the thing you just
+   tapped is as easily off to the side as under the keyboard. */
+function revealRect(top, bot, left, right) {
+  const vh = stageEl.clientHeight, vw = stageEl.clientWidth;
+  const padY = Math.min(56, vh * 0.12), padX = Math.min(40, vw * 0.12);
+  let by = 0, bx = 0;
+  if (top < padY) by = top - padY;
+  else if (bot > vh - padY) by = Math.min(bot - (vh - padY), top - padY);
+  if (left < padX) bx = left - padX;
+  else if (right > vw - padX) bx = Math.min(right - (vw - padX), left - padX);
+  if (Math.abs(by) < 4 && Math.abs(bx) < 4) return;
+  stageEl.scrollTo({
+    top: clamp(stageEl.scrollTop + by, 0, Math.max(0, stageEl.scrollHeight - vh)),
+    left: clamp(stageEl.scrollLeft + bx, 0, Math.max(0, stageEl.scrollWidth - vw)),
+    behavior: 'smooth',
+  });
+}
+
 function revealSpot() {
   const s = KB.cur;
   if (KB.nav || !s || $('#editor').hidden) return;   // Back / Next is already moving us
   const p = S.pageBox[s.page];
   if (!p) return;
-  const view = stageEl.clientHeight;
   const top = p.el.offsetTop + (s.cy - s.h / 2) * p.dh - stageEl.scrollTop;
-  const bot = top + Math.max(s.h * p.dh, 24);
-  const pad = Math.min(56, view * 0.12);
-  let by = 0;
-  if (top < pad) by = top - pad;
-  else if (bot > view - pad) by = bot - (view - pad);
-  if (Math.abs(by) < 4) return;
-  const max = Math.max(0, stageEl.scrollHeight - view);
-  stageEl.scrollTo({ top: clamp(stageEl.scrollTop + by, 0, max), behavior: 'smooth' });
+  const left = p.el.offsetLeft + s.x * p.dw - stageEl.scrollLeft;
+  revealRect(top, top + Math.max(s.h * p.dh, 24), left, left + 24);
+}
+
+/* Whatever you are actually typing into, kept above the keyboard. Working
+   from the focused element rather than from the cursor's spot covers the box
+   you just double tapped into, which belongs to no spot at all — it is
+   wherever you put your finger, and that is exactly where you want to be
+   looking. */
+function revealFocused() {
+  if (KB.nav || $('#editor').hidden) return;
+  const ae = document.activeElement;
+  if (!ae || !pagesEl.contains(ae)) return void revealSpot();
+  const r = ae.getBoundingClientRect();
+  const s = stageEl.getBoundingClientRect();
+  if (!r.width && !r.height) return;
+  revealRect(r.top - s.top, r.bottom - s.top, r.left - s.left, r.right - s.left);
+  /* Pinched in, the stage is bigger than the window onto it, so scrolling the
+     stage can leave the box outside what you can actually see. Ask the browser
+     to pan its own viewport too — it is the only thing that can. */
+  const v = window.visualViewport;
+  if (v && v.scale > 1.01) {
+    try { ae.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' }); } catch (_) {}
+  }
 }
 
 function paintBoxCursor(p, B) {
@@ -4100,4 +4161,4 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 readQuestions, pageWords, labelFor, pageCells, scanVRules, textInCell,
                 wordsOrOcr, ocrPage,
                 buildSimple, showSimple, showPage, askView, SIMof: () => SIM,
-                scanLines, findCells, totalRot, scanBoxes };
+                scanLines, findCells, totalRot, scanBoxes, layoutPages, revealFocused };
