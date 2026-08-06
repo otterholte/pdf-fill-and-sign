@@ -11,6 +11,9 @@ No account. No upload. No trial. No watermark. No surprise paywall.
 
 ## What it does
 
+- **Scan a paper form** — photograph one with the phone, or pick a photo already on
+  it, and it becomes a PDF you can fill in. Several photos become several pages.
+  Nothing is uploaded: the camera goes straight into a canvas on the device.
 - **Real form fields** — if the PDF actually declares fillable fields, they light up
   and you just tap one and type. Text boxes, multi-line boxes, checkboxes, radio
   groups and dropdowns. On export the values go back through the document's own
@@ -267,6 +270,36 @@ inferred.
 If the PDF declares nothing — which is most of them — the app falls back to
 snapping to visible rules, described below. That is a guess, so it only ever
 positions what you were already placing; it never invents a field.
+
+## Turning a photograph into a scan
+
+Away from a desk the choice is otherwise between filling a form in by hand and not
+filling it in at all, and handwriting is the thing people apologise for. So: take a
+photo of the paper, and fill it in here instead.
+
+Draining the colour is most of what makes a photo look like a scan, and it is not
+enough on its own. A phone photo of paper is grey rather than white, lit unevenly, and
+— on anything printed double-sided — carries a ghost of the other side showing through.
+Left alone the ghost survives into the PDF and reads as dirt.
+
+The fix is to pin the white point just under the paper itself: whatever is lighter than
+paper-minus-a-margin becomes plain white, so the grey, the shadow and the ghost all go
+at once while the ink stays. But *one* white point for the whole photograph cannot work,
+and that was the first attempt: a hand holding a phone puts a shadow across one corner,
+and a level set from the lit side turns the shadowed side into a black smear.
+
+So the paper is measured where it is. On a coarse grid, each cell reports the level its
+brightest tenth sits at — the paper there, not the ink — and the grid is smoothed twice
+so the lighting reads as the gradient it actually is, then sampled bilinearly so no cell
+edges show. Every pixel is then judged against the paper beside it. Three settings vary
+only how hard that judgement is: **Photo** does none of it, **Scan** is the default, and
+**Strong** pushes the white point further down for a page with a heavy shadow.
+
+The page keeps the photo's own shape — nothing is stretched to a paper size it was never
+on — scaled so the long edge is eleven inches, which lands a photo of a Letter page on
+very nearly Letter. From there it is an ordinary PDF, and everything else in this file
+applies to it: on the test photograph, a hand-filled property form shot on a phone, the
+scan finds 23 blank lines and 41 tick boxes.
 
 ## How tick boxes are found
 

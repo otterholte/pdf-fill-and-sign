@@ -7,8 +7,8 @@
      could snap someone straight back out of the zoom they had set. -->
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, interactive-widget=resizes-content">
 <title>Fill &amp; Sign — Free PDF Filler and Signer. No Account, No Upload.</title>
-<meta name="description" content="Fill out and sign a PDF on your phone for free. Add text, a signature, dates, checkmarks and permanent blackouts, then save or send it back. No account, no upload, no watermark, no paywall — your document stays on your device.">
-<meta name="keywords" content="free pdf fill and sign, sign a pdf without an account, fill out a pdf on my phone, free pdf signer, add text to a pdf, sign pdf without uploading, free pdf editor without a paywall, fill pdf on iphone, fill pdf on android, add signature to pdf free">
+<meta name="description" content="Fill out and sign a PDF on your phone for free — or photograph a paper form and fill that in too. Add text, a signature, dates, checkmarks and permanent blackouts, then save or send it back. No account, no upload, no watermark, no paywall — your document stays on your device.">
+<meta name="keywords" content="scan a form with my phone, fill out a paper form on my phone, photo to pdf free, free pdf fill and sign, sign a pdf without an account, fill out a pdf on my phone, free pdf signer, add text to a pdf, sign pdf without uploading, free pdf editor without a paywall, fill pdf on iphone, fill pdf on android, add signature to pdf free">
 <meta name="author" content="Eli Otterholt">
 <meta name="theme-color" content="#0f1216" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
@@ -42,6 +42,7 @@
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
   "isAccessibleForFree": true,
   "featureList": [
+    "Scan a paper form with the phone camera and fill it in as a PDF",
     "Fill in real PDF form fields by tapping and typing",
     "Type on blank lines in PDFs that have no form fields",
     "Sign a PDF by drawing, photographing, or choosing a signature image",
@@ -92,7 +93,7 @@
     </div>
 
     <h1 class="hero-title">Fill &amp; Sign a PDF</h1>
-    <p class="hero-sub">Add text, signatures, dates, checkmarks, and permanent blackouts to any PDF.</p>
+    <p class="hero-sub">Add text, signatures, dates, checkmarks, and permanent blackouts to any PDF — or photograph a paper form and fill that in too.</p>
 
     <p class="free-line"><strong>Free forever.</strong> No account, no payment, no trial, no watermark.</p>
     <ul class="free-chips">
@@ -104,8 +105,17 @@
 
     <div class="drop" id="drop">
       <button class="btn-primary big" id="btnOpen">Open PDF</button>
+      <button class="btn-ghost big wide" id="btnScan">
+        <svg viewBox="0 0 24 24" aria-hidden="true" class="btn-ico">
+          <path d="M3 8V5.5A1.5 1.5 0 0 1 4.5 4H7M17 4h2.5A1.5 1.5 0 0 1 21 5.5V8M21 16v2.5a1.5 1.5 0 0 1-1.5 1.5H17M7 20H4.5A1.5 1.5 0 0 1 3 18.5V16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+          <circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" stroke-width="1.9"/>
+        </svg>
+        Scan a paper form
+      </button>
       <p class="drop-hint">or drop a file here</p>
       <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden>
+      <input type="file" id="camInput" accept="image/*" capture="environment" hidden>
+      <input type="file" id="picInput" accept="image/*" multiple hidden>
     </div>
 
     <p class="privacy">Just start using it. Your document stays on your device.</p>
@@ -407,6 +417,40 @@
       <button class="btn-ghost" data-rot="0">Original</button>
     </div>
     <label class="chk wide-chk"><input type="checkbox" id="rotAll"> Apply to all pages</label>
+  </div>
+</div>
+
+<!-- ============ SCAN A PHOTO ============ -->
+<div class="sheet-wrap" id="scanPick" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet" role="dialog" aria-label="Scan a paper form">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head"><h2>Scan a paper form</h2>
+      <button class="btn-icon" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </div>
+    <p class="sheet-note">Photograph a paper form and fill it in here — typed, straight and legible. It becomes a PDF on this device; nothing is uploaded.</p>
+    <button class="btn-primary wide" id="btnCam">Take a photo</button>
+    <button class="btn-ghost wide" id="btnPics">Choose from my photos</button>
+    <p class="sheet-tip">Lay the page flat, fill the frame, and keep your shadow off it. Several photos become several pages.</p>
+  </div>
+</div>
+
+<div class="sheet-wrap" id="scanPrev" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet sheet-tall" role="dialog" aria-label="Check the scan">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head"><h2 id="scanTitle">Check the scan</h2>
+      <button class="btn-icon" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="look-row" id="lookRow">
+      <button class="look" data-look="photo">Photo</button>
+      <button class="look is-on" data-look="scan">Scan</button>
+      <button class="look" data-look="ink">Strong</button>
+    </div>
+    <div class="scan-strip" id="scanStrip"></div>
+    <p class="sheet-tip" id="scanTip">Strong wipes out shadows and anything showing through from the back. Photo keeps the picture as it is.</p>
+    <button class="btn-primary wide" id="btnScanGo">Fill this in</button>
+    <button class="linkish center" id="btnScanMore">Add another page</button>
   </div>
 </div>
 

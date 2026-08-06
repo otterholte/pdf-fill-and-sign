@@ -156,11 +156,226 @@ const drop = $('#drop');
 ['dragenter', 'dragover'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add('over'); }));
 ['dragleave', 'drop'].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove('over'); }));
 drop.addEventListener('drop', e => {
-  const f = [...(e.dataTransfer?.files || [])].find(x => /pdf$/i.test(x.type) || /\.pdf$/i.test(x.name));
-  if (f) openFile(f); else toast('That file is not a PDF.');
+  const all = [...(e.dataTransfer?.files || [])];
+  const f = all.find(x => /pdf$/i.test(x.type) || /\.pdf$/i.test(x.name));
+  if (f) return openFile(f);
+  // a photo dropped on the page is a form somebody scanned, not a mistake
+  const pics = all.filter(x => /^image\//.test(x.type));
+  if (pics.length) { SCAN.shots = []; return void addShots(pics); }
+  toast('That file is not a PDF.');
 });
 window.addEventListener('dragover', e => e.preventDefault());
 window.addEventListener('drop', e => e.preventDefault());
+
+/* ======================================================= SCAN A PAPER FORM
+   A photograph of a form, turned into the kind of PDF the rest of this app
+   already knows how to read. It matters more than it sounds: away from a
+   desk, the choice is otherwise between filling a form in by hand and not
+   filling it in at all, and handwriting is the thing people apologise for.
+
+   Draining the colour is most of it, but not all of it. A phone photo of
+   paper is grey, not white, lit uneven, and — on anything printed
+   double-sided — carries a ghost of the other side showing through. Left
+   alone that ghost survives into the PDF and reads as dirt. Pinning the
+   white point just under the paper itself is what removes it: whatever is
+   lighter than paper-minus-a-margin becomes plain white, so the shadow, the
+   grey and the ghost all go at once and the ink stays. */
+
+const SCAN_MAX = 2200;                  // ~200dpi across a sheet of Letter
+const LOOKS = {
+  photo: null,                          // grey, nothing else
+  scan:  { lo: 0.34, hi: 0.93, gamma: 1.00 },
+  ink:   { lo: 0.52, hi: 0.88, gamma: 1.15 },
+};
+
+/* How bright the paper is *here*. One number for the whole photograph cannot
+   work: a hand holding a phone puts a shadow across one corner, and a level
+   set from the lit side turns the shadowed side into a black smear. So
+   estimate the paper on a coarse grid — in each cell, the level the brightest
+   tenth of it sits at, which is the paper and not the ink — smooth the grid so
+   the lighting reads as the gradient it is, and judge every pixel against the
+   paper beside it rather than against the page as a whole. */
+function paperGrid(gray, w, h) {
+  const cell = clamp(Math.round(Math.min(w, h) / 40), 8, 64);
+  const gw = Math.max(1, Math.ceil(w / cell)), gh = Math.max(1, Math.ceil(h / cell));
+  const BINS = 32, bins = new Uint32Array(gw * gh * BINS), count = new Uint32Array(gw * gh);
+  for (let y = 0; y < h; y++) {
+    const gy = (y / cell) | 0, row = y * w;
+    for (let x = 0; x < w; x++) {
+      const g = (gy * gw + ((x / cell) | 0));
+      bins[g * BINS + (gray[row + x] >> 3)]++;
+      count[g]++;
+    }
+  }
+  let bg = new Float32Array(gw * gh);
+  for (let g = 0; g < gw * gh; g++) {
+    const need = Math.max(1, count[g] * 0.10);      // the brightest tenth is paper
+    let seen = 0, b = BINS - 1;
+    for (; b > 0; b--) { seen += bins[g * BINS + b]; if (seen >= need) break; }
+    bg[g] = Math.max(40, b * 8 + 4);
+  }
+  // smooth twice: lighting is a gradient, not a set of tiles
+  for (let pass = 0; pass < 2; pass++) {
+    const out = new Float32Array(gw * gh);
+    for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+      let s = 0, n = 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const yy = y + dy, xx = x + dx;
+        if (yy < 0 || yy >= gh || xx < 0 || xx >= gw) continue;
+        s += bg[yy * gw + xx]; n++;
+      }
+      out[y * gw + x] = s / n;
+    }
+    bg = out;
+  }
+  return { bg, gw, gh, cell };
+}
+
+/** grey the image, then judge every pixel against the paper next to it */
+function scanCanvas(bm, look) {
+  const s = Math.min(1, SCAN_MAX / Math.max(bm.width, bm.height));
+  const w = Math.max(1, Math.round(bm.width * s)), h = Math.max(1, Math.round(bm.height * s));
+  const cv = document.createElement('canvas');
+  cv.width = w; cv.height = h;
+  const cx = cv.getContext('2d', { willReadFrequently: true });
+  cx.drawImage(bm, 0, 0, w, h);
+
+  const im = cx.getImageData(0, 0, w, h), d = im.data;
+  const gray = new Uint8Array(w * h);
+  for (let i = 0, m = 0; m < gray.length; m++, i += 4) {
+    gray[m] = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+  }
+
+  const cfg = LOOKS[look];
+  if (!cfg) {
+    for (let i = 0, m = 0; m < gray.length; m++, i += 4) d[i] = d[i + 1] = d[i + 2] = gray[m];
+    cx.putImageData(im, 0, 0);
+    return cv;
+  }
+
+  const { bg, gw, gh, cell } = paperGrid(gray, w, h);
+  const span = cfg.hi - cfg.lo;
+  for (let y = 0; y < h; y++) {
+    // bilinear across the coarse grid, so no cell edges show in the result
+    const fy = clamp(y / cell - 0.5, 0, gh - 1);
+    const y0 = fy | 0, y1 = Math.min(gh - 1, y0 + 1), ty = fy - y0;
+    for (let x = 0; x < w; x++) {
+      const fx = clamp(x / cell - 0.5, 0, gw - 1);
+      const x0 = fx | 0, x1 = Math.min(gw - 1, x0 + 1), tx = fx - x0;
+      const a = bg[y0 * gw + x0] + (bg[y0 * gw + x1] - bg[y0 * gw + x0]) * tx;
+      const b = bg[y1 * gw + x0] + (bg[y1 * gw + x1] - bg[y1 * gw + x0]) * tx;
+      const paper = a + (b - a) * ty;
+      const t = clamp((gray[y * w + x] / paper - cfg.lo) / span, 0, 1);
+      const i = (y * w + x) * 4;
+      d[i] = d[i + 1] = d[i + 2] = Math.round(Math.pow(t, cfg.gamma) * 255);
+    }
+  }
+  cx.putImageData(im, 0, 0);
+  return cv;
+}
+
+const SCAN = { shots: [], look: 'scan', busy: false };
+
+const toBlob = (cv, q) => new Promise(res => cv.toBlob(res, 'image/jpeg', q));
+
+async function addShots(files) {
+  const imgs = [...files].filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|webp|heic|heif)$/i.test(f.name));
+  if (!imgs.length) return toast('That file is not a photo.');
+  busy(true, 'Reading…');
+  try {
+    for (const f of imgs) {
+      try {
+        // `from-image` is what keeps a portrait photo portrait; older
+        // browsers reject the option rather than ignore it
+        let bm;
+        try { bm = await createImageBitmap(f, { imageOrientation: 'from-image' }); }
+        catch (_) { bm = await createImageBitmap(f); }
+        SCAN.shots.push({ bm, name: f.name });
+      } catch (_) { toast('One of those photos could not be read.'); }
+    }
+  } finally { busy(false); }
+  if (SCAN.shots.length) { $('#scanPick').hidden = true; await drawShots(); }
+}
+
+async function drawShots() {
+  const strip = $('#scanStrip');
+  strip.innerHTML = '';
+  SCAN.shots.forEach((s, i) => {
+    const fig = document.createElement('figure');
+    fig.className = 'shot';
+    const cv = scanCanvas(s.bm, SCAN.look);
+    s.cv = cv;
+    const view = document.createElement('canvas');
+    const k = Math.min(1, 900 / Math.max(cv.width, cv.height));
+    view.width = Math.round(cv.width * k); view.height = Math.round(cv.height * k);
+    view.getContext('2d').drawImage(cv, 0, 0, view.width, view.height);
+    const drop = document.createElement('button');
+    drop.className = 'shot-drop';
+    drop.setAttribute('aria-label', 'Remove this page');
+    drop.innerHTML = '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
+    drop.addEventListener('click', () => {
+      SCAN.shots.splice(i, 1);
+      if (!SCAN.shots.length) { $('#scanPrev').hidden = true; return; }
+      drawShots();
+    });
+    const cap = document.createElement('figcaption');
+    cap.textContent = `Page ${i + 1}`;
+    fig.append(view, drop, cap);
+    strip.append(fig);
+  });
+  $('#scanTitle').textContent = SCAN.shots.length > 1
+    ? `Check the scan · ${SCAN.shots.length} pages` : 'Check the scan';
+  $('#scanPrev').hidden = false;
+}
+
+/** one page per photo, at the size the paper really is */
+async function shotsToPdf() {
+  const doc = await PDFDocument.create();
+  for (const s of SCAN.shots) {
+    const cv = s.cv || scanCanvas(s.bm, SCAN.look);
+    const blob = await toBlob(cv, 0.82);
+    const img = await doc.embedJpg(await blob.arrayBuffer());
+    /* Keep the photo's own shape — nothing is stretched to fit a paper size
+       it was never on — and scale it so the long edge is eleven inches, which
+       lands a photo of a Letter page on very nearly Letter. */
+    const long = Math.max(cv.width, cv.height);
+    const W = (cv.width / long) * 792, H = (cv.height / long) * 792;
+    doc.addPage([W, H]).drawImage(img, { x: 0, y: 0, width: W, height: H });
+  }
+  return doc.save();
+}
+
+$('#btnScan').addEventListener('click', () => { SCAN.shots = []; $('#scanPick').hidden = false; });
+$('#btnCam').addEventListener('click', () => $('#camInput').click());
+$('#btnPics').addEventListener('click', () => $('#picInput').click());
+['#camInput', '#picInput'].forEach(sel => $(sel).addEventListener('change', e => {
+  const fs = [...e.target.files]; e.target.value = '';
+  if (fs.length) addShots(fs);
+}));
+$('#btnScanMore').addEventListener('click', () => { $('#scanPick').hidden = false; });
+$('#lookRow').addEventListener('click', e => {
+  const b = e.target.closest('.look'); if (!b || SCAN.busy) return;
+  SCAN.look = b.dataset.look;
+  $$('#lookRow .look').forEach(x => x.classList.toggle('is-on', x === b));
+  drawShots();
+});
+$('#btnScanGo').addEventListener('click', async () => {
+  if (SCAN.busy || !SCAN.shots.length) return;
+  SCAN.busy = true;
+  busy(true, 'Making the PDF…');
+  try {
+    const bytes = await shotsToPdf();
+    const name = SCAN.shots.length > 1 ? 'Scan.pdf' : (SCAN.shots[0].name || 'Scan').replace(/\.[^.]+$/, '') + '.pdf';
+    $('#scanPrev').hidden = true;
+    SCAN.shots.forEach(s => s.bm.close?.());
+    SCAN.shots = [];
+    await loadDoc(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), name, [], null);
+    askView(name);
+  } catch (err) {
+    console.error(err);
+    toast('That photo could not be turned into a PDF.', 5000);
+  } finally { SCAN.busy = false; busy(false); }
+});
 
 async function openFile(file) {
   if (!/pdf/i.test(file.type) && !/\.pdf$/i.test(file.name)) return toast('That file is not a PDF.');
@@ -4211,4 +4426,5 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 readQuestions, pageWords, labelFor, pageCells, scanVRules, textInCell,
                 wordsOrOcr, ocrPage,
                 buildSimple, showSimple, showPage, askView, SIMof: () => SIM,
-                scanLines, findCells, totalRot, scanBoxes, layoutPages, revealFocused };
+                scanLines, findCells, totalRot, scanBoxes, layoutPages, revealFocused,
+                scanCanvas, shotsToPdf, SCANof: () => SCAN };
