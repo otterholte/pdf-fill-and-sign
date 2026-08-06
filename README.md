@@ -485,6 +485,45 @@ back out in full rather than the blob, because a blob is a promise of bytes and 
 fails to collect them attaches an empty file instead — which, again, only shows up as a
 failed download at the far end.
 
+## Resizing says what it is keeping
+
+Everything is stored by its top-left corner, so changing a size alone grows the object
+down and to the right — and a tick enlarged because it was too small for its box has now
+walked out of the box, while a line of text has sunk below the rule it was sitting on.
+Every resize cost a drag to put it back, which is most of the value of resizing gone.
+
+So a resize now names the part of the object it is *keeping*, and the object moves to
+honour it:
+
+- **Four corner handles.** Whichever you take hold of, the opposite corner stays where it
+  is. Drag the top right of text sitting on a blank line and it grows upward off the rule,
+  still left-aligned, still on its line — which is the whole reason one handle in the
+  bottom right was not enough.
+- **The size buttons keep the middle**, so an object stays where you put it instead of
+  creeping down and right on every press. Text on a blank line is the exception: there the
+  bottom edge *is* the line and the left edge is where the writing starts, so it keeps
+  those two and grows upward. Centring that would lift it off its rule.
+
+Measuring the element either side of the change is what makes this work for text, whose
+width nobody stores — it is whatever the words come out as.
+
+Two details cost more than they look. The handles sit just *outside* the corners rather
+than straddling them: four targets centred on the corners of a small text box cover the
+whole box between them, and then it cannot be dragged at all, because every press lands on
+a handle. And each frame of a drag works out the geometry from where the object *started*
+rather than from where the previous frame left it — nudging it a little at a time looks
+right for a moment and then walks, because every step carries the last step's rounding.
+
+## Coming back should not flash
+
+Setting `width` on a canvas wipes it. Rendering straight into the visible one therefore
+blanked the page and painted it back a moment later — a white flash on every return to the
+app, every rotate, every zoom, and every time you came back from Finish to keep editing.
+Pages now render into a canvas nobody is looking at and go up in a single `drawImage`, so
+the page changes from the old picture to the new one with nothing in between. The test
+counts frames during a redraw and asserts none of them are blank; against the old code
+exactly one is.
+
 ## A tick grows around itself
 
 Objects are stored by their top-left corner, so changing a mark's size alone grows it down

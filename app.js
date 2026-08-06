@@ -788,11 +788,23 @@ async function renderOne(p, dpr) {
     p.task?.cancel();
     const target = Math.round(p.dw * (dpr || clamp(window.devicePixelRatio || 1, 1, 2.5)));
     const vp = p.page.getViewport({ scale: target / (totalRot(p) % 180 ? p.uh : p.uw), rotation: totalRot(p) });
-    p.cv.width = Math.round(vp.width);
-    p.cv.height = Math.round(vp.height);
+    /* Draw somewhere nobody is looking, then put it up in one move.
+       Setting width on a canvas wipes it, so rendering straight into the
+       visible one meant every redraw blanked the page first and painted it
+       back a moment later — a flash on every return to the app, every rotate,
+       every zoom. The page now changes from the old picture to the new one
+       with nothing in between. */
+    const off = document.createElement('canvas');
+    off.width = Math.round(vp.width);
+    off.height = Math.round(vp.height);
     p.renderKey = key;
-    p.task = p.page.render({ canvasContext: p.cv.getContext('2d', { alpha: false }), viewport: vp });
+    p.task = p.page.render({ canvasContext: off.getContext('2d', { alpha: false }), viewport: vp });
     await p.task.promise;
+    if (p.cv.width !== off.width || p.cv.height !== off.height) {
+      p.cv.width = off.width; p.cv.height = off.height;
+    }
+    p.cv.getContext('2d', { alpha: false }).drawImage(off, 0, 0);
+    off.width = off.height = 0;                    // release it straight away
     p.readyKey = key;
     if (p.fields?.length) reflectFields(p);
   } catch (_) { p.renderKey = null; }
@@ -1769,9 +1781,18 @@ function itemEl(it) {
       : `<svg viewBox="0 0 24 24"><path d="M5.5 5.5 18.5 18.5 M18.5 5.5 5.5 18.5" fill="none" stroke="${it.color}" stroke-width="2.2" stroke-linecap="round"/></svg>`;
   }
 
-  const h = document.createElement('div');
-  h.className = 'handle';
-  d.append(h);
+  /* A handle on every corner. One handle in the bottom right can only ever
+     grow a box down and to the right, which is the wrong direction most of
+     the time: text already sitting on its line wants to grow *upward* off
+     that line and stay left-aligned. Whichever corner you take hold of, the
+     opposite one stays where it is — so the corner you are not touching is
+     the part of the box you are keeping. */
+  for (const c of CORNERS) {
+    const h = document.createElement('div');
+    h.className = 'handle handle-' + c;
+    h.dataset.c = c;
+    d.append(h);
+  }
   p.layer.append(d);
   sizeItem(it, d);
   return d;
@@ -1980,19 +2001,30 @@ pagesEl.addEventListener('pointerdown', e => {
 });
 
 /* ------------------------------------------------------------- tick boxes */
+const CORNERS = ['nw', 'ne', 'sw', 'se'];
 const isMark = it => it.type === 'check' || it.type === 'x';
 
-/* A mark is stored by its top-left corner, so changing its size alone grows
-   it down and to the right and it walks off whatever it was sitting on. That
-   is wrong for a tick: you sized it because it was too small for the box, not
-   because you wanted it somewhere else, and every resize then cost a drag to
-   put it back. Keep the middle where it is and the mark grows around itself. */
-function resizeMark(it, size) {
+/* Everything is stored by its top-left corner, so changing a size alone grows
+   the object down and to the right — and a tick you enlarged because it was
+   too small for its box has now walked out of the box, and a line of text has
+   sunk below the rule it was sitting on. Every resize then cost a drag to put
+   it back, which is most of the value of resizing gone.
+
+   So resizing says which part of the object it is *keeping*, and the object
+   is moved to honour it. `keep` is a corner ('sw' keeps the left edge and the
+   bottom), or 'c' for the middle. Measuring the element on both sides of the
+   change is what makes this work for text, whose width nobody stores: it is
+   whatever the words come out as. */
+function resized(it, d, keep, apply) {
   const [Wl, Hl] = itemFrame(it);
-  const cx = it.x + (it.size * Hl / Wl) / 2, cy = it.y + it.size / 2;
-  it.size = clamp(size, 0.006, 0.35);
-  it.x = cx - (it.size * Hl / Wl) / 2;
-  it.y = cy - it.size / 2;
+  const w0 = d.offsetWidth, h0 = d.offsetHeight;
+  apply();
+  sizeItem(it, d);
+  const dw = d.offsetWidth - w0, dh = d.offsetHeight - h0;
+  if (keep === 'c') { it.x -= dw / 2 / Wl; it.y -= dh / 2 / Hl; return; }
+  if (keep.includes('e')) it.x -= dw / Wl;      // keeping the right edge
+  if (keep.includes('s')) it.y -= dh / Hl;      // keeping the bottom
+  sizeItem(it, d);
 }
 
 /** the mark already sitting in this box, if any */
@@ -2371,6 +2403,13 @@ function startResize(e, d) {
   if (pinching(e)) return;
   let it = S.items.find(i => i.id === d.dataset.id);
   if (!it) return;
+  /* Which corner you took hold of. The one opposite is what stays put, so
+     dragging the top right of a line of text grows it upward off the rule and
+     leaves it left-aligned exactly where it was. */
+  const corner = e.target.closest('.handle')?.dataset.c || 'se';
+  const gx = corner.includes('e') ? 1 : -1;      // which way is bigger
+  const gy = corner.includes('s') ? 1 : -1;
+  const keep = (corner[0] === 'n' ? 's' : 'n') + (corner[1] === 'w' ? 'e' : 'w');
 
   /* A timestamp belongs to its signature. Its handle sits right where the
      signature's does, so grabbing either one has to resize the pair — not
@@ -2387,7 +2426,8 @@ function startResize(e, d) {
   const [Wl, Hl] = itemFrame(it);
   const sx = e.clientX, sy = e.clientY;
   const st = it.type === 'sig' ? stampOf(it) : null;
-  const o = { fs: it.fs, w: it.w, h: it.h, size: it.size, x: it.x, y: it.y };
+  const o = { fs: it.fs, w: it.w, h: it.h, size: it.size, x: it.x, y: it.y,
+              w0: d.offsetWidth, h0: d.offsetHeight };
   const pid = e.pointerId;
   let started = false;
   // capture can be refused; a resize that silently does nothing is worse
@@ -2411,14 +2451,22 @@ function startResize(e, d) {
     }
     if (!started) { started = true; push(); }
     const [ppx, ppy] = unspin(spin, ev.clientX - sx, ev.clientY - sy);
-    const dx = ppx / Wl, dy = ppy / Hl;
+    const dx = (ppx / Wl) * gx, dy = (ppy / Hl) * gy;
     if (isText(it)) it.fs = clamp(o.fs + dy * 0.6 + dx * 0.15, 0.005, 0.14);
     else if (it.type === 'sig') {
       it.w = clamp(o.w + dx, 0.04, 1.2);                                    // aspect locked
       if (st) st.fs = stampFsFor(it.w);          // the date follows, down to a readable floor
     }
     else if (it.type === 'redact') { it.w = clamp(o.w + dx, 0.008, 1.2); it.h = clamp(o.h + dy, 0.004, 1.0); }
-    else resizeMark(it, o.size + dy);          // grows about its middle
+    else it.size = clamp(o.size + dy, 0.006, 0.35);
+    /* Work out where it belongs from where it *started*, not from where the
+       last frame of this drag left it. Nudging it a little each time looks
+       right for a moment and then walks, because every step carries the last
+       step's rounding with it. */
+    it.x = o.x; it.y = o.y;
+    sizeItem(it, d);
+    if (keep.includes('e')) it.x = o.x - (d.offsetWidth - o.w0) / Wl;
+    if (keep.includes('s')) it.y = o.y - (d.offsetHeight - o.h0) / Hl;
     sizeItem(it, d);
     if (it.type === 'sig') reseatStamp(it);
   };
@@ -2449,15 +2497,25 @@ const bump = f => {
   const sel = getSel(); if (!sel) return;
   // sizing a timestamp sizes the signature it belongs to
   const it = (sel.link && S.items.find(i => i.id === sel.link)) || sel;
+  const d = elOf(it.id);
+  if (!d) return;
   push();
-  if (isText(it)) it.fs = clamp(it.fs * f, 0.005, 0.14);
-  else if (it.type === 'sig') {
-    it.w = clamp(it.w * f, 0.04, 1.2);
-    const st = stampOf(it);
-    if (st) st.fs = stampFsFor(it.w);
-  }
-  else if (it.type === 'redact') { it.w = clamp(it.w * f, 0.008, 1.2); it.h = clamp(it.h * f, 0.004, 1); }
-  else resizeMark(it, it.size * f);            // grows about its middle
+  /* Grow about the middle, so the object stays where you put it instead of
+     creeping down and to the right every time you press the button. Text
+     sitting on a blank line is the exception: there, the bottom edge *is* the
+     line and the left edge is where the writing starts, so it keeps those two
+     and grows upward. Centring that would lift it off its rule. */
+  const keep = (isText(it) && it.lineKey) ? 'sw' : 'c';
+  resized(it, d, keep, () => {
+    if (isText(it)) it.fs = clamp(it.fs * f, 0.005, 0.14);
+    else if (it.type === 'sig') {
+      it.w = clamp(it.w * f, 0.04, 1.2);
+      const st = stampOf(it);
+      if (st) st.fs = stampFsFor(it.w);
+    }
+    else if (it.type === 'redact') { it.w = clamp(it.w * f, 0.008, 1.2); it.h = clamp(it.h * f, 0.004, 1); }
+    else it.size = clamp(it.size * f, 0.006, 0.35);
+  });
   if (it.type === 'sig') reseatStamp(it);
   relayoutItems(); saveSoon();
 };
@@ -3866,7 +3924,14 @@ $('#btnFinish').addEventListener('click', async () => {
 $('#btnContinue').addEventListener('click', () => {
   stopConfetti();
   $('#done').hidden = true; $('#editor').hidden = false;
+  /* The editor was display:none, so nothing in it has been measured for a
+     while. Settle the viewport and the layout before the frame is painted,
+     and let the pages repaint themselves — a redraw is free when nothing has
+     changed, and it is what keeps coming back from Finish from looking like
+     the document broke. */
   fitViewport();
+  layoutPages();
+  renderVisible();
 });
 $('#btnHome').addEventListener('click', () => { stopConfetti(); closeDoc(); });
 $('#btnNewDoc').addEventListener('click', () => {
@@ -4475,4 +4540,4 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 wordsOrOcr, ocrPage,
                 buildSimple, showSimple, showPage, askView, SIMof: () => SIM,
                 scanLines, findCells, totalRot, scanBoxes, layoutPages, revealFocused,
-                scanCanvas, shotsToPdf, SCANof: () => SCAN, select, resizeMark, finalName };
+                scanCanvas, shotsToPdf, SCANof: () => SCAN, select, finalName, renderVisible };
