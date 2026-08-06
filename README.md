@@ -424,6 +424,18 @@ viewport tag is redundant next to `user-scalable=no` while also telling the brow
 ideal scale is 1, which is how focusing a text box could snap you straight back out of the
 zoom you had set.
 
+## Two fingers is a pinch, never a drag
+
+The first finger of a pinch has to land somewhere, and on a form you have been filling in
+that is quite often on a text box. A drag started from it rode along with the zoom and
+left the box somewhere nobody put it — and the further you pinched the further it went.
+
+So the fingers are counted. A drag or a resize never starts once a second one is down, and
+one already under way gives back everything it moved the moment the second finger arrives,
+taking its undo step off the stack with it: a pinch should leave no trace, not something
+to undo. The same guard covers tapping a blank, which would otherwise open a text box in
+the middle of a zoom.
+
 ## Who is allowed to move the page
 
 Only Back / Next and Tab. They centre what you land on, because asking to be taken

@@ -2028,9 +2028,22 @@ function removeItem(id) {
   saveSoon();
 }
 
+/* Two fingers on the glass is a pinch, never a drag. The first finger of a
+   pinch usually lands on something — on a filled-in form, quite often on a
+   text box — and a drag started from it would ride along with the zoom and
+   leave the box somewhere you never put it. So count the fingers: a gesture
+   that becomes a pinch gives back whatever it had already moved. */
+const touching = new Set();
+addEventListener('pointerdown', e => { if (e.pointerType === 'touch') touching.add(e.pointerId); }, true);
+const lift = e => touching.delete(e.pointerId);
+addEventListener('pointerup', lift, true);
+addEventListener('pointercancel', lift, true);
+const pinching = e => e.pointerType === 'touch' && touching.size > 1;
+
 /* drag — works on an empty box that is still being typed into: a real drag
    (more than a few pixels) takes over, a tap just moves the caret. */
 function startDrag(e, d) {
+  if (pinching(e)) return;                 // the second finger of a pinch
   const it = S.items.find(i => i.id === d.dataset.id);
   if (!it) return;
   const wasSel = S.sel === it.id;
@@ -2055,7 +2068,31 @@ function startDrag(e, d) {
   const o = { x: it.x, y: it.y, px: partner?.x, py: partner?.y };
   let moved = false;
 
+  const off = () => {
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+  };
+
+  /* Put it back exactly where it was and take the undo step off the stack
+     with it — a pinch should leave no trace, not something to undo. */
+  const putBack = () => {
+    if (moved) {
+      it.x = o.x; it.y = o.y;
+      sizeItem(it, d);
+      if (partner) {
+        partner.x = o.px; partner.y = o.py;
+        const pd = elOf(partner.id);
+        if (pd) sizeItem(partner, pd);
+      }
+      S.past.pop(); syncHistory();
+      moved = false;
+    }
+    off();
+  };
+
   const move = ev => {
+    if (pinching(ev)) return putBack();
     if (ev.pointerId !== pid) return;
     if (!moved) {
       if (Math.hypot(ev.clientX - sx, ev.clientY - sy) <= 6) return;
@@ -2078,9 +2115,7 @@ function startDrag(e, d) {
   };
   const up = ev => {
     if (ev && ev.pointerId !== pid) return;
-    window.removeEventListener('pointermove', move);
-    window.removeEventListener('pointerup', up);
-    window.removeEventListener('pointercancel', up);
+    off();
     if (!moved && isText(it) && !it.date && wasSel && !editing) edit(d);
     /* Dragging a box you were typing into hands the caret back when you let
        go. You moved it because it was in the wrong place, not because you
@@ -2105,6 +2140,7 @@ function startDrag(e, d) {
 
 /* resize */
 function startResize(e, d) {
+  if (pinching(e)) return;
   let it = S.items.find(i => i.id === d.dataset.id);
   if (!it) return;
 
@@ -2129,6 +2165,18 @@ function startResize(e, d) {
   e.preventDefault(); e.stopPropagation();
 
   const move = ev => {
+    // a second finger means a pinch: give back the size it had and get out
+    if (pinching(ev)) {
+      if (started) {
+        it.fs = o.fs; it.w = o.w; it.h = o.h; it.size = o.size;
+        if (st) st.fs = stampFsFor(it.w);
+        sizeItem(it, d);
+        if (it.type === 'sig') reseatStamp(it);
+        S.past.pop(); syncHistory();
+        started = false;
+      }
+      return up();
+    }
     if (!started) { started = true; push(); }
     const [ppx, ppy] = unspin(spin, ev.clientX - sx, ev.clientY - sy);
     const dx = ppx / Wl, dy = ppy / Hl;
@@ -2706,6 +2754,7 @@ function textOnLine(pi, L, key, focus = true) {
 /** A press on a blank might be the start of a scroll. Wait for the release
     and only treat it as a tap if the finger stayed put. */
 function armHintTap(e, pi, hint) {
+  if (pinching(e)) return;
   const sx = e.clientX, sy = e.clientY, t0 = performance.now(), pid = e.pointerId;
   const off = () => {
     window.removeEventListener('pointerup', up);
@@ -2714,6 +2763,7 @@ function armHintTap(e, pi, hint) {
   const up = ev => {
     if (ev.pointerId !== pid) return;
     off();
+    if (touching.size > 1) return;                                   // a pinch
     if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 8) return;   // a scroll
     if (performance.now() - t0 > 700) return;                        // a long press
     if (hint.kind === 'cell') textInCell(pi, hint.C, hint.key);
