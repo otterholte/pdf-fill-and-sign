@@ -289,6 +289,33 @@ edges of a rectangle rather than two blanks, and if that rectangle already has i
 it is a table cell and neither edge is offered. An *empty* bordered box still is, because
 that is a real place to write.
 
+### When the boxes landed in the wrong place
+
+On a dense scanned form the boxes came out badly wrong, and for two separate reasons
+worth keeping apart.
+
+**A box grew upwards into whatever was printed above it.** The box has to be about a
+line tall so there is somewhere to write; drawing that height blindly upwards from the
+rule works on an airy form and lands squarely on a section banner on a crowded one.
+`clearAbove()` now measures the gap from each rule to the nearest ink over its own
+width, and both the box and the text size stop just short of it. Throwing the rule away
+instead was tried first and was worse: "Full Name" on a scanned application sits
+directly under a solid black banner, and a rule is not disqualified from being a blank
+by what happens to be printed above it — that experiment deleted 13 of 23 real blanks.
+
+**A whole word was being read as a rule.** In a heavy label like `Phone Number:` the
+letters nearly touch across the word's x-height, so every row of it reads as a solid
+run and the word arrives as one eight-pixel band. It passed the existing tests because
+the checks three and five pixels out are clear — the stems are thin there. The tell is
+that a real rule is *drawn* solid: six or more dense rows with gaps still in them is a
+word, not a rule.
+
+That second one did more damage than it looked. The phantom sat within stitching
+distance of the genuine rule beside it, so the two merged and dragged the blank's left
+edge back across the label — the hint then struck through the very words naming the
+field. Fixing the phantom fixed the misplacement with it. On the scanned application:
+23 bands down to 18, every one of them a real blank, each starting after its label.
+
 ## Reading order
 
 Tab and the Back / Next bar walk one ordered list per page, built from all three kinds

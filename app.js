@@ -823,13 +823,35 @@ function scanLines(cv) {
     for (let x = x0; x <= x1; x++) if (mask[base + x]) c++;
     return c / (x1 - x0 + 1);
   };
+  /* …and a rule you can write on is not hemmed in on both sides. A heavy
+     word like "Phone Number:" has a level where the letters nearly join, and
+     that row reads as a solid run; the check three pixels out clears it
+     because the stems are thin there. What gives it away is that there is
+     more of the same word one or two pixels above AND below. A real blank has
+     open paper on at least one side. Left in, these phantoms did real damage:
+     stitching would then join one to the genuine rule beside it and drag the
+     blank's left edge back across the label, so the hint struck through the
+     very words naming the field. */
   const bands = raw.filter(b => {
-    let solid = 0;
-    for (let y = b.top; y <= b.bot; y++) solid = Math.max(solid, density(y, b.x0, b.x1));
+    let solid = 0, core = 0;
+    for (let y = b.top; y <= b.bot; y++) {
+      const v = density(y, b.x0, b.x1);
+      solid = Math.max(solid, v);
+      if (v >= 0.55) core++;
+    }
     if (solid < 0.80) return false;
     const above = Math.max(density(b.top - 3, b.x0, b.x1), density(b.top - 5, b.x0, b.x1));
     const below = Math.max(density(b.bot + 3, b.x0, b.x1), density(b.bot + 5, b.x0, b.x1));
-    return above < 0.28 && below < 0.28;
+    if (above >= 0.28 || below >= 0.28) return false;
+    /* A rule is thin. A heavy word like "Phone Number:" is not — but across
+       its whole x-height the letters nearly join, so every row of it reads as
+       a run and the whole word arrives as one eight-pixel "rule" that tops out
+       around 0.8 dense. A real rule that thick is drawn solid. Six-plus dense
+       rows with gaps still in them is a word, and left in these phantoms did
+       real damage: stitching would join one to the genuine rule beside it and
+       drag the blank's left edge back across the label, so the hint struck
+       through the very words naming the field. */
+    return !(core >= 6 && solid < 0.92);
   });
 
   /* Two rules of the same width, joined down both sides, are the edges of a
@@ -1261,6 +1283,32 @@ function ensureScan(p) {
       const vs = scanVRules(scan);
       const { cells, usedH } = findCells(scan.allBands, vs, scan.W, scan.H, scan.mask);
       const free = scan.bands.filter(b => !usedH.has(b));
+      /* How much empty room sits above a rule. It matters because on a dense
+         form the next thing up is often a section banner or a caption, and a
+         writing box drawn blindly upwards lands squarely on that heading's own
+         words — which is exactly what made a gridded form look scribbled on.
+         Measuring the gap lets both the box and the text stop just short of it.
+         Throwing the rule away instead was tried and was worse: "Full Name" on
+         a scanned application sits directly under a solid black banner, and a
+         rule is not disqualified from being a blank by what happens to be
+         printed above it. */
+      const clearAbove = b => {
+        const CAP = Math.round(scan.H * 0.05);          // no need to look far
+        const w = b.x1 - b.x0;
+        /* Ignore a sliver at each end: a blank that starts right after a "$"
+           or a bracket would otherwise report no room at all and get 5pt text. */
+        const lo = b.x0 + Math.round(w * 0.05), hi = b.x1 - Math.round(w * 0.02);
+        const need = Math.max(3, Math.round(w * 0.05));
+        const stop = Math.max(0, b.top - CAP);
+        let y = b.top - 2;
+        for (; y > stop; y--) {
+          let ink = 0;
+          const base = y * scan.W;
+          for (let x = lo; x <= hi; x++) if (scan.mask[base + x] && ++ink >= need) break;
+          if (ink >= need) break;
+        }
+        return (b.top - y) / scan.H;
+      };
       p.scanned = {
         cells: cells.filter(c => !c.filled),
         cellsAll: cells, vrules: vs.length, bands: scan.bands.length,
@@ -1269,11 +1317,14 @@ function ensureScan(p) {
              sensible default beats the bottom of the clamp — that is what
              used to make an unlabelled blank get 6pt text. */
           const ink = inkHeightLeft(scan, b);
+          const clr = clearAbove(b);
+          const want = ink ? clamp((ink / 0.72) / scan.H, 0.0085, 0.045) : DEF.fs;
           return {
             y: b.top / scan.H,                     // where a baseline should sit
             x0: b.x0 / scan.W,
             x1: b.x1 / scan.W,
-            fs: ink ? clamp((ink / 0.72) / scan.H, 0.0085, 0.045) : DEF.fs,
+            fs: Math.max(0.0085, Math.min(want, clr / 0.95)),
+            clr,
             hasLabel: ink > 0,
           };
         }),
@@ -2314,10 +2365,14 @@ async function readQuestions(opts = {}) {
    already owns the gesture. Letting them take it would break scrolling. */
 
 /** where you would write on this line, 0-1 in the page's display frame */
-const hintRect = L => ({
-  x0: L.x0, x1: L.x1,
-  y0: L.y - L.fs * 1.45, y1: L.y + 0.002,
-});
+const hintRect = L => {
+  /* Never grow up into whatever is printed above — see clearAbove(). */
+  const room = L.clr != null ? Math.max(L.clr * 0.9, L.fs * 0.6) : L.fs * 1.45;
+  return {
+    x0: L.x0, x1: L.x1,
+    y0: L.y - Math.min(L.fs * 1.45, room), y1: L.y + 0.002,
+  };
+};
 
 function placeHint(p, h) {
   const rot = totalRot(p);

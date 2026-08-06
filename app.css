@@ -242,17 +242,16 @@ a:hover{text-decoration:underline;}
 
 /* A blank line the document only implies. Faint on purpose — a real form
    field is a fact, this is a good guess — but solid enough to aim at. */
+/* No wash of colour over the page. A blank is marked by a line under it, the
+   way a form already marks one — visible enough to aim at, quiet enough that
+   a dense document still reads as the document. */
 .linehint{
   position:absolute;transform-origin:0 0;pointer-events:none;z-index:1;
-  border-radius:3px 3px 0 0;
-  background:linear-gradient(to top, rgba(27,79,216,.11), rgba(27,79,216,.02));
-  box-shadow:inset 0 -1.5px 0 rgba(27,79,216,.34);
+  background:transparent;
+  box-shadow:inset 0 -2px 0 rgba(27,79,216,.42);
 }
 @media (prefers-color-scheme: dark){
-  .linehint{
-    background:linear-gradient(to top, rgba(123,160,255,.16), rgba(123,160,255,.03));
-    box-shadow:inset 0 -1.5px 0 rgba(123,160,255,.42);
-  }
+  .linehint{box-shadow:inset 0 -2px 0 rgba(123,160,255,.52);}
 }
 /* while a tool is armed you are aiming yourself — get out of the way */
 .editor.arming .linehint{opacity:.3;}
@@ -605,13 +604,10 @@ select.fld{padding-right:0;}
 .it.in-cell .it-text{text-align:center;}
 /* and the blank itself is the whole box, not a line to rest on */
 .linehint.is-cell{
-  border-radius:3px;
-  background:rgba(27,79,216,.09);
-  box-shadow:inset 0 0 0 1.5px rgba(27,79,216,.26);
+  border-radius:2px;
+  background:transparent;
+  box-shadow:inset 0 0 0 1.5px rgba(27,79,216,.34);
 }
 @media (prefers-color-scheme: dark){
-  .linehint.is-cell{
-    background:rgba(123,160,255,.13);
-    box-shadow:inset 0 0 0 1.5px rgba(123,160,255,.34);
-  }
+  .linehint.is-cell{box-shadow:inset 0 0 0 1.5px rgba(123,160,255,.44);}
 }
