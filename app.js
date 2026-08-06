@@ -3949,10 +3949,26 @@ function confetti() {
   requestAnimationFrame(step);
 }
 
+/* A file name has to survive being handed to another app. Downloading it
+   here is forgiving — the browser writes whatever you ask — but a name goes
+   on a journey after that: an Android share hands it to a mail app, which
+   puts it in a MIME header, which travels, and something along that road
+   quietly drops the attachment. Em dashes and smart quotes come through from
+   the original document's name without anyone typing them, so the trip
+   starts broken and the first sign of it is "couldn't download attachment"
+   at the far end. Keep the name to characters that cannot be argued about. */
 function finalName() {
-  let n = ($('#saveName').value || outName()).replace(/[\\/:*?"<>|]/g, '').trim() || outName();
-  if (!/\.pdf$/i.test(n)) n += '.pdf';
-  return n;
+  const raw = ($('#saveName').value || outName());
+  let n = raw
+    .normalize('NFKD').replace(/[̀-ͯ]/g, '')   // café → cafe
+    .replace(/[‐-―]/g, '-')                     // dashes of every width
+    .replace(/[‘’“”]/g, '')           // smart quotes
+    .replace(/\.pdf$/i, '')
+    .replace(/[^A-Za-z0-9 ._-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s._-]+|[\s._-]+$/g, '');
+  if (n.length > 60) n = n.slice(0, 60).replace(/[\s._-]+$/, '');
+  return (n || 'Document') + '.pdf';
 }
 $('#btnSave').addEventListener('click', () => {
   if (!lastBlob) return;
@@ -3966,10 +3982,19 @@ $('#btnSave').addEventListener('click', () => {
 $('#btnShare').addEventListener('click', async () => {
   if (!lastBlob) return;
   const name = finalName();
+  /* Hand over a file read back out in full rather than the blob itself. A
+     blob is a promise of bytes; the receiving app gets a moment to read them
+     and if anything about that hand-off goes wrong it attaches an empty file,
+     which only shows up as a failed download for whoever opens the mail. */
+  const buf = await lastBlob.arrayBuffer();
+  if (!buf.byteLength) return toast('The PDF came out empty — press Finish again.', 5000);
+  const file = new File([buf], name, { type: 'application/pdf' });
   try {
-    await navigator.share({ files: [new File([lastBlob], name, { type: 'application/pdf' })], title: name });
-  } catch (e) {
-    if (e.name !== 'AbortError') toast('Sharing is not available here — use Save PDF instead.');
+    if (navigator.canShare && !navigator.canShare({ files: [file] })) throw new Error('unsupported');
+    await navigator.share({ files: [file] });      // no title: some mail apps
+  } catch (e) {                                    // treat it as a text share
+    if (e.name === 'AbortError') return;
+    toast('That app would not take the file. Use Save PDF, then attach it from your files.', 6000);
   }
 });
 
@@ -4450,4 +4475,4 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 wordsOrOcr, ocrPage,
                 buildSimple, showSimple, showPage, askView, SIMof: () => SIM,
                 scanLines, findCells, totalRot, scanBoxes, layoutPages, revealFocused,
-                scanCanvas, shotsToPdf, SCANof: () => SCAN, select, resizeMark };
+                scanCanvas, shotsToPdf, SCANof: () => SCAN, select, resizeMark, finalName };

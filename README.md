@@ -469,6 +469,22 @@ taking its undo step off the stack with it: a pinch should leave no trace, not s
 to undo. The same guard covers tapping a blank, which would otherwise open a text box in
 the middle of a zoom.
 
+## A name has to survive the journey
+
+Downloading a file here is forgiving: the browser writes whatever name it is given. But a
+name goes on a journey after that — an Android share hands it to a mail app, which puts it
+in a MIME header, which travels — and something along that road quietly drops the
+attachment, so the first sign of trouble is "couldn't download attachment" for whoever
+opens the mail. Em dashes, smart quotes and accents arrive in the name from the original
+document without anyone typing them, so the trip can start broken.
+
+The name is now reduced to characters nobody can argue about: accents flattened, dashes of
+every width folded to a hyphen, smart quotes dropped, anything else replaced by a space,
+and the whole thing capped at sixty characters. The share also hands over the bytes read
+back out in full rather than the blob, because a blob is a promise of bytes and an app that
+fails to collect them attaches an empty file instead — which, again, only shows up as a
+failed download at the far end.
+
 ## A tick grows around itself
 
 Objects are stored by their top-left corner, so changing a mark's size alone grows it down
