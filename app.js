@@ -648,18 +648,11 @@ function zoomTo(z, mx, my) {
     zoomTo(S.zoom * (1 - e.deltaY / 400), e.clientX - r.left, e.clientY - r.top);
   }, { passive: false });
 
-  // double tap / double click to zoom
-  let lastT = 0, lastX = 0, lastY = 0;
-  stageEl.addEventListener('pointerup', e => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    if (e.target.closest('.it')) { lastT = 0; return; }
-    const now = performance.now();
-    if (now - lastT < 320 && Math.hypot(e.clientX - lastX, e.clientY - lastY) < 32) {
-      const r = stageEl.getBoundingClientRect();
-      zoomTo(S.zoom > 1.2 ? 1 : 2.4, e.clientX - r.left, e.clientY - r.top);
-      lastT = 0;
-    } else { lastT = now; lastX = e.clientX; lastY = e.clientY; }
-  });
+  /* Double tap used to zoom here, and that is the gesture a form needs for
+     something else: putting a text box where the scan did not offer one. Two
+     fingers still zoom, which is how people zoom anyway, and the wheel with
+     ctrl held still does it on a desktop. Nothing else was reaching the
+     double-tap handler further down while this one had it. */
 })();
 
 /* ======================================================= BLANK-LINE SNAPPING

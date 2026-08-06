@@ -238,6 +238,11 @@ a:hover{text-decoration:underline;}
 .layer{position:absolute;left:0;top:0;transform-origin:0 0;}
 .page.arm{cursor:crosshair;}
 /* while a tool is armed the page must own the gesture, or a drag scrolls instead of drawing */
+/* `manipulation` keeps panning and two-finger zoom and drops only the
+   browser's own double-tap-to-zoom, which the page needs for placing text.
+   iOS Safari has ignored `user-scalable=no` since iOS 10, so the viewport tag
+   cannot do this on its own. */
+#stage, .page, .layer{touch-action:manipulation;}
 .page.arm, .page.arm .layer{touch-action:none;}
 
 /* A blank line the document only implies. Faint on purpose — a real form

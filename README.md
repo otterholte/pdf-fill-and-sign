@@ -432,6 +432,14 @@ It never overrules something the scan *did* find. A tick box or a marked blank u
 finger does its own thing, and a quick double tap on one of those is just an impatient
 single tap.
 
+Two things owned that gesture and both had to give it up. The app had its own double-tap
+zoom, which ran on `pointerup` at the stage and got there first — so on a phone the tap
+did nothing but zoom, and no amount of work further down the page could be reached. And
+`user-scalable=no` in the viewport tag stops the browser's double-tap zoom on Android but
+not on iOS, which has ignored it since iOS 10; `touch-action: manipulation` is what
+actually says *pan and pinch, but no double-tap zoom*. Two fingers still zoom, which is
+how people zoom anyway, and ctrl with the wheel still does it on a desktop.
+
 An empty box shows a placeholder, which is what makes it draggable — an empty box with
 nothing in it is invisible, and you cannot take hold of something you cannot see. The
 placeholder is drawn by CSS from `data-ph`, so it is never content: typing does not have
