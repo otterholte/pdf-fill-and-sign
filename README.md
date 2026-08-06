@@ -102,6 +102,17 @@ left while each button takes the text to its right.
 On the fixtures: 8/8 on printed lines with headings above, 15/15 on lines plus tick boxes,
 9/10 on a declared AcroForm. The misses are blanks with no label anywhere on the page.
 
+### Scans and skew
+
+A photographed or scanned page is never perfectly square, and a rule that drifts a
+couple of pixels across the width comes back as a row of overlapping fragments — on a
+real employment application, one "Full Name:" line arrived as five, and the page went
+from ~20 blanks to 78. Collinear neighbours are stitched back together, and the black
+edge of the scan itself is discarded. That one change took the same page from 78 lines
+to 27, which is what is actually on it. Tick boxes never had the problem: all 32 on
+that form, including every cell of the 3×7 availability grid, were found from the
+start.
+
 ### Scans
 
 A scanned page has no text layer, so there is nothing to read. Detection still works —

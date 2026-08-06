@@ -793,10 +793,44 @@ function scanLines(cv) {
     }
     return tot > 0 && ink / tot > 0.02;
   };
+  /* A scan is never perfectly square. A rule that drifts a couple of pixels
+     across the page comes back as a row of overlapping fragments — one "Full
+     Name:" line arrived as five — because each row's run marches sideways
+     faster than the overlap test tolerates. Stitching collinear neighbours
+     back together costs little and is the difference between a scanned form
+     working and not. */
+  const stitch = list => {
+    const near = Math.max(3, Math.round(H * 0.004));
+    let again = true;
+    while (again) {
+      again = false;
+      list.sort((a, b) => a.top - b.top || a.x0 - b.x0);
+      for (let i = 0; i < list.length && !again; i++) {
+        for (let j = i + 1; j < list.length; j++) {
+          const a = list[i], b = list[j];
+          if (Math.abs(b.top - a.top) > near) continue;
+          const gap = Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1);
+          if (gap > Math.max(6, W * 0.012)) continue;      // same rule, not a neighbour
+          a.top = Math.min(a.top, b.top); a.bot = Math.max(a.bot, b.bot);
+          a.x0 = Math.min(a.x0, b.x0);    a.x1 = Math.max(a.x1, b.x1);
+          list.splice(j, 1);
+          again = true;
+          break;
+        }
+      }
+    }
+    return list;
+  };
+
+  /* The edge of a scan is a rule too, and never one to write on. */
+  const edge = Math.max(2, Math.round(H * 0.012));
+  const inner = stitch(bands).filter(b =>
+    b.top > edge && b.bot < H - edge && !(b.x1 - b.x0 > W * 0.97));
+
   const cellEdge = new Set();
-  for (let i = 0; i < bands.length; i++) {
-    for (let j = i + 1; j < bands.length; j++) {
-      const a = bands[i], b = bands[j];
+  for (let i = 0; i < inner.length; i++) {
+    for (let j = i + 1; j < inner.length; j++) {
+      const a = inner[i], b = inner[j];
       const gap = Math.abs(b.top - a.top);
       if (gap < 8 || gap > H * 0.3) continue;
       if (Math.abs(a.x0 - b.x0) > 3 || Math.abs(a.x1 - b.x1) > 3) continue;
@@ -805,7 +839,7 @@ function scanLines(cv) {
     }
   }
 
-  return { W, H, bands: bands.filter(b => !cellEdge.has(b)), data: d, mask };
+  return { W, H, bands: inner.filter(b => !cellEdge.has(b)), data: d, mask };
 }
 
 /** Height of the label sitting just left of a line — used to match font size.
@@ -2014,6 +2048,7 @@ function markSpot(pi, key) {
   if (i < 0) return;
   KB.pi = pi; KB.key = key; KB.at = i + 1; KB.of = list.length; KB.cur = list[i];
   syncJump();
+  recentre();
 }
 
 async function spotsOf(pi) {
@@ -2079,7 +2114,7 @@ if (vp) {
   window.addEventListener('orientationchange', () => setTimeout(fitViewport, 250));
 }
 // focus and blur move the keyboard; the viewport event can lag behind them
-document.addEventListener('focusin', () => setTimeout(fitViewport, 60), true);
+document.addEventListener('focusin', () => setTimeout(() => { fitViewport(); recentre(); }, 90), true);
 document.addEventListener('focusout', () => setTimeout(fitViewport, 60), true);
 
 /* ---------------------------------------------------------- the jump bar */
@@ -2110,7 +2145,7 @@ async function enterSpot(s) {
 
   if (s.kind === 'field') {
     select(null);
-    scrollToSpot(p, s.x, s.y);
+    scrollToSpot(p, s.x, s.cy, s.h);
     s.f.el?.focus({ preventScroll: true });
     if (s.f.type === 'text' && s.f.el?.setSelectionRange) {
       const v = s.f.el.value.length;
@@ -2122,7 +2157,7 @@ async function enterSpot(s) {
 
   if (s.kind === 'line') {
     const it = textOnLine(s.page, s.L, s.key, false);
-    scrollToSpot(p, s.x, s.y);
+    scrollToSpot(p, s.x, s.cy, s.h);
     const d = elOf(it.id);
     if (d) edit(d);
     syncJump();
@@ -2134,20 +2169,32 @@ async function enterSpot(s) {
   blurActive();
   KB.box = s;
   paintBoxCursor(p, s.B);
-  scrollToSpot(p, s.B.cx, s.B.cy);
+  scrollToSpot(p, s.B.cx, s.B.cy, s.B.h);
   focusStage();
   syncJump();
 }
 
-function scrollToSpot(p, x, y) {
-  const top = p.el.offsetTop + y * p.dh - stageEl.clientHeight * 0.42;
-  const max = Math.max(0, stageEl.scrollHeight - stageEl.clientHeight);
+/* Put the thing you are filling in the middle of what you can actually see.
+   The stage is already sized to the visible viewport, so with a keyboard up
+   its middle is the middle of the strip above the keyboard. */
+function scrollToSpot(p, x, cy, h = 0) {
+  const view = stageEl.clientHeight;
+  const top = p.el.offsetTop + (cy * p.dh) - view / 2 + (h * p.dh) / 2;
+  const max = Math.max(0, stageEl.scrollHeight - view);
   const want = clamp(top, 0, max);
   if (Math.abs(want - stageEl.scrollTop) > 6) stageEl.scrollTo({ top: want, behavior: 'smooth' });
   const maxX = Math.max(0, stageEl.scrollWidth - stageEl.clientWidth);
   if (maxX > 2) {
     stageEl.scrollLeft = clamp(p.el.offsetLeft + x * p.dw - stageEl.clientWidth * 0.4, 0, maxX);
   }
+}
+/* re-centre whatever the cursor is on — after a tap, or once a keyboard
+   has opened and taken half the screen */
+function recentre() {
+  const s = KB.cur;
+  if (!s || $('#editor').hidden) return;
+  const p = S.pageBox[s.page];
+  if (p) scrollToSpot(p, s.x, s.cy, s.h);
 }
 
 function paintBoxCursor(p, B) {
