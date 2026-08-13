@@ -1763,6 +1763,72 @@ async function nativeWidth(p) {
   } catch (_) { return 0; }
 }
 
+/* A table is a rectangle. If a column is proved on some rows of a table and
+   not others, the gap is a faint rule, not a missing cell — no form has a
+   column that stops halfway down. That is what made the losses look arbitrary:
+   the outermost column of a table is bounded by the sheet's own border, the
+   rule most likely to fade, so "Degree or Diploma" appeared on the third row
+   and nowhere else. Finding the rows and the columns separately and then
+   insisting the grid is complete is far steadier than hoping every rule
+   survives, and it costs nothing when they all do. Anything that already has
+   writing in it is left alone. */
+function completeGrid(cells, scan) {
+  const near = (a, b, t) => Math.abs(a - b) < t;
+  const add = [];
+  /* One table at a time. Two tables on a page have similar row heights, so
+     proximity has to decide it: rows of one grid sit within about a row of
+     each other and their columns overlap. Merge two tables and each inherits
+     the other's columns. */
+  const seen = [];
+  const uniq = cells.filter(c => {
+    if (seen.some(o => near(o.cx, c.cx, 0.012) && near(o.cy, c.cy, 0.008))) return false;
+    seen.push(c); return true;
+  });
+  const groups = [];
+  for (const c of uniq) {
+    const g = groups.find(g => near(g.h, c.h, 0.010) &&
+      g.rows.some(r => Math.abs(r.cy - c.cy) < Math.max(0.028, c.h * 2.2)));
+    if (g) { g.rows.push(c); g.h = (g.h + c.h) / 2; } else groups.push({ h: c.h, rows: [c] });
+  }
+  for (const g of groups) {
+    const rows = [], cols = [];
+    for (const c of g.rows) {
+      let r = rows.find(r => near(r.cy, c.cy, c.h * 0.6));
+      if (!r) rows.push(r = { cy: c.cy, y0: c.y0, y1: c.y1, at: [] });
+      r.at.push(c);
+      let k = cols.find(k => near(k.cx, c.cx, Math.max(0.02, c.w * 0.45)));
+      if (!k) cols.push(k = { cx: c.cx, x0: c.x0, x1: c.x1, n: 0 });
+      k.n++;
+    }
+    if (rows.length < 2 || cols.length < 2) continue;
+    for (const r of rows) {
+      for (const k of cols) {
+        /* One sighting is enough. The outermost column of a table is bounded
+           by the sheet's own border and is exactly the one that survives on a
+           single row — insisting on two proofs threw away the column this was
+           written to rescue. The blank-paper test below is what keeps a stray
+           cell from inventing one. */
+        if (r.at.some(c => near(c.cx, k.cx, Math.max(0.02, (k.x1 - k.x0) * 0.45)))) continue;
+        // only where the paper is actually blank
+        const px = (v, n) => Math.round(v * n);
+        let ink = 0, tot = 0;
+        for (let y = px(r.y0, scan.H) + 3; y < px(r.y1, scan.H) - 2; y += 2) {
+          const base = y * scan.W;
+          for (let x = px(k.x0, scan.W) + 3; x < px(k.x1, scan.W) - 2; x += 2) {
+            tot++; if (scan.mask[base + x]) ink++;
+          }
+        }
+        if (!tot || ink / tot > 0.02) continue;
+        if (add.some(o => near(o.cx, k.cx, 0.012) && near(o.cy, r.cy, 0.008))) continue;
+        add.push({ x0: k.x0, x1: k.x1, y0: r.y0, y1: r.y1,
+                   cx: (k.x0 + k.x1) / 2, cy: (r.y0 + r.y1) / 2,
+                   w: k.x1 - k.x0, h: r.y1 - r.y0, filled: false, guessed: 1 });
+      }
+    }
+  }
+  return add;
+}
+
 /** the same page at a closer look, for cells the first pass could not prove */
 async function secondLook(p, have) {
   if (K !== 1) return [];
@@ -1822,6 +1888,7 @@ function ensureScan(p) {
          up under closer inspection is still a column. One extra scan per page,
          once; lines and tick boxes stay with the width they were tuned at. */
       cells.push(...await secondLook(p, cells));
+      cells.push(...completeGrid(cells, scan));
       /* A rule with an upright standing at each end is a border — the side of
          a box, the line between two rows of a grid. It is drawn to divide the
          page, not to be written on, and offering it as a blank puts a text
