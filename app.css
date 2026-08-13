@@ -474,7 +474,7 @@ select.fld{padding-right:0;}
    shoulder. `safe` matters: a plain centre on an overflowing flex row hides
    the start of it behind the left edge with no way to scroll back. */
 .selbar-scroll{
-  display:flex;align-items:center;gap:4px;padding:7px 8px;
+  display:flex;align-items:center;gap:3px;padding:7px 8px;
   justify-content:center;justify-content:safe center;
   overflow-x:auto;scrollbar-width:none;
 }
@@ -482,8 +482,19 @@ select.fld{padding-right:0;}
    selection — nudge pad, three colours, both size buttons and Delete. Space
    it any further apart and the last of them goes off the end of the row,
    which is a worse answer to "is it centred?" than a slightly tighter row. */
-.selbar-scroll > .sep{margin:0 3px;}
 .selbar-scroll .btn-icon{width:36px;height:36px;}
+
+/* A divider between two groups should hold whatever room is going between
+   them, so the groups reach the ends of the bar instead of huddling in the
+   middle of it. The spacer stretches; the line inside it does not. With the
+   fullest selection there is nothing to share and each falls back to its
+   minimum, which is why that minimum is small. */
+.selbar-scroll > .sep{
+  flex:1 1 auto;min-width:8px;max-width:46px;
+  width:auto;height:24px;margin:0;background:none;
+  display:flex;align-items:center;justify-content:center;
+}
+.selbar-scroll > .sep::before{content:"";width:1px;height:22px;background:var(--line);}
 .selbar-scroll::-webkit-scrollbar{display:none;}
 .swatches{display:flex;gap:8px;padding-left:2px;flex:none;}
 .swatches[hidden]{display:none;}
@@ -903,10 +914,15 @@ select.fld{padding-right:0;}
    obvious the row keeps going. */
 @media (hover:none){
   .tool{flex:0 0 20%;min-width:0;}
-  /* No scroll snapping. Proximity snapping fought every short swipe — the row
-     crept back to where it started and reaching Crop took three goes. A flick
-     should travel as far as it was thrown. */
   .toolbar{overscroll-behavior-x:contain;}
+  /* Two detents, not fifteen. Snapping every tool fought every short swipe —
+     the row crept back to where it started and reaching Crop took three goes.
+     Snapping only the two places worth stopping at gives the row a floor:
+     one flick left from the far end comes to rest on the standard five, and
+     getting past them to Simple view takes a second, deliberate pull. Nothing
+     is placed to the right, so the way out stays free. */
+  .toolbar{scroll-snap-type:x proximity;}
+  #btnSimple,.tool[data-tool="text"]{scroll-snap-align:start;}
 }
 /* Simple view is a different kind of thing from the tools beside it — a way
    of looking at the document rather than something you add to it — so it gets

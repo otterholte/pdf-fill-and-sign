@@ -170,7 +170,7 @@
         <dt>Tap, then drag</dt><dd>One tap selects, the next moves it &mdash; scrolling past never grabs anything</dd>
         <dt>Arrows in the bar</dt><dd>Tiny adjustments to whatever is selected &mdash; and to a crop edge. Hold one down to go further</dd>
         <dt>Pinch</dt><dd>Zoom in close. Two fingers never move your edits</dd>
-        <dt>Swipe the tools</dt><dd>Blackout, rotate, crop and clear are off to the right; simple view is off to the left. The bar under the row says where you are, and the arrow at each end takes you there</dd>
+        <dt>Swipe the tools</dt><dd>Past the rule on the right: blackout, rotate, crop and clear. Off to the left: simple view. A swipe back stops on the standard five &mdash; pull once more to reach simple view</dd>
       </dl>
       <p class="tipnote">Add it to your home screen and it opens straight to this page, with or without a signal.</p>
     </div>
@@ -388,6 +388,11 @@
       <svg viewBox="0 0 24 24"><path d="M5.5 5.5l13 13M18.5 5.5l-13 13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
       <span>X mark</span>
     </button>
+    <!-- Everything past here is something you do to the page rather than
+         something you put on it, and it is also the part that lives off the
+         edge of a phone. The rule says both at once: a different kind of
+         tool, and a row that keeps going. -->
+    <span class="tool-div" aria-hidden="true"></span>
     <button class="tool" data-tool="redact">
       <svg viewBox="0 0 24 24"><rect x="3.5" y="7.5" width="17" height="9" rx="1.5" fill="currentColor"/></svg>
       <span>Blackout</span>
