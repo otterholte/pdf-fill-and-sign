@@ -420,6 +420,7 @@ async function loadDoc(buf, name, items, rots, fields) {
   $('#editor').hidden = false;
   SIM = { qs: [], scanned: false, built: false };
 
+  armBack();
   await buildPages(rots);
   syncBars();
   clearBoxCursor();
@@ -1772,7 +1773,7 @@ async function nativeWidth(p) {
    insisting the grid is complete is far steadier than hoping every rule
    survives, and it costs nothing when they all do. Anything that already has
    writing in it is left alone. */
-function completeGrid(cells, scan) {
+function completeGrid(cells, scan, boxy) {
   const near = (a, b, t) => Math.abs(a - b) < t;
   const add = [];
   /* One table at a time. Two tables on a page have similar row heights, so
@@ -1802,6 +1803,12 @@ function completeGrid(cells, scan) {
     }
     if (rows.length < 2 || cols.length < 2) continue;
     for (const r of rows) {
+      /* Only finish a row that is plainly part of the grid. A "Yes / No" pair
+         under an availability chart shares its rows and none of its columns,
+         and completing it scatters phantom boxes across the days. A row that
+         already holds half the columns is in the grid; two boxes out of eight
+         are not. */
+      if (r.at.length < cols.length * 0.5) continue;
       for (const k of cols) {
         /* One sighting is enough. The outermost column of a table is bounded
            by the sheet's own border and is exactly the one that survives on a
@@ -1809,20 +1816,26 @@ function completeGrid(cells, scan) {
            written to rescue. The blank-paper test below is what keeps a stray
            cell from inventing one. */
         if (r.at.some(c => near(c.cx, k.cx, Math.max(0.02, (k.x1 - k.x0) * 0.45)))) continue;
-        // only where the paper is actually blank
+        /* Only where the paper is actually blank — but a tick box is *drawn*,
+           so for those look inside the outline rather than at the square as a
+           whole, or every empty box reads as full of ink and nothing is ever
+           completed. */
         const px = (v, n) => Math.round(v * n);
+        const in8 = boxy ? 0.22 : 0;
+        const iy = (r.y1 - r.y0) * in8, ix = (k.x1 - k.x0) * in8;
         let ink = 0, tot = 0;
-        for (let y = px(r.y0, scan.H) + 3; y < px(r.y1, scan.H) - 2; y += 2) {
+        for (let y = px(r.y0 + iy, scan.H) + 2; y < px(r.y1 - iy, scan.H) - 1; y += 2) {
           const base = y * scan.W;
-          for (let x = px(k.x0, scan.W) + 3; x < px(k.x1, scan.W) - 2; x += 2) {
+          for (let x = px(k.x0 + ix, scan.W) + 2; x < px(k.x1 - ix, scan.W) - 1; x += 2) {
             tot++; if (scan.mask[base + x]) ink++;
           }
         }
-        if (!tot || ink / tot > 0.02) continue;
+        if (!tot || ink / tot > (boxy ? 0.5 : 0.02)) continue;
         if (add.some(o => near(o.cx, k.cx, 0.012) && near(o.cy, r.cy, 0.008))) continue;
         add.push({ x0: k.x0, x1: k.x1, y0: r.y0, y1: r.y1,
                    cx: (k.x0 + k.x1) / 2, cy: (r.y0 + r.y1) / 2,
                    w: k.x1 - k.x0, h: r.y1 - r.y0, filled: false, guessed: 1 });
+        if (boxy) add[add.length - 1].w = k.x1 - k.x0;
       }
     }
   }
@@ -1942,11 +1955,19 @@ function ensureScan(p) {
         // reaches the next row of the form and cuts on its labels instead
         const top = b.bot + 2, bot = Math.min(scan.H - 1, b.bot + Math.round(scan.H * 0.012));
         if (bot - top < 4) return null;
-        const W = scan.W, wide = b.x1 - b.x0;
+        /* Look a little to the left of where the rule starts. The first
+           caption of a split line sits under the field's *label* — "Last"
+           lives under "Full Name:", outside the rule itself — so a strip that
+           begins where the rule begins never sees it, finds two captions
+           instead of three, and hands you one box covering Last and First. */
+        const W = scan.W;
+        const lead = Math.round((b.x1 - b.x0) * 0.18);
+        const from = Math.max(0, b.x0 - lead);
+        const wide = b.x1 - from;
         const col = new Uint8Array(wide + 1);
         for (let y = top; y <= bot; y++) {
           const base = y * W;
-          for (let x = b.x0; x <= b.x1; x++) if (scan.mask[base + x]) col[x - b.x0] = 1;
+          for (let x = from; x <= b.x1; x++) if (scan.mask[base + x]) col[x - from] = 1;
         }
         const need = Math.max(6 * K, Math.round(wide * 0.02));  // air between captions
         const runs = [];
@@ -1965,7 +1986,12 @@ function ensureScan(p) {
            paper would start. Halfway between two captions is nowhere in
            particular, and the writing then starts adrift of its own label. */
         const cuts = [];
-        for (let i = 1; i < runs.length; i++) cuts.push(b.x0 + runs[i][0]);
+        // a caption left of the rule confirms the first section; it cannot cut it
+        for (let i = 1; i < runs.length; i++) {
+          const at = from + runs[i][0];
+          if (at > b.x0 + scan.W * 0.03) cuts.push(at);
+        }
+        if (!cuts.length) return null;
         const edges = [b.x0, ...cuts.map(Math.round), b.x1];
         const parts = [];
         for (let i = 0; i + 1 < edges.length; i++) {
@@ -1996,6 +2022,10 @@ function ensureScan(p) {
         };
       });
       const boxes = scanBoxes(scan);
+      /* A column of tick boxes is a grid exactly as a table is, and it fails
+         the same way: one faint square in an availability chart and that one
+         day cannot be ticked. Same rule, same evidence. */
+      boxes.push(...completeGrid(boxes, scan, true));
       /* Bordered inputs join the table cells: both are a rectangle you write
          inside, and everything downstream already knows how to fill one. Drop
          any that a cell or a tick box has already claimed. */
@@ -4302,6 +4332,30 @@ async function buildPdf() {
   return blob;
 }
 
+
+/* ------------------------------------------------------- the Back button
+   Android's back gesture is the one control the app does not own, and by
+   default it leaves the site — so a back-swipe while filling a form closed
+   Fill & Sign outright rather than stepping out of the sheet, or the crop, or
+   the document. Keep one spare history entry while anything of ours is open,
+   spend it on closing that thing, and put another back. Only when nothing is
+   open does Back mean leave. */
+let backDepth = 0;
+function armBack() { try { history.pushState({ fs: ++backDepth }, ''); } catch (_) {} }
+
+addEventListener('popstate', () => {
+  const sheet = $$('.sheet-wrap').find(x => !x.hidden);
+  if (sheet) { sheet.hidden = true; return armBack(); }
+  if (!$('#cropbar').hidden) { closeCrop(); return armBack(); }
+  if (!$('#pick').hidden) { $('#pick').hidden = true; closeDoc(); return armBack(); }
+  if (!$('#simple').hidden) { showPage(); return armBack(); }
+  if (!$('#done').hidden) {
+    stopConfetti(); $('#done').hidden = true; $('#editor').hidden = false;
+    fitViewport(); return armBack();
+  }
+  if (!$('#editor').hidden) { closeDoc(); return armBack(); }
+  // nothing of ours is showing: this one really was meant to leave
+});
 
 /* ================================================================== CROP
    A document arrives the wrong size — a photo with the desk in it, a scan
