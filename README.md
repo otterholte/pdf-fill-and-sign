@@ -56,7 +56,7 @@ No account. No upload. No trial. No watermark. No surprise paywall.
   than merely covered.
 - **Rotate** — 90° / 180° / 270° / original, per page or all pages. Objects rotate with
   the page, and objects added to an already-sideways page land upright.
-- **Undo / redo**, duplicate, bring forward, send backward
+- **Undo / redo**, duplicate, and arrow keys to nudge whatever is selected
 - **Save or Share** — download the PDF, or hand it to the device share sheet (Gmail,
   Outlook, Messages, Drive, Files, …). The finished screen also offers three clear
   exits — start another PDF, the other tools, or home — and a little confetti, which

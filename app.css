@@ -261,6 +261,58 @@ a:hover{text-decoration:underline;}
 /* while a tool is armed you are aiming yourself — get out of the way */
 .editor.arming .linehint{opacity:.3;}
 
+/* ------------------------------------------------------- hovering a blank
+   Under a mouse, the blank you are pointing at fills in briefly so you can
+   see exactly how far it runs and where it starts — which is the answer to
+   "is this the field I think it is?". Transitions, not a loop: it should
+   settle, not pulse at you while you read the page underneath it. */
+.linehint{
+  transition:box-shadow .16s ease, background-color .16s ease;
+}
+/* A bracket, not a wash: the two end posts are the answer to "where does
+   this field actually start and stop", which is the whole question a
+   misplaced blank raises. */
+.linehint.hot{
+  background:rgba(27,79,216,.13);
+  box-shadow:inset 0 -2.5px 0 var(--accent),
+             inset 3px 0 0 var(--accent),
+             inset -3px 0 0 var(--accent);
+  animation:spotwake .2s ease-out;
+}
+.linehint.is-cell.hot{
+  background:rgba(27,79,216,.09);
+  box-shadow:inset 0 0 0 2px var(--accent);
+}
+/* a tick box has no marker of its own, so hovering lends it one */
+.boxhot{
+  position:absolute;transform-origin:0 0;pointer-events:none;z-index:1;
+  border-radius:2.5px;
+  background:rgba(27,79,216,.10);
+  box-shadow:inset 0 0 0 2px var(--accent);
+  animation:spotwake .2s ease-out;
+}
+@keyframes spotwake{ from{opacity:0;} to{opacity:1;} }
+@media (prefers-reduced-motion: reduce){
+  .linehint{transition:none;}
+  .linehint.hot,.boxhot{animation:none;}
+}
+@media (prefers-color-scheme: dark){
+  .linehint.hot{
+    background:rgba(123,160,255,.16);
+    box-shadow:inset 0 -2.5px 0 var(--accent),
+               inset 3px 0 0 var(--accent),
+               inset -3px 0 0 var(--accent);
+  }
+  .linehint.is-cell.hot,.boxhot{
+    background:rgba(123,160,255,.13);
+    box-shadow:inset 0 0 0 2px var(--accent);
+  }
+}
+/* and the cursor agrees with the highlight */
+.editor.overspot .page{cursor:text;}
+/* none of this on a finger: there is no hover, only a tap that already works */
+@media (hover:none){ .boxhot{display:none;} }
+
 /* brief highlight of a blank line we snapped to */
 .snapflash{
   position:absolute;height:3px;border-radius:2px;background:var(--accent);

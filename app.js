@@ -74,6 +74,45 @@ const DB = (() => {
 const COLORS = ['#0b0f14', '#1b4fd8', '#c8202a'];
 const DEF = { fs: 0.0165, stampFs: 0.0105, mark: 0.034, sigW: 0.26, redW: 0.34, redH: 0.032 };
 
+/* ------------------------------------------------------- how big to write
+
+   Sizes are stored as a fraction of the page's height, because that is what
+   survives zooming, rotating and exporting. But "a fraction of the height" is
+   not what a size *means* to anyone: the same fraction is 12pt on Letter and
+   15pt on a Legal page, and the writing quietly grows with the paper.
+
+   So the defaults are decided in PDF points and converted per page. Filling
+   in a form by hand lands somewhere around 9–14pt whatever the paper is, and
+   that is the range these hold to.
+
+   The ceiling is the important half. Text snapped to a blank is sized to the
+   printed words beside it, which is right for a caption and wrong for a
+   heading: a blank under a 30pt title was being offered 30pt writing, which
+   is a poster, not an answer. Matching still decides the size inside the
+   range; the range decides how far matching is allowed to go. */
+const TEXT_PT = { min: 9, max: 14, def: 12 };
+/* A signature with no rule under it has nothing to match, so it gets a size
+   that reads as handwriting rather than a banner: a bit over two lines of
+   ordinary text tall — about a third of an inch, which is what a signature
+   on paper actually measures — and never more than a quarter of the page
+   wide. Width used to be the fixed quantity, which meant a tall narrow scan
+   and a wide flat one came out the same *width* and wildly different sizes.
+   Height is the thing the eye compares, so height is what is held. */
+const SIG_PT = 26, SIG_W_MAX = 0.24;
+/** the page's height in PDF points, as it is currently turned */
+const pageHpt = p => (localDims(p.uw, p.uh, totalRot(p))[1] || 792);
+/** the same three sizes as fractions of *this* page's height */
+function fsRange(p) {
+  const H = pageHpt(p);
+  return { lo: TEXT_PT.min / H, hi: TEXT_PT.max / H, def: TEXT_PT.def / H };
+}
+/** what a hand-filled blank should be set in, given the printed words beside
+    it (`want`, already a fraction of the page height) — or nothing at all */
+const fsFit = (p, want) => {
+  const R = fsRange(p);
+  return want ? clamp(want, R.lo, R.hi) : R.def;
+};
+
 /* A signature timestamp tracks the signature's width so the two look like one
    object — but only down to a point. Past it the date stops shrinking, because
    an unreadable date under a signature is worse than a slightly large one. The
@@ -2006,12 +2045,17 @@ function ensureScan(p) {
         if (parts) free2.push(...parts); else free2.push(b);
       }
       const lines = free2.filter(b => clearAbove(b) * scan.H >= 8 * K).map(b => {
-        /* Match the label if we found one. With no label to measure, a
-           sensible default beats the bottom of the clamp — that is what
-           used to make an unlabelled blank get 6pt text. */
+        /* Match the label if we found one, within the range a person actually
+           writes in — see TEXT_PT. With no label to measure, the middle of
+           that range beats the bottom of the clamp: that is what used to make
+           an unlabelled blank get 6pt text.
+
+           The clearance check still has the last word downwards. A tight row
+           may need writing smaller than anyone would choose, and that is
+           better than writing that collides with the line above it. */
         const ink = inkHeightLeft(scan, b);
         const clr = clearAbove(b);
-        const want = ink ? clamp((ink / 0.72) / scan.H, 0.0085, 0.045) : DEF.fs;
+        const want = fsFit(p, ink ? (ink / 0.72) / scan.H : 0);
         return {
           y: b.top / scan.H,                     // where a baseline should sit
           x0: b.x0 / scan.W,
@@ -2471,7 +2515,7 @@ stageEl.addEventListener('pointerdown', e => {
 function placeLooseText(pi, x, y) {
   const p = S.pageBox[pi];
   const near = findLine(p, x, y);
-  const fs = near ? near.fs : DEF.fs;
+  const fs = near ? near.fs : fsRange(p).def;
   const it = { id: uid(), page: pi, rot: totalRot(p), type: 'text',
                x: clamp(x, 0, .97), y: clamp(y - fs * 0.62, 0, .99),
                fs, color: COLORS[0], text: '' };
@@ -2499,15 +2543,23 @@ function place(pi, x, y) {
 
   if (pendingSig) {
     const ar = pendingSig.ar;
-    let w = DEF.sigW, sx = clamp(x - w / 2, 0, 1 - w), sy;
+    /* Width follows from the height you want, because height is the thing
+       that has to look right: it is what a signature shares with the writing
+       around it. Wide-and-thin and short-and-tall scans then come out the
+       same size on the page instead of the same width. */
+    const wFor = h => clamp((h * Hl) / (Wl * ar), 0.05, SIG_W_MAX);
+    let w, sx, sy;
     if (L) {
       // sit the signature on the line, sized to the label beside it
-      const hWant = clamp(L.fs * 2.6, 0.022, 0.10);
-      w = clamp((hWant * Hl) / (Wl * ar), 0.05, Math.max(0.08, (L.x1 - L.x0) * 0.98));
+      const hWant = clamp(L.fs * 2.6, 0.022, (SIG_PT * 2.4) / pageHpt(p));
+      w = Math.min(wFor(hWant), Math.max(0.08, (L.x1 - L.x0) * 0.98));
       const h = (w * Wl * ar) / Hl;
       sx = clamp(L.x0 + 0.008, 0, 1 - w);
       sy = clamp(L.y - h - 0.004, 0, 1);
     } else {
+      // nothing to match: a hand-sized signature, centred on the tap
+      w = wFor(SIG_PT / pageHpt(p));
+      sx = clamp(x - w / 2, 0, 1 - w);
       sy = clamp(y - ((w * Wl * ar) / Hl) / 2, 0, 1);
     }
     it = { id, page: pi, rot, type: 'sig', x: sx, y: sy, w, ar,
@@ -2522,7 +2574,7 @@ function place(pi, x, y) {
   }
 
   if (tool === 'text' || tool === 'date') {
-    const fs = L ? L.fs : DEF.fs;
+    const fs = L ? L.fs : fsRange(p).def;
     // baseline lands just above the rule; otherwise centre the text on the tap
     const ty = L ? L.y - fs * (BASELINE + 0.06) : y - fs * 0.62;
     let tx = L ? L.x0 + 0.006 : x;
@@ -2961,20 +3013,10 @@ $('#btnDupe').addEventListener('click', () => {
   S.items.push(c); itemEl(c); select(c.id); saveSoon();
 });
 
-function reorder(dir) {
-  const it = getSel(); if (!it) return;
-  const idx = S.items.indexOf(it);
-  const sib = dir > 0
-    ? S.items.findIndex((x, i) => i > idx && x.page === it.page)
-    : [...S.items].reduce((acc, x, i) => (i < idx && x.page === it.page ? i : acc), -1);
-  if (sib < 0) return toast(dir > 0 ? 'Already in front.' : 'Already behind.');
-  push();
-  S.items.splice(idx, 1);
-  S.items.splice(sib, 0, it);
-  paintItems(); select(it.id); saveSoon();
-}
-$('#btnFwd').addEventListener('click', () => reorder(1));
-$('#btnBack2').addEventListener('click', () => reorder(-1));
+/* Bring forward / send backward used to live here. Stacking order only ever
+   matters when two things overlap, which on a filled-in form is a mistake
+   rather than a layout — and the two buttons cost a permanent slot in a bar
+   that has to fit on a phone. Items still draw in the order they were made. */
 
 $('#btnStamp').addEventListener('click', () => {
   const it = getSel(); if (!it || it.type !== 'sig') return;
@@ -2995,9 +3037,31 @@ $('#btnDateFmt').addEventListener('click', () => {
   paintItems(); select(it.id); saveSoon();
 });
 
+/* On a desktop the arrow keys are the obvious way to shift something a hair,
+   and the on-screen nudge pad is already the thumb version of exactly that —
+   so they share it. They only apply while something is selected and the caret
+   is not inside it, which is the guard at the top of this handler: inside a
+   text box the arrows still move the caret, as they must.
+
+   Holding an arrow repeats, and a burst of repeats is one undo step rather
+   than forty — you meant to move it there once. Shift takes a bigger stride. */
+const ARROWS = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
+let arrowAt = 0;
+
 document.addEventListener('keydown', e => {
   if ($('#editor').hidden) return;
   if (document.activeElement?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) return;
+
+  const dir = ARROWS[e.key];
+  if (dir && S.sel && !e.metaKey && !e.ctrlKey && !e.altKey && !KB.box) {
+    e.preventDefault();
+    const now = performance.now();
+    if (now - arrowAt > 700) push();
+    arrowAt = now;
+    nudge(dir, e.shiftKey);
+    return;
+  }
+
   if ((e.key === 'Backspace' || e.key === 'Delete') && S.sel) { e.preventDefault(); push(); removeItem(S.sel); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
@@ -3401,6 +3465,7 @@ function placeHint(p, h) {
 }
 
 function paintHints() {
+  hotHint = null;                    // the element it pointed at is about to go
   S.pageBox.forEach((p, pi) => {
     p.layer.querySelectorAll('.linehint').forEach(e => e.remove());
     p.hints = [];
@@ -3437,6 +3502,64 @@ function findHint(p, x, y, pad = 0.003) {
   return null;
 }
 
+/* ------------------------------------------------------ hover (mouse only)
+
+   A blank is drawn where the scan believes it is, and that is not always
+   where you would have drawn it: a rule can start a word further right than
+   its caption suggests, and two blanks on one line can split in a place you
+   would not have picked. Under a mouse the pointer already says what you are
+   considering, so the thing beneath it lights up and shows you its real
+   extent — before you click, rather than after you have typed into it.
+
+   Tick boxes have no marker of their own (a page of outlined squares does not
+   need outlining again), so hovering one borrows a marker that follows the
+   pointer around. Touch gets none of this: a finger has no hover, and lighting
+   something up at the moment it is tapped is just a flicker. */
+const hotEl = document.createElement('div');
+hotEl.className = 'boxhot';
+let hotHint = null;
+
+function clearHover() {
+  if (hotHint) { hotHint.el?.classList.remove('hot'); hotHint = null; }
+  hotEl.remove();
+  $('#editor').classList.remove('overspot');
+}
+
+function hoverSpot(e) {
+  if (e.pointerType && e.pointerType !== 'mouse') return;
+  if (!$('#editor') || $('#editor').hidden || S.tool || pendingSig) return clearHover();
+  const pageEl = e.target.closest?.('.page');
+  if (!pageEl || e.target.closest('.it') || e.target.closest('.fld')) return clearHover();
+  const p = S.pageBox[+pageEl.dataset.i];
+  if (!p) return clearHover();
+  const r = pageEl.getBoundingClientRect();
+  if (!r.width || !r.height) return clearHover();
+  const x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+
+  const B = findBox(p, x, y, 0.002);
+  if (B) {
+    if (hotHint) { hotHint.el?.classList.remove('hot'); hotHint = null; }
+    if (hotEl.parentNode !== p.layer) p.layer.append(hotEl);
+    placeHint(p, { el: hotEl, r: { x0: B.x0, x1: B.x1, y0: B.y0, y1: B.y1 } });
+    $('#editor').classList.add('overspot');
+    return;
+  }
+  hotEl.remove();
+
+  const h = findHint(p, x, y);
+  if (h !== hotHint) {
+    hotHint?.el?.classList.remove('hot');
+    hotHint = h || null;
+    hotHint?.el?.classList.add('hot');
+  }
+  $('#editor').classList.toggle('overspot', !!h);
+}
+
+stageEl.addEventListener('pointermove', hoverSpot);
+stageEl.addEventListener('pointerleave', clearHover);
+stageEl.addEventListener('pointerdown', e => { if (e.pointerType !== 'mouse') clearHover(); });
+stageEl.addEventListener('scroll', clearHover, { passive: true });
+
 /** Start typing in a table cell. The text is centred in the box rather than
     resting on a rule, because that is what a person writing in a table does
     and what makes the finished page look right. */
@@ -3444,7 +3567,10 @@ function textInCell(pi, C, key, focus = true) {
   const p = S.pageBox[pi];
   let it = S.items.find(i => i.page === pi && i.lineKey === key);
   if (!it) {
-    const fs = clamp(C.h * 0.52, 0.0085, 0.03);
+    /* Fill the cell, but only up to the size a person writes at — a tall
+       cell is a tall cell, not an instruction to write in 24pt. The cell
+       still caps it downwards so the writing cannot outgrow its own box. */
+    const fs = Math.max(0.0085, Math.min(fsFit(p, C.h * 0.52), C.h * 0.62));
     it = { id: uid(), page: pi, rot: totalRot(p), type: 'text',
            x: C.x0, y: clamp(C.cy - fs * 0.62, 0, .99),
            fs, color: COLORS[0], text: '', lineKey: key,
