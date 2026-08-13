@@ -795,7 +795,8 @@ select.fld{padding-right:0;}
 .crop-hint{flex:1;font-size:12.5px;color:var(--accent);font-weight:600;}
 .crop-nudge{flex:none;}
 .crop-nudge .nud{width:38px;height:34px;}
-.crop-nudge .nud-x{color:var(--accent);opacity:.65;}
+.crop-nudge .nud-x{color:var(--accent);opacity:.8;}
+.crop-nudge .nud[hidden]{display:none;}
 .crop-row .btn-ghost.sm{flex:1;}
 .crop-row .btn-save{flex:1;}
 /* the rotate bar is one row, not two */
@@ -870,20 +871,25 @@ select.fld{padding-right:0;}
 }
 .toolrail[hidden]{display:none;}
 .toolthumb{
-  position:absolute;top:0;height:100%;border-radius:2px;background:var(--accent);
+  position:absolute;top:0;height:100%;border-radius:2px;background:var(--fg-3);
+  opacity:.45;
   transition:left .12s linear, width .12s linear;
 }
+/* Quiet on purpose: these say which way the row runs, they are not something
+   to be drawn to. Colour alone carries the meaning — blue for the tools,
+   green for Simple view — with no chip behind it competing with the buttons. */
 .toolnext{
-  flex:0 0 26px;align-self:center;z-index:6;
-  height:40px;display:grid;place-items:center;border-radius:9px;
-  color:var(--accent);background:var(--accent-soft);
+  flex:0 0 22px;align-self:center;z-index:6;
+  height:36px;display:grid;place-items:center;border-radius:8px;
+  color:var(--accent);background:transparent;opacity:.55;
 }
+.toolnext:active{background:var(--bg-3);opacity:1;}
 .toolnext[hidden]{display:none;}
-.toolnext svg{width:15px;height:15px;}
+.toolnext svg{width:13px;height:13px;}
 /* the left-hand chip leads to Simple view, so it wears Simple view's colour */
-.toolprev{color:var(--tools);background:var(--tools-soft);}
-/* nothing further that way: dim it rather than leaving a live-looking arrow */
-.toolnext.spent{opacity:.3;}
+.toolprev{color:var(--tools);}
+/* nothing further that way: fade it rather than leaving a live-looking arrow */
+.toolnext.spent{opacity:.2;}
 .editor.kb .toolrail,.editor.kb .toolnext{display:none;}
 
 /* the prompt sits at the top: at the bottom it covered the very controls it
@@ -906,6 +912,9 @@ select.fld{padding-right:0;}
    pair is heavier and sits on a chip, the horizontal pair is a light outline */
 .nud-y{background:var(--accent-soft);color:var(--accent);}
 .nud-y svg{width:20px;height:20px;}
-.nud-x{color:var(--fg-3);}
-.nud-x svg{width:18px;height:18px;}
+/* Firmer than they were, so they read as a pair with the vertical two rather
+   than as something disabled — but still plainly the lighter of the two axes:
+   outline against solid, --fg-2 against the accent. */
+.nud-x{color:var(--fg-2);}
+.nud-x svg{width:19px;height:19px;}
 .nud-y:active{filter:brightness(.92);}

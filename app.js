@@ -81,24 +81,29 @@ const DEF = { fs: 0.0165, stampFs: 0.0105, mark: 0.034, sigW: 0.26, redW: 0.34, 
    not what a size *means* to anyone: the same fraction is 12pt on Letter and
    15pt on a Legal page, and the writing quietly grows with the paper.
 
-   So the defaults are decided in PDF points and converted per page. Filling
-   in a form by hand lands somewhere around 9–14pt whatever the paper is, and
-   that is the range these hold to.
+   So the defaults are decided per page from a fixed physical size. Filling in
+   a form by hand lands somewhere around 9–14 CSS pixels whatever the paper
+   is, and that is the range these hold to.
+
+   The numbers are in CSS pixels, converted, because that is the ruler people
+   actually have a feel for — and a point is not one. A point is 1/72 inch and
+   a CSS pixel is 1/96, so 14pt is 18.7px: a "14" ceiling set in points still
+   came out looking like a headline.
 
    The ceiling is the important half. Text snapped to a blank is sized to the
    printed words beside it, which is right for a caption and wrong for a
    heading: a blank under a 30pt title was being offered 30pt writing, which
    is a poster, not an answer. Matching still decides the size inside the
    range; the range decides how far matching is allowed to go. */
-const TEXT_PT = { min: 9, max: 14, def: 12 };
+const PX = 0.75;                                  // one CSS pixel, in points
+const TEXT_PT = { min: 9 * PX, max: 14 * PX, def: 12 * PX };
 /* A signature with no rule under it has nothing to match, so it gets a size
-   that reads as handwriting rather than a banner: a bit over two lines of
-   ordinary text tall — about a third of an inch, which is what a signature
-   on paper actually measures — and never more than a quarter of the page
-   wide. Width used to be the fixed quantity, which meant a tall narrow scan
-   and a wide flat one came out the same *width* and wildly different sizes.
-   Height is the thing the eye compares, so height is what is held. */
-const SIG_PT = 26, SIG_W_MAX = 0.24;
+   that reads as handwriting rather than a banner: about two lines of ordinary
+   text tall, and never more than a fifth of the page wide. Width used to be
+   the fixed quantity, which meant a tall narrow scan and a wide flat one came
+   out the same *width* and wildly different sizes. Height is the thing the
+   eye compares, so height is what is held. */
+const SIG_PT = 26 * PX, SIG_W_MAX = 0.20;
 /** the page's height in PDF points, as it is currently turned */
 const pageHpt = p => (localDims(p.uw, p.uh, totalRot(p))[1] || 792);
 /** the same three sizes as fractions of *this* page's height */
@@ -2090,7 +2095,15 @@ function ensureScan(p) {
            better than writing that collides with the line above it. */
         const ink = inkHeightLeft(scan, b);
         const clr = clearAbove(b);
-        const want = fsFit(p, ink ? (ink / 0.72) / scan.H : 0);
+        /* inkHeightIn walks from the lowest inked row of the caption up to
+           the top of its ink, so what comes back is the whole span from
+           descender to ascender — very nearly the em box, not the cap height.
+           Dividing by 0.72 as though it were cap height inflated every
+           estimate by about a third, which is why almost every blank on every
+           fixture came out pinned to the ceiling instead of matched to its
+           label. Against 0.95 they spread out across the range the way they
+           were always meant to. */
+        const want = fsFit(p, ink ? (ink / 0.95) / scan.H : 0);
         return {
           y: b.top / scan.H,                     // where a baseline should sit
           x0: b.x0 / scan.W,
@@ -2309,9 +2322,24 @@ function select(id) {
   if (prev && prev.id !== id) hintsSoon();
 }
 
+/* The bars live in the same column as the stage, so one appearing takes its
+   height off the stage and everything you were looking at slides. Zoomed in
+   on one line of a form that is the difference between placing a date where
+   you meant to and chasing it back down the page. The scroll offset is the
+   top of the view, so holding it steady still loses the bottom — hold the
+   *middle* instead, which is where you are looking and where you just tapped. */
+function keepView(change) {
+  const h0 = stageEl.clientHeight, top0 = stageEl.scrollTop;
+  change();
+  const d = h0 - stageEl.clientHeight;
+  if (!d) return;
+  const max = Math.max(0, stageEl.scrollHeight - stageEl.clientHeight);
+  stageEl.scrollTop = clamp(top0 + d / 2, 0, max);
+}
+
 function syncBars() {
   const it = getSel();
-  $('#selbar').hidden = !it;
+  keepView(() => { $('#selbar').hidden = !it; });
   if (!it) return;
   const colorable = isText(it) || it.type === 'check' || it.type === 'x';
   $('#swatches').hidden = !colorable;
@@ -2365,7 +2393,15 @@ $$('.tool').forEach(b => b.addEventListener('click', () => {
   S.tool = S.tool === t ? null : t;
   pendingSig = null;
   reflectTool();
+  /* Hand focus back to the page. A focused button in a bar at the bottom is
+     something a browser will pan its own viewport to keep in view, and while
+     you are pinched in on one line that pan is the whole screen moving. */
+  focusStage();
 }));
+/* …and do not let the press take focus in the first place */
+$('#toolwrap').addEventListener('mousedown', e => {
+  if (e.target.closest('.tool, .toolnext')) e.preventDefault();
+});
 
 /* ---- how far along the row of tools you are
 
@@ -2661,7 +2697,7 @@ function place(pi, x, y) {
     let w, sx, sy;
     if (L) {
       // sit the signature on the line, sized to the label beside it
-      const hWant = clamp(L.fs * 2.6, 0.022, (SIG_PT * 2.4) / pageHpt(p));
+      const hWant = clamp(L.fs * 2.2, 0.018, (SIG_PT * 1.4) / pageHpt(p));
       w = Math.min(wFor(hWant), Math.max(0.08, (L.x1 - L.x0) * 0.98));
       const h = (w * Wl * ar) / Hl;
       sx = clamp(L.x0 + 0.008, 0, 1 - w);
@@ -4781,6 +4817,14 @@ const CROP_LABEL = { n: 'Top edge', s: 'Bottom edge', e: 'Right edge', w: 'Left 
 function pickCrop(k) {
   cropSel = k;
   $('#cropHint').textContent = CROP_LABEL[k] || 'Drag an edge or a corner';
+  /* An edge only moves along one axis, so only that axis is offered. Two dead
+     arrows beside two live ones is a worse answer to "which way does this
+     go?" than showing the two that work. Corners keep all four. */
+  const axis = k.length === 1 ? (k === 'n' || k === 's' ? 'y' : 'x') : null;
+  $$('#cropNudge .nud').forEach(b => {
+    const mine = b.classList.contains('nud-y') ? 'y' : 'x';
+    b.hidden = !!axis && axis !== mine;
+  });
   paintCrop();
 }
 
