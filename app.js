@@ -111,6 +111,25 @@ function fsRange(p) {
   const H = pageHpt(p);
   return { lo: TEXT_PT.min / H, hi: TEXT_PT.max / H, def: TEXT_PT.def / H };
 }
+/** How wide a signature of aspect ratio `ar` must be to stand `h` tall,
+    `h` being a fraction of the page height. Width follows from height because
+    height is the thing that has to look right — it is what a signature shares
+    with the writing around it. Sizing by width instead meant a tall narrow
+    scan and a wide flat one came out the same width and wildly different
+    sizes. */
+function sigWidth(p, ar, h) {
+  const [Wl, Hl] = localDims(p.lw, p.lh, totalRot(p));
+  return clamp((h * Hl) / (Wl * ar), 0.05, SIG_W_MAX);
+}
+/** …and on a rule, matched to the label beside it and never wider than the
+    rule. One function, because there are two ways to land a signature on a
+    line — by tapping it and from the simple view — and they had drifted
+    apart, so the same rule gave you two different signatures. */
+function sigOnLine(p, L, ar) {
+  const hWant = clamp(L.fs * 2.2, 0.018, (SIG_PT * 1.4) / pageHpt(p));
+  return Math.min(sigWidth(p, ar, hWant), Math.max(0.08, (L.x1 - L.x0) * 0.98));
+}
+
 /** what a hand-filled blank should be set in, given the printed words beside
     it (`want`, already a fraction of the page height) — or nothing at all */
 const fsFit = (p, want) => {
@@ -2356,9 +2375,38 @@ function syncBars() {
   fmtBtn.hidden = !it.date;
   if (it.date) fmtBtn.textContent = shortLabel(it.date.fmt);
 
-  const penWrap = $('#penWrap');
-  penWrap.hidden = !(it.type === 'sig' && it.gen);
-  if (!penWrap.hidden) $('#penSel').value = it.gen.pen;
+  /* Thickness is one button here and a bar of its own when pressed — see
+     openPen. Anything the button does not apply to closes that bar, or you
+     end up adjusting the weight of something that has no weight. */
+  const penable = it.type === 'sig' && !!it.gen;
+  $('#btnPen').hidden = !penable;
+  if (penable) $('#penSel').value = it.gen.pen;
+  else closePen();
+}
+
+/* ---- signature thickness, on demand
+
+   A slider is a wide control, and parking one permanently in a bar that
+   already has to scroll means scrolling to it every time you want the two
+   seconds of use it gets. So the bar carries a button, and the button brings
+   the slider up on its own — over the tools, like crop and rotate, so there
+   is nothing to scroll past and nothing else competing for the space. */
+function openPen() {
+  const it = getSel();
+  if (!it || it.type !== 'sig' || !it.gen) return;
+  closeCrop(); closeRotate();
+  $('#penSel').value = it.gen.pen;
+  keepView(() => {
+    $('#penbar').hidden = false;
+    $('#editor').classList.add('busytool');
+  });
+}
+function closePen() {
+  if ($('#penbar').hidden) return;
+  keepView(() => {
+    $('#penbar').hidden = true;
+    if ($('#cropbar').hidden && $('#rotbar').hidden) $('#editor').classList.remove('busytool');
+  });
 }
 
 /* redraw a placed signature at a new pen weight */
@@ -2381,6 +2429,8 @@ $('#penSel').addEventListener('input', e => {
   penT = setTimeout(() => repen(it, v), 60);
 });
 $('#penSel').addEventListener('change', () => { const it = getSel(); if (it?.gen) push(); });
+$('#btnPen').addEventListener('click', openPen);
+$('#penDone').addEventListener('click', closePen);
 
 /* -------------------------------------------------------------- toolbar */
 $$('.tool').forEach(b => b.addEventListener('click', () => {
@@ -2689,16 +2739,11 @@ function place(pi, x, y) {
 
   if (pendingSig) {
     const ar = pendingSig.ar;
-    /* Width follows from the height you want, because height is the thing
-       that has to look right: it is what a signature shares with the writing
-       around it. Wide-and-thin and short-and-tall scans then come out the
-       same size on the page instead of the same width. */
-    const wFor = h => clamp((h * Hl) / (Wl * ar), 0.05, SIG_W_MAX);
+    const wFor = h => sigWidth(p, ar, h);
     let w, sx, sy;
     if (L) {
       // sit the signature on the line, sized to the label beside it
-      const hWant = clamp(L.fs * 2.2, 0.018, (SIG_PT * 1.4) / pageHpt(p));
-      w = Math.min(wFor(hWant), Math.max(0.08, (L.x1 - L.x0) * 0.98));
+      w = sigOnLine(p, L, ar);
       const h = (w * Wl * ar) / Hl;
       sx = clamp(L.x0 + 0.008, 0, 1 - w);
       sy = clamp(L.y - h - 0.004, 0, 1);
@@ -3209,14 +3254,10 @@ $('#nudge').addEventListener('pointerdown', e => {
 $('#btnBigger').addEventListener('click', () => bump(1.15));
 $('#btnSmaller').addEventListener('click', () => bump(1 / 1.15));
 $('#btnDelete').addEventListener('click', () => { const it = getSel(); if (it) { push(); removeItem(it.id); } });
-$('#btnDupe').addEventListener('click', () => {
-  const it = getSel(); if (!it) return;
-  push();
-  const c = { ...it, id: uid(), link: undefined, stampMode: it.type === 'sig' ? 'none' : it.stampMode,
-              x: clamp(it.x + 0.03, 0, 1), y: clamp(it.y + 0.03, 0, 1) };
-  if (c.date) c.date = { ...it.date };
-  S.items.push(c); itemEl(c); select(c.id); saveSoon();
-});
+/* Duplicate used to sit here too. Copying something you have placed is a
+   rare thing to want on a form — you are filling in one of each — and it was
+   holding a permanent slot in a bar that has to fit on a phone beside the
+   controls you reach for every time. */
 
 /* Bring forward / send backward used to live here. Stacking order only ever
    matters when two things overlap, which on a filled-in form is a mistake
@@ -4184,7 +4225,7 @@ function currentPage() {
    tools rather than in a sheet, so the page stays in view while you turn it. */
 function openRotate() {
   select(null);
-  closeCrop();
+  closeCrop(); closePen();
   $('#rotbar').dataset.page = currentPage();
   $('#rotbar').hidden = false;
   $('#editor').classList.add('busytool');
@@ -4715,6 +4756,7 @@ addEventListener('popstate', () => {
   if (sheet) { sheet.hidden = true; return armBack(); }
   if (!$('#cropbar').hidden) { closeCrop(); return armBack(); }
   if (!$('#rotbar').hidden) { closeRotate(); return armBack(); }
+  if (!$('#penbar').hidden) { closePen(); return armBack(); }
   if (!$('#pick').hidden) { $('#pick').hidden = true; closeDoc(); return armBack(); }
   if (!$('#simple').hidden) { showPage(); return armBack(); }
   if (!$('#done').hidden) {
@@ -4862,7 +4904,7 @@ $('#cropNudge').addEventListener('pointerdown', e => {
 function openCrop() {
   if (!S.pdf) return;
   select(null);
-  closeRotate();
+  closeRotate(); closePen();
   cropPi = frontPage();
   const p = S.pageBox[cropPi];
   p.draft = { ...cropOf(p) };
@@ -5222,8 +5264,7 @@ function placeSigOnLine(pi, L, sig) {
   const rot = totalRot(p);
   const [Wl, Hl] = localDims(p.lw, p.lh, rot);
   const ar = sig.ar;
-  const hWant = clamp(L.fs * 2.6, 0.022, 0.10);
-  const w = clamp((hWant * Hl) / (Wl * ar), 0.05, Math.max(0.08, (L.x1 - L.x0) * 0.98));
+  const w = sigOnLine(p, L, ar);
   const h = (w * Wl * ar) / Hl;
   const it = {
     id: uid(), page: pi, rot, type: 'sig',
@@ -5631,4 +5672,5 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 buildSimple, showSimple, showPage, askView, SIMof: () => SIM,
                 scanLines, findCells, totalRot, scanBoxes, layoutPages, revealFocused,
                 scanPanels, scanCanvas, shotsToPdf, SCANof: () => SCAN, select, finalName, renderVisible,
+                openPen, closePen,
                 openCrop, closeCrop, nudgeCrop, pickCrop, syncRail, turn, openRotate, cropOf };

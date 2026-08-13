@@ -470,10 +470,7 @@ select.fld{padding-right:0;}
 .sw{width:26px;height:26px;border-radius:50%;background:var(--c);border:2px solid var(--bg);box-shadow:0 0 0 1.5px var(--line);flex:none;}
 .sw.is-on{box-shadow:0 0 0 2px var(--accent);}
 
-.penwrap{display:flex;align-items:center;gap:7px;flex:none;padding:0 6px;color:var(--fg-2);}
-.penwrap[hidden]{display:none;}
-.penwrap svg{width:19px;height:19px;flex:none;}
-.penwrap input{width:104px;accent-color:var(--accent);}
+/* thickness lives in its own bar now — see .penbar */
 .slider.thick{margin-top:14px;}
 
 /* The wrapper is the bar; the row inside it is the only part that scrolls,
@@ -801,6 +798,10 @@ select.fld{padding-right:0;}
 .crop-row .btn-save{flex:1;}
 /* the rotate bar is one row, not two */
 .rotbar{flex-direction:row;align-items:center;}
+/* and so is the thickness bar, with the slider taking the room it needs */
+.penbar{gap:12px;padding-left:16px;padding-right:12px;}
+.pen-ico{width:21px;height:21px;flex:none;color:var(--accent);}
+.penbar input[type=range]{flex:1;min-width:0;accent-color:var(--accent);}
 .cropmask{position:absolute;inset:0;pointer-events:none;z-index:6;}
 .cropmask .shade{position:absolute;background:rgba(15,18,22,.45);}
 .cropmask .frame{position:absolute;outline:1.5px solid #fff;box-shadow:0 0 0 1.5px var(--accent);}
