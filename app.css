@@ -48,6 +48,13 @@
 }
 
 *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+/* `hidden` means not rendered, and it has to beat a class that sets display.
+   The UA rule for it is display:none at the very bottom of the cascade, so
+   .btn-icon{display:grid} quietly outranked it — the thickness button drew
+   itself on every selection, signature or not, while every script that asked
+   whether it was hidden was told yes. One rule rather than one per class,
+   because the next class to set display would have the same argument. */
+[hidden]{display:none !important;}
 html,body{margin:0;padding:0;min-height:100%;}
 body{
   font-family:var(--font);
@@ -463,14 +470,65 @@ select.fld{padding-right:0;}
 /* bars */
 .selbar{flex:none;background:var(--bg);border-top:1px solid var(--line);}
 .selbar[hidden]{display:none;}
-.selbar-scroll{display:flex;align-items:center;gap:2px;padding:7px 10px;overflow-x:auto;scrollbar-width:none;}
+/* Centred, with the groups spaced apart rather than everything shoulder to
+   shoulder. `safe` matters: a plain centre on an overflowing flex row hides
+   the start of it behind the left edge with no way to scroll back. */
+.selbar-scroll{
+  display:flex;align-items:center;gap:4px;padding:7px 8px;
+  justify-content:center;justify-content:safe center;
+  overflow-x:auto;scrollbar-width:none;
+}
+/* Everything in here is trimmed to fit a 414px phone with the fullest
+   selection — nudge pad, three colours, both size buttons and Delete. Space
+   it any further apart and the last of them goes off the end of the row,
+   which is a worse answer to "is it centred?" than a slightly tighter row. */
+.selbar-scroll > .sep{margin:0 3px;}
+.selbar-scroll .btn-icon{width:36px;height:36px;}
 .selbar-scroll::-webkit-scrollbar{display:none;}
 .swatches{display:flex;gap:8px;padding-left:2px;flex:none;}
 .swatches[hidden]{display:none;}
-.sw{width:26px;height:26px;border-radius:50%;background:var(--c);border:2px solid var(--bg);box-shadow:0 0 0 1.5px var(--line);flex:none;}
+.sw{width:25px;height:25px;border-radius:50%;background:var(--c);border:2px solid var(--bg);box-shadow:0 0 0 1.5px var(--line);flex:none;}
 .sw.is-on{box-shadow:0 0 0 2px var(--accent);}
 
-/* thickness lives in its own bar now — see .penbar */
+/* thickness is a slider in the signature row — see .sigbar */
+.penwrap{display:flex;align-items:center;gap:10px;flex:1;min-width:0;}
+.pen-ico{width:21px;height:21px;flex:none;color:var(--fg-2);}
+.penwrap input[type=range]{flex:1;min-width:0;accent-color:var(--accent);}
+
+/* ---------- the signature row ----------
+   Stands exactly where the tool row stands and looks like it, because it is
+   doing that row's job for as long as a signature is selected. The buttons
+   are the ones from the selection bar, moved here and moved back; the labels
+   only appear in this row, where there is room for them. */
+.sigbar{
+  order:5;flex:none;
+  background:var(--bg);border-top:1px solid var(--line);
+  padding:6px 12px calc(var(--safe-b) + 9px);
+}
+.sigbar[hidden]{display:none;}
+.sigbar-inner{display:flex;align-items:center;justify-content:center;gap:16px;padding:0 4px;}
+.sigbar .btn-icon{width:auto;min-width:74px;height:auto;padding:8px 10px;gap:4px;
+  grid-auto-flow:row;place-items:center;border-radius:12px;color:var(--fg-2);}
+.sigbar .btn-icon.danger{color:var(--danger);}
+.sigbar .btn-icon svg{width:22px;height:22px;}
+.sigbar .btn-chip{padding:10px 16px;font-size:13.5px;}
+.sigbar .sep{display:none;}
+/* the labels are for this row only; everywhere else these are icon buttons */
+.tip-label{display:none;font-size:10.5px;font-weight:600;letter-spacing:-.005em;}
+.sigbar .tip-label{display:block;}
+/* …except the timestamp, whose label is the state it is in, so it says it
+   wherever it stands — beside the icon up here, under it down there */
+#btnStamp .tip-label{display:block;}
+#selbar #btnStamp{
+  width:auto;height:auto;min-width:0;padding:6px 11px 6px 8px;
+  grid-auto-flow:column;align-items:center;gap:6px;
+  background:var(--bg-2);border:1px solid var(--line);border-radius:999px;color:var(--fg-2);
+}
+#selbar #btnStamp svg{width:17px;height:17px;}
+#selbar #btnStamp .tip-label{font-size:12px;}
+/* while it is up, the row of things to add steps aside */
+.editor.onsig .toolwrap{display:none;}
+.editor.cropping .sigbar,.editor.busytool .sigbar,.editor.kb .sigbar{display:none;}
 .slider.thick{margin-top:14px;}
 
 /* The wrapper is the bar; the row inside it is the only part that scrolls,
@@ -798,10 +856,7 @@ select.fld{padding-right:0;}
 .crop-row .btn-save{flex:1;}
 /* the rotate bar is one row, not two */
 .rotbar{flex-direction:row;align-items:center;}
-/* and so is the thickness bar, with the slider taking the room it needs */
-.penbar{gap:12px;padding-left:16px;padding-right:12px;}
-.pen-ico{width:21px;height:21px;flex:none;color:var(--accent);}
-.penbar input[type=range]{flex:1;min-width:0;accent-color:var(--accent);}
+
 .cropmask{position:absolute;inset:0;pointer-events:none;z-index:6;}
 .cropmask .shade{position:absolute;background:rgba(15,18,22,.45);}
 .cropmask .frame{position:absolute;outline:1.5px solid #fff;box-shadow:0 0 0 1.5px var(--accent);}

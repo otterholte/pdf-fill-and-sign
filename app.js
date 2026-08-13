@@ -2356,9 +2356,38 @@ function keepView(change) {
   stageEl.scrollTop = clamp(top0 + d / 2, 0, max);
 }
 
+/* ---- where the buttons live
+
+   A signature has more to say about itself than anything else you can put on
+   a page — a timestamp, a stroke weight — and a slider does not fit in the
+   same strip as the nudge pad without pushing everything else off the end of
+   it. So while one is selected the row of things you could *add* steps aside,
+   the slider takes the width that row was using, and Delete comes down to sit
+   beside it.
+
+   Delete is moved, not copied. A second Delete button with a second id doing
+   the same job is the kind of thing that gets fixed in one place and stays
+   broken in the other; a node can only be in one parent at a time, so the
+   order it goes back in is recorded once, here. */
+const SELBAR_ROW = $('#selbar .selbar-scroll');
+const SELBAR_ORDER = [...SELBAR_ROW.children];
+const SIG_ROW = ['#btnDelete'];
+
+function houseButtons(onSig) {
+  const inner = $('#sigbarInner');
+  if (onSig) SIG_ROW.forEach(sel => inner.append($(sel)));
+  else SELBAR_ORDER.forEach(el => SELBAR_ROW.append(el));
+  $('#sepEnd').hidden = onSig;      // it separated something that has left
+  $('#sigbar').hidden = !onSig;
+  $('#editor').classList.toggle('onsig', onSig);
+}
+
 function syncBars() {
   const it = getSel();
-  keepView(() => { $('#selbar').hidden = !it; });
+  keepView(() => {
+    $('#selbar').hidden = !it;
+    houseButtons(!!it && it.type === 'sig');
+  });
   if (!it) return;
   const colorable = isText(it) || it.type === 'check' || it.type === 'x';
   $('#swatches').hidden = !colorable;
@@ -2367,47 +2396,22 @@ function syncBars() {
 
   const stampBtn = $('#btnStamp');
   stampBtn.hidden = it.type !== 'sig';
+  $('#sepStamp').hidden = stampBtn.hidden;   // a rule with nothing to divide
   if (it.type === 'sig') {
-    stampBtn.textContent = it.stampMode === 'none' ? 'No timestamp'
+    $('#stampLabel').textContent = it.stampMode === 'none' ? 'No timestamp'
       : it.stampMode === 'date' ? 'Date only' : 'Date & time';
   }
   const fmtBtn = $('#btnDateFmt');
   fmtBtn.hidden = !it.date;
   if (it.date) fmtBtn.textContent = shortLabel(it.date.fmt);
 
-  /* Thickness is one button here and a bar of its own when pressed — see
-     openPen. Anything the button does not apply to closes that bar, or you
-     end up adjusting the weight of something that has no weight. */
+  /* A photographed signature has no stroke to weigh, so the slider goes and
+     Delete has the row to itself. */
   const penable = it.type === 'sig' && !!it.gen;
-  $('#btnPen').hidden = !penable;
+  $('#penWrap').hidden = !penable;
   if (penable) $('#penSel').value = it.gen.pen;
-  else closePen();
 }
 
-/* ---- signature thickness, on demand
-
-   A slider is a wide control, and parking one permanently in a bar that
-   already has to scroll means scrolling to it every time you want the two
-   seconds of use it gets. So the bar carries a button, and the button brings
-   the slider up on its own — over the tools, like crop and rotate, so there
-   is nothing to scroll past and nothing else competing for the space. */
-function openPen() {
-  const it = getSel();
-  if (!it || it.type !== 'sig' || !it.gen) return;
-  closeCrop(); closeRotate();
-  $('#penSel').value = it.gen.pen;
-  keepView(() => {
-    $('#penbar').hidden = false;
-    $('#editor').classList.add('busytool');
-  });
-}
-function closePen() {
-  if ($('#penbar').hidden) return;
-  keepView(() => {
-    $('#penbar').hidden = true;
-    if ($('#cropbar').hidden && $('#rotbar').hidden) $('#editor').classList.remove('busytool');
-  });
-}
 
 /* redraw a placed signature at a new pen weight */
 let penT;
@@ -2429,8 +2433,6 @@ $('#penSel').addEventListener('input', e => {
   penT = setTimeout(() => repen(it, v), 60);
 });
 $('#penSel').addEventListener('change', () => { const it = getSel(); if (it?.gen) push(); });
-$('#btnPen').addEventListener('click', openPen);
-$('#penDone').addEventListener('click', closePen);
 
 /* -------------------------------------------------------------- toolbar */
 $$('.tool').forEach(b => b.addEventListener('click', () => {
@@ -3331,6 +3333,10 @@ document.addEventListener('keydown', e => {
 
   if (typing) return;
 
+  /* Escape lets go. It matters more than it used to: while something is
+     selected its own controls are standing where the tool row stands, and
+     tapping bare paper is not always convenient on a full page. */
+  if (e.key === 'Escape' && S.sel) { e.preventDefault(); select(null); return; }
   if ((e.key === 'Backspace' || e.key === 'Delete') && S.sel) { e.preventDefault(); push(); removeItem(S.sel); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
@@ -4225,7 +4231,7 @@ function currentPage() {
    tools rather than in a sheet, so the page stays in view while you turn it. */
 function openRotate() {
   select(null);
-  closeCrop(); closePen();
+  closeCrop();
   $('#rotbar').dataset.page = currentPage();
   $('#rotbar').hidden = false;
   $('#editor').classList.add('busytool');
@@ -4756,7 +4762,6 @@ addEventListener('popstate', () => {
   if (sheet) { sheet.hidden = true; return armBack(); }
   if (!$('#cropbar').hidden) { closeCrop(); return armBack(); }
   if (!$('#rotbar').hidden) { closeRotate(); return armBack(); }
-  if (!$('#penbar').hidden) { closePen(); return armBack(); }
   if (!$('#pick').hidden) { $('#pick').hidden = true; closeDoc(); return armBack(); }
   if (!$('#simple').hidden) { showPage(); return armBack(); }
   if (!$('#done').hidden) {
@@ -4904,7 +4909,7 @@ $('#cropNudge').addEventListener('pointerdown', e => {
 function openCrop() {
   if (!S.pdf) return;
   select(null);
-  closeRotate(); closePen();
+  closeRotate();
   cropPi = frontPage();
   const p = S.pageBox[cropPi];
   p.draft = { ...cropOf(p) };
@@ -5672,5 +5677,4 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 buildSimple, showSimple, showPage, askView, SIMof: () => SIM,
                 scanLines, findCells, totalRot, scanBoxes, layoutPages, revealFocused,
                 scanPanels, scanCanvas, shotsToPdf, SCANof: () => SCAN, select, finalName, renderVisible,
-                openPen, closePen,
                 openCrop, closeCrop, nudgeCrop, pickCrop, syncRail, turn, openRotate, cropOf };

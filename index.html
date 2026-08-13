@@ -150,7 +150,7 @@
         <dt><kbd>Enter</kbd></dt><dd>Tick the box you are on, or start typing on the blank</dd>
         <dt><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></dt><dd>Nudge whatever is selected</dd>
         <dt><kbd>Shift</kbd>+<kbd>↑</kbd><kbd>↓</kbd></dt><dd>Nudge it <em>while</em> you are still typing in it</dd>
-        <dt><kbd>Esc</kbd></dt><dd>Stop typing, keep what you wrote</dd>
+        <dt><kbd>Esc</kbd></dt><dd>Stop typing, or let go of what is selected</dd>
         <dt><kbd>Delete</kbd></dt><dd>Remove the selected thing</dd>
         <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo &mdash; add <kbd>Shift</kbd> to redo</dd>
         <dt>Double&#8209;click</dt><dd>A text box anywhere you like</dd>
@@ -332,17 +332,18 @@
       <button class="btn-icon" id="btnBigger" aria-label="Bigger">
         <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
-      <!-- A whole slider parked in a bar you have to scroll is a lot of room
-           for something you touch once. One button; the slider gets its own
-           bar when you ask for it. -->
-      <button class="btn-icon" id="btnPen" hidden aria-label="Line thickness" title="Line thickness">
-        <svg viewBox="0 0 24 24"><path d="M4 17.5c4-9 7-13 9-13 1.4 0 1.6 1.6.6 3.7-1.1 2.3-3.1 4.6-3.1 6 0 .9.7 1.4 1.7 1.4 1.9 0 3.4-1.3 5.2-3.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="sep" id="sepStamp" hidden></span>
+      <!-- Only ever shown for a signature. It keeps its label wherever it
+           stands, because the label is the state it cycles through. -->
+      <button class="btn-icon" id="btnStamp" hidden aria-label="Timestamp">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12.5" r="7.8" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M12 8.4v4.3l2.9 1.7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/><path d="M9 2.6h6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+        <span class="tip-label" id="stampLabel">Date &amp; time</span>
       </button>
-      <button class="btn-chip" id="btnStamp" hidden>Date &amp; time</button>
       <button class="btn-chip" id="btnDateFmt" hidden>08/05/2026</button>
-      <span class="sep"></span>
+      <span class="sep" id="sepEnd"></span>
       <button class="btn-icon danger" id="btnDelete" aria-label="Delete">
         <svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5.5A1.5 1.5 0 0 1 11.5 4h1A1.5 1.5 0 0 1 14 5.5V7M7 7l.8 12a2 2 0 0 0 2 1.9h4.4a2 2 0 0 0 2-1.9L17 7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span class="tip-label">Delete</span>
       </button>
     </div>
   </div>
@@ -429,12 +430,19 @@
     </div>
   </div>
 
-  <!-- One control, its own bar, over the top of everything else — the same
-       bargain crop and rotate make. No scrolling to reach a slider. -->
-  <div class="cropbar rotbar penbar" id="penbar" hidden>
-    <svg class="pen-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17.5c4-9 7-13 9-13 1.4 0 1.6 1.6.6 3.7-1.1 2.3-3.1 4.6-3.1 6 0 .9.7 1.4 1.7 1.4 1.9 0 3.4-1.3 5.2-3.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    <input type="range" id="penSel" min="1" max="9" step="0.2" value="2.6" aria-label="Signature thickness">
-    <button class="btn-save" id="penDone">Done</button>
+  <!-- While a signature is selected the row of things you could *add* to the
+       page is not the question in front of you, so it steps aside and the two
+       that are — how heavy the line is, and whether you want it at all —
+       take its place. The slider gets the width it needs here, which is why
+       it does not have to live in the strip above. Delete is the same button
+       as the one in that strip, moved rather than copied. -->
+  <div class="sigbar" id="sigbar" hidden>
+    <div class="sigbar-inner" id="sigbarInner">
+      <label class="penwrap" id="penWrap">
+        <svg class="pen-ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 17.5c4-9 7-13 9-13 1.4 0 1.6 1.6.6 3.7-1.1 2.3-3.1 4.6-3.1 6 0 .9.7 1.4 1.7 1.4 1.9 0 3.4-1.3 5.2-3.4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <input type="range" id="penSel" min="1" max="9" step="0.2" value="2.6" aria-label="Signature thickness">
+      </label>
+    </div>
   </div>
 
   <!-- Rotate is a verb you repeat, not a value you pick: press until it looks
