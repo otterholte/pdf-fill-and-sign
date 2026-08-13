@@ -333,9 +333,38 @@
       <svg viewBox="0 0 24 24"><path d="M20 11.5a8 8 0 1 1-2.4-5.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20.5 3.5v4.2h-4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span>Rotate</span>
     </button>
+    <button class="tool" data-tool="crop">
+      <svg viewBox="0 0 24 24"><path d="M6.5 2.5v15h15M2.5 6.5h15v15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Crop</span>
+    </button>
+    <button class="tool" data-tool="clear">
+      <svg viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 12.5h9L17.5 7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Clear</span>
+    </button>
   </nav>
 
+  <div class="cropbar" id="cropbar" hidden>
+    <button class="btn-ghost sm" id="cropReset">Whole page</button>
+    <span class="crop-hint">Drag the corners</span>
+    <button class="btn-ghost sm" id="cropCancel">Cancel</button>
+    <button class="btn-save" id="cropApply">Crop</button>
+  </div>
+
   <div class="placing" id="placing" hidden><span id="placingText">Tap the page</span><button id="placingCancel">Cancel</button></div>
+</div>
+
+<!-- ============ CLEAR THE PAGE ============ -->
+<div class="sheet-wrap" id="clearSheet" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet" role="dialog" aria-label="Clear the page">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head"><h2>Clear everything on this page?</h2>
+      <button class="btn-icon" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </div>
+    <p class="sheet-note" id="clearWhat">Everything you have added to this page will be removed. The document itself is untouched, and you can undo it.</p>
+    <button class="btn-primary wide danger-fill" id="clearGo">Clear the page</button>
+    <button class="btn-ghost wide" data-close>Keep it</button>
+  </div>
 </div>
 
 <!-- ============ SIGNATURE SHEET ============ -->

@@ -666,3 +666,20 @@ select.fld{padding-right:0;}
 }
 .shot-drop svg{width:15px;height:15px;}
 #btnScanMore{margin-top:10px;}
+
+/* ------------------------------------------------------------ crop + clear */
+.cropbar{
+  order:4;flex:none;display:flex;align-items:center;gap:8px;
+  padding:8px 12px;background:var(--accent-soft);border-top:1px solid var(--line);
+}
+.cropbar[hidden]{display:none;}
+.crop-hint{flex:1;font-size:12.5px;color:var(--accent);font-weight:600;}
+.cropmask{position:absolute;inset:0;pointer-events:none;z-index:6;}
+.cropmask .shade{position:absolute;background:rgba(15,18,22,.45);}
+.cropmask .frame{position:absolute;outline:1.5px solid #fff;box-shadow:0 0 0 1.5px var(--accent);}
+.crophandle{
+  position:absolute;width:34px;height:34px;display:grid;place-items:center;
+  pointer-events:auto;touch-action:none;z-index:7;
+}
+.crophandle::after{content:"";width:16px;height:16px;border-radius:4px;background:#fff;border:3px solid var(--accent);}
+.danger-fill{background:var(--danger);color:#fff;}

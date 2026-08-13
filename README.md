@@ -485,6 +485,38 @@ back out in full rather than the blob, because a blob is a promise of bytes and 
 fails to collect them attaches an empty file instead — which, again, only shows up as a
 failed download at the far end.
 
+## One rule, several fields
+
+A form writes "Full Name" once and labels the thirds of the line underneath — Last, First,
+Middle. Read as one blank that is a single text box stretched across all three, with no way
+to tab between them. The captions below the rule say where the divisions are, so cluster
+them and cut the rule at the gaps between. Only where the evidence is plain: a handful of
+short captions with clear air between them, never a sentence, and only in the strip
+directly under the rule — reach any further and the strip finds the *next* row of the form
+and cuts on its labels instead, which split one address line into four.
+
+Each section starts at the *left edge of its own caption*, not halfway between two of
+them. A caption sits under the start of the thing it names, so that is where the section
+begins: tab into "First" and the cursor lands directly above the word First, and the
+apartment box starts above "Apt / Unit #". Halfway between two captions is nowhere in
+particular, and the writing then sits adrift of its own label.
+
+On the scanned application: Full Name becomes three fields, Address becomes two.
+
+## A mark you can see
+
+A tick box gets an X first and a checkmark second — an X is what people put on paper, and
+it is the one you can see from across the page. It is also much bigger: the glyph only used
+two thirds of its own viewBox and was then placed at 86% of the box, so the mark came out
+under half the width of the square it sat in and you could scan a filled page without
+noticing it had been ticked. The corners of the cross now land on the corners of the box.
+
+Anything bigger than a tick box, drawn hollow, is somewhere to write rather than something
+to tick — the bordered input a form uses instead of a rule. Same evidence as a tick box: a
+top edge, a matching bottom, the two sides, and nothing in the middle; only the proportions
+differ. A rectangle with other places to write inside it is the frame round them, not an
+input, and a rectangle the width of the sheet is a row.
+
 ## Resizing says what it is keeping
 
 Everything is stored by its top-left corner, so changing a size alone grows the object
@@ -513,6 +545,15 @@ whole box between them, and then it cannot be dragged at all, because every pres
 a handle. And each frame of a drag works out the geometry from where the object *started*
 rather than from where the previous frame left it — nudging it a little at a time looks
 right for a moment and then walks, because every step carries the last step's rounding.
+
+## When the page comes back blank
+
+Sometimes the redraw does not stick: the tab returns, the render throws or the backing
+store is reclaimed a moment after it finished, and the page is left blank with your own
+text and ticks floating on nothing — the document has apparently vanished, which reads as
+a crash. Nothing detects that from the inside, so the app looks: it samples the canvas, and
+a page that claims to be drawn but has no ink on it at all is not drawn. It retries a
+couple of times and then stops rather than spin.
 
 ## Coming back should not flash
 

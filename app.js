@@ -72,7 +72,7 @@ const DB = (() => {
 
 /* --------------------------------------------------------------- state */
 const COLORS = ['#0b0f14', '#1b4fd8', '#c8202a'];
-const DEF = { fs: 0.0165, stampFs: 0.0105, mark: 0.026, sigW: 0.26, redW: 0.34, redH: 0.032 };
+const DEF = { fs: 0.0165, stampFs: 0.0105, mark: 0.034, sigW: 0.26, redW: 0.34, redH: 0.032 };
 
 /* A signature timestamp tracks the signature's width so the two look like one
    object — but only down to a point. Past it the date stops shrinking, because
@@ -773,10 +773,49 @@ function refreshOnReturn() {
   S.pageBox.forEach(forget);
   renderVisible();
 }
+
+/* Sometimes the redraw does not stick: the tab comes back, the render throws
+   or the backing store is reclaimed a moment after it finished, and the page
+   is left blank with your own text and ticks floating on nothing — the
+   document you were filling in has apparently vanished, which reads as a
+   crash. Nothing detects that from the inside, so look: sample the canvas,
+   and if a page that claims to be drawn has no ink on it at all, it is not
+   drawn. Retry a couple of times and then leave it alone rather than spin. */
+function pageIsBlank(p) {
+  if (!p.readyKey || !p.cv.width) return false;
+  try {
+    const ctx = p.cv.getContext('2d', { willReadFrequently: true });
+    const w = Math.min(48, p.cv.width), h = Math.min(64, p.cv.height);
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    const c2 = cv.getContext('2d', { willReadFrequently: true });
+    c2.drawImage(p.cv, 0, 0, w, h);
+    const d = c2.getImageData(0, 0, w, h).data;
+    let lo = 255, hi = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const v = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000;
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    return hi - lo < 8;                      // one flat colour is not a page
+  } catch (_) { return false; }
+}
+
+let healing = 0;
+function healPages() {
+  if (!S.pdf || !S.pageBox.length || healing > 2) return;
+  const sick = S.pageBox.filter(p => p.el.offsetParent !== null && pageIsBlank(p));
+  if (!sick.length) { healing = 0; return; }
+  healing++;
+  sick.forEach(forget);
+  renderVisible().then(() => setTimeout(healPages, 350));
+}
+const cameBack = () => { healing = 0; refreshOnReturn(); setTimeout(healPages, 400); };
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') refreshOnReturn();
+  if (document.visibilityState === 'visible') cameBack();
 });
-window.addEventListener('pageshow', refreshOnReturn);
+window.addEventListener('pageshow', cameBack);
+window.addEventListener('focus', () => setTimeout(healPages, 400));
 
 async function renderOne(p, dpr) {
   const key = p.dw + ':' + totalRot(p);
@@ -1239,6 +1278,94 @@ function inkHeightLeft(scan, band) {
   return inkHeightIn(scan, band, band.x0, Math.min(W, band.x1 + 1), Math.round(H * 0.024));
 }
 
+/* ---------------------------------------------------------- BOXED INPUTS
+   A square small enough to tick is a tick box. A rectangle bigger than that,
+   drawn hollow, is somewhere to write — the bordered input a form uses
+   instead of a rule, and there is no reason to make anyone place a text box
+   inside it by hand when the border already says exactly where the writing
+   goes. Same evidence as a tick box: a top edge, a matching bottom edge, the
+   two sides joining them, and nothing in the middle. Only the proportions
+   differ, so only the proportions are tested. */
+function scanPanels(scan) {
+  const { W, H, mask } = scan;
+  if (!mask) return [];
+  // a bordered input is not the width of the whole sheet; that is a row or a frame
+  const minW = Math.round(W * 0.035), maxW = Math.round(W * 0.62);
+  const minH = Math.round(H * 0.010), maxH = Math.round(H * 0.075);
+
+  const runs = new Array(H).fill(null);
+  for (let y = 0; y < H; y++) {
+    const base = y * W;
+    let list = null, start = -1, gap = 0;
+    for (let x = 0; x <= W; x++) {
+      if (x < W && mask[base + x]) { start = start < 0 ? x : start; gap = 0; continue; }
+      if (start >= 0 && ++gap <= 3 && x < W) continue;      // a border can have specks
+      if (start >= 0) {
+        const len = x - gap - start;
+        if (len >= minW && len <= maxW) (list || (list = [])).push(start, x - gap - 1);
+        start = -1; gap = 0;
+      }
+    }
+    runs[y] = list;
+  }
+
+  const dens = (y, x0, x1) => {
+    if (y < 0 || y >= H) return 0;
+    let c = 0, base = y * W;
+    for (let x = x0; x <= x1; x++) if (mask[base + x]) c++;
+    return c / (x1 - x0 + 1);
+  };
+  const side = (x, y0, y1) => {
+    let c = 0;
+    for (let y = y0; y <= y1; y++) {
+      const b = y * W;
+      if (mask[b + x] || (x > 0 && mask[b + x - 1]) || (x + 1 < W && mask[b + x + 1])) c++;
+    }
+    return c / (y1 - y0 + 1);
+  };
+
+  const out = [], used = [];
+  for (let y = 0; y < H; y++) {
+    const list = runs[y];
+    if (!list) continue;
+    for (let k = 0; k < list.length; k += 2) {
+      const x0 = list[k], x1 = list[k + 1];
+      if (dens(y, x0, x1) < 0.9) continue;                  // the top must be drawn
+      let y1 = -1;
+      for (let dy = minH; dy <= maxH && y + dy < H; dy++) {
+        const bl = runs[y + dy];
+        if (!bl) continue;
+        for (let j = 0; j < bl.length; j += 2) {
+          if (Math.abs(bl[j] - x0) <= 3 && Math.abs(bl[j + 1] - x1) <= 3 &&
+              dens(y + dy, x0, x1) > 0.9) { y1 = y + dy; break; }
+        }
+        if (y1 > 0) break;
+      }
+      if (y1 < 0) continue;
+      if (side(x0, y, y1) < 0.85 || side(x1, y, y1) < 0.85) continue;   // both uprights
+
+      // hollow: whatever is already written in it is not an empty field
+      const iy0 = y + 3, iy1 = y1 - 3, ix0 = x0 + 3, ix1 = x1 - 3;
+      if (iy1 - iy0 < 3 || ix1 - ix0 < 6) continue;
+      let ink = 0, tot = 0;
+      for (let yy = iy0; yy <= iy1; yy++) {
+        const b = yy * W;
+        for (let xx = ix0; xx <= ix1; xx += 2) { tot++; if (mask[b + xx]) ink++; }
+      }
+      if (!tot || ink / tot > 0.02) continue;
+      // one rectangle, not the same one found again a pixel lower
+      if (used.some(u => Math.abs(u.y - y) < 6 && Math.abs(u.x - x0) < 6)) continue;
+      used.push({ y, x: x0 });
+      out.push({
+        x0: x0 / W, x1: x1 / W, y0: y / H, y1: (y1 + 1) / H,
+        cx: (x0 + x1) / 2 / W, cy: (y + y1) / 2 / H,
+        w: (x1 - x0) / W, h: (y1 - y) / H, panel: 1,
+      });
+    }
+  }
+  return out;
+}
+
 /* ------------------------------------------------------- CHECKBOX SPOTTING
    A tick box is the one shape on a form that is unmistakable from pixels
    alone: a small, near-square outline with nothing inside it. Look for a
@@ -1657,7 +1784,56 @@ function ensureScan(p) {
          solid rule and passes every test a blank has to pass — but there is
          nowhere to write on it, because the banner is pressed right up
          against it. Room above is what makes a rule a blank. */
-      const lines = free.filter(b => clearAbove(b) * scan.H >= 8).map(b => {
+      /* One rule, several fields. A form writes "Full Name" once and then
+         labels the thirds of the line underneath — Last, First, Middle — and
+         treating that as a single blank means one text box stretching across
+         all three and no way to tab between them. The captions below say
+         where the divisions are: cluster them, and cut the rule at the gaps
+         between. Only where the evidence is plain — a handful of short
+         captions with clear air between them, not a sentence. */
+      const subDivide = b => {
+        // only the caption directly under the rule; any further and the strip
+        // reaches the next row of the form and cuts on its labels instead
+        const top = b.bot + 2, bot = Math.min(scan.H - 1, b.bot + Math.round(scan.H * 0.012));
+        if (bot - top < 4) return null;
+        const W = scan.W, wide = b.x1 - b.x0;
+        const col = new Uint8Array(wide + 1);
+        for (let y = top; y <= bot; y++) {
+          const base = y * W;
+          for (let x = b.x0; x <= b.x1; x++) if (scan.mask[base + x]) col[x - b.x0] = 1;
+        }
+        const need = Math.max(6, Math.round(wide * 0.02));      // air between captions
+        const runs = [];
+        let s0 = -1, gap = 0;
+        for (let i = 0; i <= wide; i++) {
+          if (i <= wide && col[i]) { if (s0 < 0) s0 = i; gap = 0; continue; }
+          if (s0 >= 0 && ++gap <= need && i < wide) continue;
+          if (s0 >= 0) { runs.push([s0, i - gap]); s0 = -1; gap = 0; }
+        }
+        if (runs.length < 2 || runs.length > 5) return null;
+        if (runs.some(r => (r[1] - r[0]) > wide * 0.35)) return null;   // a sentence
+        /* Cut at the *left edge of each caption*, not halfway between them.
+           A caption sits under the start of the thing it names, so this is
+           where that section begins — tab into "First" and the cursor lands
+           directly above the word First, which is where a person writing on
+           paper would start. Halfway between two captions is nowhere in
+           particular, and the writing then starts adrift of its own label. */
+        const cuts = [];
+        for (let i = 1; i < runs.length; i++) cuts.push(b.x0 + runs[i][0]);
+        const edges = [b.x0, ...cuts.map(Math.round), b.x1];
+        const parts = [];
+        for (let i = 0; i + 1 < edges.length; i++) {
+          if (edges[i + 1] - edges[i] < scan.W * 0.05) return null;     // too thin to be a field
+          parts.push({ ...b, x0: edges[i], x1: edges[i + 1] - 2 });
+        }
+        return parts;
+      };
+      const free2 = [];
+      for (const b of free) {
+        const parts = b.x1 - b.x0 > scan.W * 0.28 ? subDivide(b) : null;
+        if (parts) free2.push(...parts); else free2.push(b);
+      }
+      const lines = free2.filter(b => clearAbove(b) * scan.H >= 8).map(b => {
         /* Match the label if we found one. With no label to measure, a
            sensible default beats the bottom of the clamp — that is what
            used to make an unlabelled blank get 6pt text. */
@@ -1674,6 +1850,23 @@ function ensureScan(p) {
         };
       });
       const boxes = scanBoxes(scan);
+      /* Bordered inputs join the table cells: both are a rectangle you write
+         inside, and everything downstream already knows how to fill one. Drop
+         any that a cell or a tick box has already claimed. */
+      const holds = (q, x, y) => x > q.x0 + 0.004 && x < q.x1 - 0.004 &&
+                                 y > q.y0 + 0.002 && y < q.y1 - 0.002;
+      const panels = scanPanels(scan).filter(q => {
+        // the same rectangle something else already offers
+        if (boxes.some(B => Math.abs(B.cx - q.cx) < 0.02 && Math.abs(B.cy - q.cy) < 0.02)) return false;
+        if (cells.some(c => Math.abs(c.cx - q.cx) < 0.02 && Math.abs(c.cy - q.cy) < 0.015)) return false;
+        /* A rectangle with other places to write inside it is the frame round
+           them, not an input: a whole row of a grid is drawn exactly like one
+           wide box, and offering it would put one text box across the columns. */
+        if (cells.some(c => holds(q, c.cx, c.cy))) return false;
+        if (boxes.some(B => holds(q, B.cx, B.cy))) return false;
+        if (lines.some(L => holds(q, (L.x0 + L.x1) / 2, L.y))) return false;
+        return true;
+      });
       /* A captioned box that already has rules or tick boxes drawn in it is
          not one place to write but several — "Height ___ ft. ___ in." is two
          blanks, and a yes/no column is a pair of boxes. Offer the finer thing
@@ -1696,7 +1889,7 @@ function ensureScan(p) {
         return mine.length > 0 || tick.length > 0 || c.body;
       };
       p.scanned = {
-        cells: cells.filter(c => !c.filled && !split(c)),
+        cells: cells.filter(c => !c.filled && !split(c)).concat(panels),
         cellsAll: cells, vrules: vs.length, bands: scan.bands.length,
         lines, boxes,
       };
@@ -1777,8 +1970,8 @@ function itemEl(it) {
   } else {
     d.classList.add('it-mark');
     d.innerHTML = it.type === 'check'
-      ? `<svg viewBox="0 0 24 24"><path d="M4.5 12.5 9.5 17.5 20 6" fill="none" stroke="${it.color}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-      : `<svg viewBox="0 0 24 24"><path d="M5.5 5.5 18.5 18.5 M18.5 5.5 5.5 18.5" fill="none" stroke="${it.color}" stroke-width="2.2" stroke-linecap="round"/></svg>`;
+      ? `<svg viewBox="0 0 24 24"><path d="M2.6 12.8 9.2 19.6 21.4 4.6" fill="none" stroke="${it.color}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+      : `<svg viewBox="0 0 24 24"><path d="M2.6 2.6 21.4 21.4 M21.4 2.6 2.6 21.4" fill="none" stroke="${it.color}" stroke-width="2.6" stroke-linecap="round"/></svg>`;
   }
 
   /* A handle on every corner. One handle in the bottom right can only ever
@@ -1911,6 +2104,8 @@ $$('.tool').forEach(b => b.addEventListener('click', () => {
   const t = b.dataset.tool;
   if (t === 'sig') { S.tool = null; reflectTool(); openSig(); return; }
   if (t === 'rotate') { S.tool = null; reflectTool(); openRotate(); return; }
+  if (t === 'crop') { S.tool = null; reflectTool(); openCrop(); return; }
+  if (t === 'clear') { S.tool = null; reflectTool(); openClear(); return; }
   S.tool = S.tool === t ? null : t;
   pendingSig = null;
   reflectTool();
@@ -1983,7 +2178,7 @@ pagesEl.addEventListener('pointerdown', e => {
 
   // nothing armed: clicking straight into an empty tick box ticks it
   const B = findBox(p, x, y, 0.002);
-  if (B) { e.preventDefault(); clearBoxCursor(); cycleBox(pi, B, 'check'); return void markSpot(pi, boxKey(pi, B)); }
+  if (B) { e.preventDefault(); clearBoxCursor(); cycleBox(pi, B, 'x'); return void markSpot(pi, boxKey(pi, B)); }
 
   // …and tapping a marked-up blank line starts typing on it
   const hint = findHint(p, x, y);
@@ -2041,7 +2236,11 @@ function placeInBox(pi, B, type, sel = true) {
   const p = S.pageBox[pi];
   const rot = totalRot(p);
   const [Wl, Hl] = localDims(p.lw, p.lh, rot);
-  const side = Math.min(B.w * Wl, B.h * Hl) * 0.86;   // sits inside the rule, not on it
+  /* Fill the box. At 86% inside a glyph that only uses two thirds of its own
+     viewBox, the mark came out under half the width of the square it was in —
+     you could scan a page and not see that it had been ticked at all. The
+     corners of the cross should land on the corners of the box. */
+  const side = Math.min(B.w * Wl, B.h * Hl) * 1.02;
   const size = side / Hl;
   const it = {
     id: uid(), page: pi, rot, type,
@@ -2057,9 +2256,9 @@ function placeInBox(pi, B, type, sel = true) {
   return it;
 }
 
-/** One box, one control: empty → your mark → the other mark → empty again.
-    `first` is what you get on the first press, so a click gives a checkmark
-    and Enter gives an X, and either way both are two presses away. */
+/** One box, one control: empty → X → checkmark → empty again. An X first,
+    because that is what people put in a box on paper, and because it is the
+    mark you can see from across the page. */
 function cycleBox(pi, B, first, sel = true) {
   const cur = markInBox(pi, B);
   if (!cur) return placeInBox(pi, B, first, sel);
@@ -2389,7 +2588,7 @@ function startDrag(e, d) {
     if (!moved && wasSel && isMark(it)) {
       const [Wl, Hl] = itemFrame(it);
       const B = findBox(p, it.x + (it.size * Hl / Wl) / 2, it.y + it.size / 2, 0.004);
-      if (B) cycleBox(it.page, B, 'check');
+      if (B) cycleBox(it.page, B, 'x');
     }
     if (moved) saveSoon();
   };
@@ -3879,6 +4078,20 @@ async function buildPdf() {
       }
     }
     p.setRotation(degrees(rot));
+    /* The crop is a CropBox, not a cut: the page keeps everything it had and
+       the viewer is told which part of it to show. Nothing is destroyed, so
+       widening the crop later gets it all back — and a blackout, which really
+       does have to destroy what it covers, is a separate thing entirely. */
+    const cr = S.pageBox[i]?.crop;
+    if (cr) {
+      const [ax, ay] = unrotXY(rot, cr.x0, cr.y0);
+      const [bx, by] = unrotXY(rot, cr.x1, cr.y1);
+      const mb = p.getMediaBox();
+      const lo = Math.min(ax, bx), hi = Math.max(ax, bx);
+      const t = Math.min(ay, by), b2 = Math.max(ay, by);
+      p.setCropBox(mb.x + lo * mb.width, mb.y + (1 - b2) * mb.height,
+                   (hi - lo) * mb.width, (b2 - t) * mb.height);
+    }
   }
 
   out.setProducer('Fill & Sign — free PDF fill and sign by Eli Otterholt');
@@ -3887,6 +4100,141 @@ async function buildPdf() {
   try { rasterDoc?.destroy?.(); } catch (_) {}
   return blob;
 }
+
+
+/* ================================================================== CROP
+   A document arrives the wrong size — a photo with the desk in it, a scan
+   with a margin of shadow — and the fix is one gesture, not a trip through
+   another app. The crop is stored against the page and applied on export as
+   the PDF's own CropBox, so nothing is thrown away: come back and widen it
+   again whenever you like. In the editor it is drawn rather than applied,
+   because shading what will go is honest about a change that has not
+   happened yet, and it leaves the page's own layout untouched. */
+let cropPi = -1;
+
+const cropOf = p => p.crop || { x0: 0, y0: 0, x1: 1, y1: 1 };
+
+function frontPage() {
+  let best = 0, bestSeen = -1;
+  S.pageBox.forEach((p, i) => {
+    const top = p.el.offsetTop - stageEl.scrollTop;
+    const seen = Math.min(stageEl.clientHeight, top + p.dh) - Math.max(0, top);
+    if (seen > bestSeen) { bestSeen = seen; best = i; }
+  });
+  return best;
+}
+
+function paintCrop() {
+  S.pageBox.forEach(p => p.layer.querySelector('.cropmask')?.remove());
+  if (cropPi < 0) return;
+  const p = S.pageBox[cropPi];
+  if (!p) return;
+  const c = p.draft || cropOf(p);
+  const m = document.createElement('div');
+  m.className = 'cropmask';
+  const pct = v => (v * 100) + '%';
+  m.innerHTML =
+    `<div class="shade" style="left:0;top:0;right:0;height:${pct(c.y0)}"></div>` +
+    `<div class="shade" style="left:0;bottom:0;right:0;height:${pct(1 - c.y1)}"></div>` +
+    `<div class="shade" style="left:0;top:${pct(c.y0)};width:${pct(c.x0)};height:${pct(c.y1 - c.y0)}"></div>` +
+    `<div class="shade" style="right:0;top:${pct(c.y0)};width:${pct(1 - c.x1)};height:${pct(c.y1 - c.y0)}"></div>` +
+    `<div class="frame" style="left:${pct(c.x0)};top:${pct(c.y0)};width:${pct(c.x1 - c.x0)};height:${pct(c.y1 - c.y0)}"></div>`;
+  for (const k of CORNERS) {
+    const h = document.createElement('div');
+    h.className = 'crophandle';
+    h.dataset.k = k;
+    h.style.left = ((k.includes('w') ? c.x0 : c.x1) * 100) + '%';
+    h.style.top = ((k[0] === 'n' ? c.y0 : c.y1) * 100) + '%';
+    h.style.marginLeft = '-17px'; h.style.marginTop = '-17px';
+    m.append(h);
+  }
+  p.layer.append(m);
+}
+
+function openCrop() {
+  if (!S.pdf) return;
+  select(null);
+  cropPi = frontPage();
+  const p = S.pageBox[cropPi];
+  p.draft = { ...cropOf(p) };
+  $('#cropbar').hidden = false;
+  paintCrop();
+  toast('Drag the corners, then press Crop.', 2600);
+}
+function closeCrop() {
+  const p = S.pageBox[cropPi];
+  if (p) delete p.draft;
+  cropPi = -1;
+  $('#cropbar').hidden = true;
+  paintCrop();
+}
+
+pagesEl.addEventListener('pointerdown', e => {
+  const h = e.target.closest('.crophandle');
+  if (!h || cropPi < 0) return;
+  e.preventDefault(); e.stopPropagation();
+  const p = S.pageBox[cropPi], k = h.dataset.k, pid = e.pointerId;
+  const r = p.el.getBoundingClientRect();
+  const MIN = 0.08;
+  const move = ev => {
+    if (ev.pointerId !== pid) return;
+    const x = clamp((ev.clientX - r.left) / r.width, 0, 1);
+    const y = clamp((ev.clientY - r.top) / r.height, 0, 1);
+    const c = p.draft;
+    if (k.includes('w')) c.x0 = Math.min(x, c.x1 - MIN); else c.x1 = Math.max(x, c.x0 + MIN);
+    if (k[0] === 'n') c.y0 = Math.min(y, c.y1 - MIN); else c.y1 = Math.max(y, c.y0 + MIN);
+    paintCrop();
+  };
+  const up = ev => {
+    if (ev && ev.pointerId !== pid) return;
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+  };
+  window.addEventListener('pointermove', move, { passive: false });
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+}, true);
+
+$('#cropApply').addEventListener('click', () => {
+  const p = S.pageBox[cropPi];
+  if (!p) return closeCrop();
+  const c = p.draft;
+  push();
+  p.crop = (c.x0 < 0.002 && c.y0 < 0.002 && c.x1 > 0.998 && c.y1 > 0.998) ? null : { ...c };
+  closeCrop();
+  saveSoon();
+  toast(p.crop ? 'Cropped. The page itself is unchanged until you save.' : 'Showing the whole page.', 3000);
+});
+$('#cropCancel').addEventListener('click', closeCrop);
+$('#cropReset').addEventListener('click', () => {
+  const p = S.pageBox[cropPi];
+  if (!p) return;
+  p.draft = { x0: 0, y0: 0, x1: 1, y1: 1 };
+  paintCrop();
+});
+
+/* ------------------------------------------------------------ clear a page */
+function openClear() {
+  if (!S.pdf) return;
+  const pi = frontPage();
+  const n = S.items.filter(i => i.page === pi).length;
+  if (!n) return toast('There is nothing on this page yet.', 2600);
+  $('#clearWhat').textContent =
+    `${n} thing${n > 1 ? 's' : ''} you have added to page ${pi + 1} will be removed. ` +
+    'The document itself is untouched, and you can undo it.';
+  $('#clearSheet').dataset.pi = pi;
+  $('#clearSheet').hidden = false;
+}
+$('#clearGo').addEventListener('click', () => {
+  const pi = +$('#clearSheet').dataset.pi;
+  push();
+  S.items.filter(i => i.page === pi).forEach(i => { elOf(i.id)?.remove(); });
+  S.items = S.items.filter(i => i.page !== pi);
+  S.sel = null; syncBars(); hintsSoon(); saveSoon();
+  $('#clearSheet').hidden = true;
+  toast('Page cleared.', 2400);
+});
 
 /* ---------------------------------------------------------- done screen */
 let lastBlob = null;
@@ -4540,4 +4888,4 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 wordsOrOcr, ocrPage,
                 buildSimple, showSimple, showPage, askView, SIMof: () => SIM,
                 scanLines, findCells, totalRot, scanBoxes, layoutPages, revealFocused,
-                scanCanvas, shotsToPdf, SCANof: () => SCAN, select, finalName, renderVisible };
+                scanPanels, scanCanvas, shotsToPdf, SCANof: () => SCAN, select, finalName, renderVisible };
