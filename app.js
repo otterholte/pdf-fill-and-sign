@@ -977,6 +977,10 @@ function inkThreshold(d) {
   // a page with almost no ink gives a meaningless split; keep it sensible
   return clamp(best, 90, 205);
 }
+/* White tolerated inside one run. Deliberately *not* scaled with the scan:
+   tried it, and it made both fixtures worse. A gap in a printed rule is a
+   physical flaw of a fixed size, so the tolerance is about the paper, not
+   about how closely you look at it. */
 const GAP = 5;             // px of white tolerated inside one run
 
 function scanLines(cv) {
@@ -1030,7 +1034,7 @@ function scanLines(cv) {
      like "City ______  State ____  ZIP ______" has three separate rules at
      the same height; keeping only the widest would silently lose the other
      two, which is exactly what makes a short blank feel "not registered". */
-  const minLen = Math.max(24, W * 0.045);
+  const minLen = Math.max(24 * K, W * 0.045);
   const rows = new Array(H).fill(null);
   for (let y = 0; y < H; y++) {
     const base = y * W;
@@ -1050,7 +1054,7 @@ function scanLines(cv) {
   /* Grow bands downwards, matching each row's runs to the band they overlap.
      Matching on overlap rather than mere adjacency keeps neighbouring rules
      on the same row apart. */
-  const maxThick = Math.max(4, Math.round(H * 0.007));
+  const maxThick = Math.max(4 * K, Math.round(H * 0.007));
   const raw = [];
   const share = (a, b) => {
     const ov = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0) + 1;
@@ -1117,7 +1121,7 @@ function scanLines(cv) {
        and both were thrown away, taking every cell on that row with them.
        Nearly-solid across the same width is the tell: text never is. */
     const clear = dir => {
-      const at = g => density(dir < 0 ? b.top - g : b.bot + g, b.x0, b.x1);
+      const at = g => density(dir < 0 ? b.top - Math.round(g * K) : b.bot + Math.round(g * K), b.x0, b.x1);
       if (at(3) < 0.28 && at(5) < 0.28) return true;          // open paper
       for (let g = 2; g <= 7; g++) if (at(g) > 0.90) return true;  // another rule
       return false;
@@ -1131,7 +1135,7 @@ function scanLines(cv) {
        real damage: stitching would join one to the genuine rule beside it and
        drag the blank's left edge back across the label, so the hint struck
        through the very words naming the field. */
-    return !(core >= 6 && solid < 0.92);
+    return !(core >= 6 * K && solid < 0.92);
   });
 
   /* Two rules of the same width, joined down both sides, are the edges of a
@@ -1142,7 +1146,7 @@ function scanLines(cv) {
      the test insists on the vertical strokes joining them. */
   const joined = (a, b) => {
     const top = Math.min(a.bot, b.bot), bot = Math.max(a.top, b.top);
-    if (bot - top < 6) return false;
+    if (bot - top < 6 * K) return false;
     const col = cx => {
       let c = 0;
       for (let y = top; y <= bot; y++) {
@@ -1154,9 +1158,10 @@ function scanLines(cv) {
     return col(Math.max(a.x0, b.x0)) > 0.75 && col(Math.min(a.x1, b.x1)) > 0.75;
   };
   const written = (a, b) => {
-    const y0 = Math.min(a.bot, b.bot) + 3, y1 = Math.max(a.top, b.top) - 3;
-    const x0 = Math.max(a.x0, b.x0) + 3, x1 = Math.min(a.x1, b.x1) - 3;
-    if (y1 - y0 < 4 || x1 - x0 < 8) return false;
+    const pad = Math.round(3 * K);
+    const y0 = Math.min(a.bot, b.bot) + pad, y1 = Math.max(a.top, b.top) - pad;
+    const x0 = Math.max(a.x0, b.x0) + pad, x1 = Math.min(a.x1, b.x1) - pad;
+    if (y1 - y0 < 4 * K || x1 - x0 < 8 * K) return false;
     let ink = 0, tot = 0;
     for (let y = y0; y <= y1; y += 2) {
       const base = y * W;
@@ -1180,13 +1185,14 @@ function scanLines(cv) {
     const gx0 = Math.min(L.x1, R.x1), gx1 = Math.max(L.x0, R.x0);
     if (gx1 <= gx0 + 1) return true;                       // already overlapping
     const ya = (L.top + L.bot) / 2, yb = (R.top + R.bot) / 2;
-    const steps = clamp(Math.round((gx1 - gx0) / 5), 4, 40);
+    const steps = clamp(Math.round((gx1 - gx0) / (5 * K)), 4, 40);
     let hit = 0;
     for (let i = 1; i < steps; i++) {
       const t = i / steps;
       const x = Math.round(gx0 + (gx1 - gx0) * t);
       const y = Math.round(ya + (yb - ya) * t);
-      for (let dy = -3; dy <= 3; dy++) {
+      const rad = Math.round(3 * K);
+      for (let dy = -rad; dy <= rad; dy++) {
         const yy = y + dy;
         if (yy >= 0 && yy < H && mask[yy * W + x]) { hit++; break; }
       }
@@ -1194,7 +1200,7 @@ function scanLines(cv) {
     return hit >= (steps - 1) * 0.85;
   };
   const stitch = list => {
-    const near = Math.max(4, Math.round(H * 0.006));
+    const near = Math.max(4 * K, Math.round(H * 0.006));
     const reach = W * 0.35;
     let again = true;
     while (again) {
@@ -1218,7 +1224,7 @@ function scanLines(cv) {
   };
 
   /* The edge of a scan is a rule too, and never one to write on. */
-  const edge = Math.max(2, Math.round(H * 0.012));
+  const edge = Math.max(2 * K, Math.round(H * 0.012));
   const inner = stitch(bands).filter(b =>
     b.top > edge && b.bot < H - edge && !(b.x1 - b.x0 > W * 0.97));
 
@@ -1227,8 +1233,8 @@ function scanLines(cv) {
     for (let j = i + 1; j < inner.length; j++) {
       const a = inner[i], b = inner[j];
       const gap = Math.abs(b.top - a.top);
-      if (gap < 8 || gap > H * 0.3) continue;
-      if (Math.abs(a.x0 - b.x0) > 3 || Math.abs(a.x1 - b.x1) > 3) continue;
+      if (gap < 8 * K || gap > H * 0.3) continue;
+      if (Math.abs(a.x0 - b.x0) > 3 * K || Math.abs(a.x1 - b.x1) > 3 * K) continue;
       if (!joined(a, b) || !written(a, b)) continue;
       cellEdge.add(a); cellEdge.add(b);
     }
@@ -1380,7 +1386,7 @@ function scanBoxes(scan) {
   const { W, H, mask } = scan;
   if (!mask) return [];
 
-  const minS = Math.max(5, Math.round(H * 0.0075));
+  const minS = Math.max(5 * K, Math.round(H * 0.0075));
   const maxS = Math.max(minS + 4, Math.round(H * 0.030));
 
   // short horizontal runs, per row — candidate top and bottom edges
@@ -1478,8 +1484,8 @@ function scanBoxes(scan) {
 function scanVRules(scan) {
   const { W, H, mask } = scan;
   if (!mask) return [];
-  const minLen = Math.max(14, Math.round(H * 0.014));
-  const maxThick = Math.max(4, Math.round(W * 0.006));
+  const minLen = Math.max(14 * K, Math.round(H * 0.014));
+  const maxThick = Math.max(4 * K, Math.round(W * 0.006));
 
   const cols = new Array(W).fill(null);
   for (let x = 0; x < W; x++) {
@@ -1533,19 +1539,20 @@ function scanVRules(scan) {
     for (let y = y0; y <= y1; y++) if (mask[y * W + x]) c++;
     return c / (y1 - y0 + 1);
   };
-  const edge = Math.max(2, Math.round(W * 0.012));
+  const edge = Math.max(2 * K, Math.round(W * 0.012));
   const kept = raw.filter(b => {
     if (b.x0 < edge || b.x1 > W - edge) return false;
     let solid = 0;
     for (let x = b.x0; x <= b.x1; x++) solid = Math.max(solid, dens(x, b.y0, b.y1));
     if (solid < 0.80) return false;
-    const l = Math.max(dens(b.x0 - 3, b.y0, b.y1), dens(b.x0 - 5, b.y0, b.y1));
-    const r = Math.max(dens(b.x1 + 3, b.y0, b.y1), dens(b.x1 + 5, b.y0, b.y1));
+    const q3 = Math.round(3 * K), q5 = Math.round(5 * K);
+    const l = Math.max(dens(b.x0 - q3, b.y0, b.y1), dens(b.x0 - q5, b.y0, b.y1));
+    const r = Math.max(dens(b.x1 + q3, b.y0, b.y1), dens(b.x1 + q5, b.y0, b.y1));
     return l < 0.28 && r < 0.28;
   });
 
   // a skewed scan splits an upright too
-  const near = Math.max(3, Math.round(W * 0.004));
+  const near = Math.max(3 * K, Math.round(W * 0.004));
   let again = true;
   while (again) {
     again = false;
@@ -1554,7 +1561,7 @@ function scanVRules(scan) {
       for (let j = i + 1; j < kept.length; j++) {
         const a = kept[i], b = kept[j];
         if (Math.abs(b.x0 - a.x0) > near) continue;
-        if (Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1) > Math.max(6, H * 0.012)) continue;
+        if (Math.max(a.y0, b.y0) - Math.min(a.y1, b.y1) > Math.max(6 * K, H * 0.012)) continue;
         a.x0 = Math.min(a.x0, b.x0); a.x1 = Math.max(a.x1, b.x1);
         a.y0 = Math.min(a.y0, b.y0); a.y1 = Math.max(a.y1, b.y1);
         kept.splice(j, 1); again = true; break;
@@ -1628,11 +1635,11 @@ function findCells(hs, vs, W, H, mask) {
         Math.min(M.y1, bot) - Math.max(M.y0, top) >
         Math.min(bot - top, M.y1 - M.y0) * 0.5);
 
-      /* How closely a rule has to reach the uprights to be counted as this
+            /* How closely a rule has to reach the uprights to be counted as this
          cell's lid. Five pixels is right for a drawn table and too strict for
          a scan, where a rule fades out before it meets the border — miss by a
          hair and the whole row of cells vanishes. */
-      const reach = Math.max(5, Math.round(W * 0.015));
+      const reach = Math.max(5 * K, Math.round(W * 0.015));
       const spans = Hh.filter(h =>
         h.x0 <= x0 + reach && h.x1 >= x1 - reach && h.bot >= vy0 - 5 && h.top <= vy1 + 5);
       for (let a = 0; a + 1 < spans.length; a++) {
@@ -1660,7 +1667,7 @@ function findCells(hs, vs, W, H, mask) {
           /* An absolute floor as well as a fraction: a scan leaves a couple of
              stray dark pixels on most rows, and a pure percentage reads those
              as writing and calls every wide cell already full. */
-          inked.push(c >= Math.max(4, wide * 0.02));
+          inked.push(c >= Math.max(4 * K, wide * 0.02));
         }
         /* The caption is the first band of ink, allowing for the gap between
            a word's body and its descenders. What matters after it is the
@@ -1680,7 +1687,7 @@ function findCells(hs, vs, W, H, mask) {
           while (gapEnd < inked.length && !inked[gapEnd]) gapEnd++;
         }
         const capped = capA >= 0 && capA < tall * 0.4 &&
-                       gapEnd - capB - 1 >= Math.max(9, H * 0.011);
+                       gapEnd - capB - 1 >= Math.max(9 * K, H * 0.011);
         const wy0 = capped ? iy0 + capB + 2 : T.bot;         // where you write
         cells.push({
           x0: x0 / W, x1: x1 / W, y0: wy0 / H, y1: B.top / H,
@@ -1714,7 +1721,21 @@ function findCells(hs, vs, W, H, mask) {
    bitmap. The canvas is thrown away immediately; only the measurements are
    kept, in memory, in this tab. */
 const EMPTY_SCAN = { lines: [], boxes: [], cells: [] };
-const SCAN_W = 1000;
+/* The scan used to run at a fixed 1000px wide whatever the page was, which
+   quietly downsampled anything bigger. A form that arrives as a photograph is
+   a bitmap of 1200-2000px, and a table rule in it is a hairline one or two
+   pixels across — resample that down and it becomes a grey smudge that no
+   longer reads as solid, so the upright it belonged to disappears and every
+   cell in that column goes with it. Because each row is judged on its own the
+   losses come out ragged: a box on the third row and nothing on the first two.
+
+   So scan at the page's own resolution, up to a ceiling. Every constant below
+   that counts pixels is multiplied by K, or raising the width would just move
+   the problem: at 1600px a "thin" rule of four pixels is no longer thin. */
+const SCAN_W_BASE = 1000;
+const SCAN_W_MAX = 1700;
+let SCAN_W = SCAN_W_BASE;
+let K = 1;
 const scanKeyOf = p => 'r' + totalRot(p);
 
 function pageScan(p) {
@@ -1723,6 +1744,47 @@ function pageScan(p) {
 const pageLines = p => pageScan(p).lines;
 const pageBoxes = p => pageScan(p).boxes;
 const pageCells = p => pageScan(p).cells;
+
+/** the resolution the page actually carries, from the biggest image on it */
+async function nativeWidth(p) {
+  try {
+    const ops = await p.page.getOperatorList();
+    let best = 0;
+    for (let i = 0; i < ops.fnArray.length; i++) {
+      const a = ops.argsArray[i];
+      if (!a) continue;
+      for (const v of a) {
+        if (v && typeof v === 'object' && typeof v.width === 'number' && typeof v.height === 'number') {
+          best = Math.max(best, v.width);
+        }
+      }
+    }
+    return best;
+  } catch (_) { return 0; }
+}
+
+/** the same page at a closer look, for cells the first pass could not prove */
+async function secondLook(p, have) {
+  if (K !== 1) return [];
+  const cv = document.createElement('canvas');
+  const was = SCAN_W, wasK = K;
+  try {
+    SCAN_W = SCAN_W_MAX; K = SCAN_W / SCAN_W_BASE;
+    const v0 = p.page.getViewport({ scale: 1, rotation: totalRot(p) });
+    const vp = p.page.getViewport({ scale: SCAN_W / v0.width, rotation: totalRot(p) });
+    cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+    await p.page.render({
+      canvasContext: cv.getContext('2d', { alpha: false, willReadFrequently: true }),
+      viewport: vp,
+    }).promise;
+    const scan = scanLines(cv);
+    const { cells } = findCells(scan.allBands, scanVRules(scan), scan.W, scan.H, scan.mask);
+    // only what the first pass missed, judged by where it sits on the page
+    return cells.filter(c => !c.filled &&
+      !have.some(h => Math.abs(h.cx - c.cx) < 0.02 && Math.abs(h.cy - c.cy) < 0.012));
+  } catch (_) { return []; }
+  finally { SCAN_W = was; K = wasK; cv.width = cv.height = 0; }
+}
 
 function ensureScan(p) {
   const key = scanKeyOf(p);
@@ -1734,6 +1796,8 @@ function ensureScan(p) {
     try {
       try { await p.task?.promise; } catch (_) {}      // don't render a page twice at once
       const v0 = p.page.getViewport({ scale: 1, rotation: totalRot(p) });
+      SCAN_W = SCAN_W_BASE;
+      K = 1;
       const vp = p.page.getViewport({ scale: SCAN_W / v0.width, rotation: totalRot(p) });
       cv.width = Math.round(vp.width);
       cv.height = Math.round(vp.height);
@@ -1746,6 +1810,18 @@ function ensureScan(p) {
          bound are. Work those out first, then keep only the leftovers. */
       const vs = scanVRules(scan);
       const { cells, usedH, uprights } = findCells(scan.allBands, vs, scan.W, scan.H, scan.mask);
+
+      /* Look again, closer, and keep whatever the second look adds.
+         A hairline rule survives one resolution and not another: at 1000px a
+         rule in a photographed form blurs into a smudge too soft to register,
+         and at 1700px a rule in a crisp one falls between the tests instead.
+         Neither width wins everywhere — on two versions of the same page one
+         width found 27 cells and 18, the other 22 and 27. Picking a side is
+         choosing which documents to be bad at. So do both and take the union:
+         a cell either width can prove is a cell, and a column that only shows
+         up under closer inspection is still a column. One extra scan per page,
+         once; lines and tick boxes stay with the width they were tuned at. */
+      cells.push(...await secondLook(p, cells));
       /* A rule with an upright standing at each end is a border — the side of
          a box, the line between two rows of a grid. It is drawn to divide the
          page, not to be written on, and offering it as a blank puts a text
@@ -1772,7 +1848,7 @@ function ensureScan(p) {
         /* Ignore a sliver at each end: a blank that starts right after a "$"
            or a bracket would otherwise report no room at all and get 5pt text. */
         const lo = b.x0 + Math.round(w * 0.05), hi = b.x1 - Math.round(w * 0.02);
-        const need = Math.max(3, Math.round(w * 0.05));
+        const need = Math.max(3 * K, Math.round(w * 0.05));
         const stop = Math.max(0, b.top - CAP);
         let y = b.top - 2;
         for (; y > stop; y--) {
@@ -1805,7 +1881,7 @@ function ensureScan(p) {
           const base = y * W;
           for (let x = b.x0; x <= b.x1; x++) if (scan.mask[base + x]) col[x - b.x0] = 1;
         }
-        const need = Math.max(6, Math.round(wide * 0.02));      // air between captions
+        const need = Math.max(6 * K, Math.round(wide * 0.02));  // air between captions
         const runs = [];
         let s0 = -1, gap = 0;
         for (let i = 0; i <= wide; i++) {
@@ -1836,7 +1912,7 @@ function ensureScan(p) {
         const parts = b.x1 - b.x0 > scan.W * 0.28 ? subDivide(b) : null;
         if (parts) free2.push(...parts); else free2.push(b);
       }
-      const lines = free2.filter(b => clearAbove(b) * scan.H >= 8).map(b => {
+      const lines = free2.filter(b => clearAbove(b) * scan.H >= 8 * K).map(b => {
         /* Match the label if we found one. With no label to measure, a
            sensible default beats the bottom of the clamp — that is what
            used to make an unlabelled blank get 6pt text. */
