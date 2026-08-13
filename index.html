@@ -165,9 +165,9 @@
         <dt>Tap a box</dt><dd>An X goes in. Tap again for a checkmark, again to clear it</dd>
         <dt>Double&#8209;tap</dt><dd>A text box wherever you put your finger</dd>
         <dt>Tap, then drag</dt><dd>One tap selects, the next moves it &mdash; scrolling past never grabs anything</dd>
-        <dt>Arrows in the bar</dt><dd>Tiny adjustments. Hold one down to go further</dd>
+        <dt>Arrows in the bar</dt><dd>Tiny adjustments to whatever is selected &mdash; and to a crop edge. Hold one down to go further</dd>
         <dt>Pinch</dt><dd>Zoom in close. Two fingers never move your edits</dd>
-        <dt>Swipe the tools</dt><dd>Blackout, crop and clear are just past the right edge</dd>
+        <dt>Swipe the tools</dt><dd>Blackout, rotate, crop, clear and simple view are past the right edge &mdash; the bar under the row says how far along you are</dd>
       </dl>
       <p class="tipnote">Add it to your home screen and it opens straight to this page, with or without a signal.</p>
     </div>
@@ -275,9 +275,6 @@
       <span id="docName">Document.pdf</span>
       <small id="docPages"></small>
     </div>
-    <button class="btn-icon" id="btnSimple" aria-label="Simple view" title="Simple view">
-      <svg viewBox="0 0 24 24"><path d="M4 6h5M4 12h5M4 18h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><rect x="12" y="4.2" width="8" height="3.6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="12" y="10.2" width="8" height="3.6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="12" y="16.2" width="8" height="3.6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
-    </button>
     <button class="btn-icon" id="btnUndo" aria-label="Undo" disabled>
       <svg viewBox="0 0 24 24"><path d="M9 7L4.5 11.5 9 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.5 11.5H14a5.5 5.5 0 0 1 0 11h-2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </button>
@@ -368,7 +365,7 @@
     </button>
     <button class="tool" data-tool="x">
       <svg viewBox="0 0 24 24"><path d="M5.5 5.5l13 13M18.5 5.5l-13 13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
-      <span>X</span>
+      <span>X mark</span>
     </button>
     <button class="tool" data-tool="redact">
       <svg viewBox="0 0 24 24"><rect x="3.5" y="7.5" width="17" height="9" rx="1.5" fill="currentColor"/></svg>
@@ -386,13 +383,60 @@
       <svg viewBox="0 0 24 24"><path d="M4 7h16M9.5 7V4.5h5V7M6.5 7l1 12.5h9L17.5 7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span>Clear</span>
     </button>
+    <!-- Its own section at the far end: a way of looking at the document
+         rather than something you do to it, so it is set apart and tinted
+         differently instead of sitting in the header taking up room. -->
+    <span class="tool-div" aria-hidden="true"></span>
+    <button class="tool tool-alt" data-tool="simple" id="btnSimple">
+      <svg viewBox="0 0 24 24"><path d="M4 6h5M4 12h5M4 18h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><rect x="12" y="4.2" width="8" height="3.6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="12" y="10.2" width="8" height="3.6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="12" y="16.2" width="8" height="3.6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+      <span>Simple view</span>
+    </button>
   </nav>
 
+  <!-- Where you are in a row that is wider than the screen. The track is the
+       whole row, the bar is the part you can see, and the chip on the right
+       is both the news that there is more and a way to get to it. Both are
+       there the whole time, so the row never looks like all there is. -->
+  <div class="toolrail" id="toolRail" hidden>
+    <span class="toolthumb" id="toolThumb"></span>
+  </div>
+  <button class="toolnext" id="toolNext" hidden aria-label="More tools">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </button>
+
+  <!-- Eight handles: four corners and the middle of each edge, because most
+       crops are one edge at a time. Whichever you touched last stays picked,
+       and the arrows move that one — a few thousandths of the page per press,
+       which is the difference between "about there" and right. -->
   <div class="cropbar" id="cropbar" hidden>
-    <button class="btn-ghost sm" id="cropReset">Whole page</button>
-    <span class="crop-hint">Drag the corners</span>
-    <button class="btn-ghost sm" id="cropCancel">Cancel</button>
-    <button class="btn-save" id="cropApply">Crop</button>
+    <div class="crop-row">
+      <span class="crop-hint" id="cropHint">Drag an edge or a corner</span>
+      <div class="nudge crop-nudge" id="cropNudge" role="group" aria-label="Move the crop edge">
+        <button class="nud nud-x" data-d="left" aria-label="Move left"><svg viewBox="0 0 24 24"><path d="M19.5 12H7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M11.4 6.6 5.6 12l5.8 5.4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="nud nud-y" data-d="up" aria-label="Move up"><svg viewBox="0 0 24 24"><path d="M12 20.5v-9" fill="none" stroke="currentColor" stroke-width="3.1" stroke-linecap="round"/><path d="M12 3.4 19 12.4H5z" fill="currentColor"/></svg></button>
+        <button class="nud nud-y" data-d="down" aria-label="Move down"><svg viewBox="0 0 24 24"><path d="M12 3.5v9" fill="none" stroke="currentColor" stroke-width="3.1" stroke-linecap="round"/><path d="M12 20.6 5 11.6h14z" fill="currentColor"/></svg></button>
+        <button class="nud nud-x" data-d="right" aria-label="Move right"><svg viewBox="0 0 24 24"><path d="M4.5 12H17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M12.6 6.6 18.4 12l-5.8 5.4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div>
+    </div>
+    <div class="crop-row">
+      <button class="btn-ghost sm" id="cropReset">Whole page</button>
+      <button class="btn-ghost sm" id="cropCancel">Cancel</button>
+      <button class="btn-save" id="cropApply">Crop</button>
+    </div>
+  </div>
+
+  <!-- Rotate is a verb you repeat, not a value you pick: press until it looks
+       right. Two icons say which way without a word between them. -->
+  <div class="cropbar rotbar" id="rotbar" hidden>
+    <button class="rot-btn" id="rotCCW" aria-label="Turn left" title="Turn left">
+      <svg viewBox="0 0 24 24"><path d="M4 11.5a8 8 0 1 0 2.4-5.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M3.5 3.5v4.2h4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <button class="rot-btn" id="rotCW" aria-label="Turn right" title="Turn right">
+      <svg viewBox="0 0 24 24"><path d="M20 11.5a8 8 0 1 1-2.4-5.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20.5 3.5v4.2h-4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <span class="crop-hint" id="rotHint">Page 1</span>
+    <label class="chk rot-all"><input type="checkbox" id="rotAll"> All pages</label>
+    <button class="btn-save" id="rotDone">Done</button>
   </div>
 
   <div class="placing" id="placing" hidden><span id="placingText">Tap the page</span><button id="placingCancel">Cancel</button></div>
@@ -477,24 +521,6 @@
 </div>
 
 <!-- ============ ROTATE SHEET ============ -->
-<div class="sheet-wrap" id="rotSheet" hidden>
-  <div class="sheet-backdrop" data-close></div>
-  <div class="sheet" role="dialog" aria-label="Rotate pages">
-    <div class="sheet-grab"></div>
-    <div class="sheet-head"><h2>Rotate</h2>
-      <button class="btn-icon" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
-    </div>
-    <p class="rot-page" id="rotPage">Page 1</p>
-    <div class="rotgrid">
-      <button class="btn-ghost" data-rot="90">90° right</button>
-      <button class="btn-ghost" data-rot="180">180°</button>
-      <button class="btn-ghost" data-rot="270">90° left</button>
-      <button class="btn-ghost" data-rot="0">Original</button>
-    </div>
-    <label class="chk wide-chk"><input type="checkbox" id="rotAll"> Apply to all pages</label>
-  </div>
-</div>
-
 <!-- ============ SCAN A PHOTO ============ -->
 <div class="sheet-wrap" id="scanPick" hidden>
   <div class="sheet-backdrop" data-close></div>

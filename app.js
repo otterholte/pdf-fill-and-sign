@@ -146,12 +146,20 @@ const pagesEl = $('#pages');
 const stageEl = $('#stage');
 
 /* ------------------------------------------------------------------ history */
-const snap = () => JSON.stringify({ i: S.items, r: S.pageBox.map(p => p.userRot), f: S.fields });
+/* The crop belongs in here with the rest of it. It always should have — but
+   while it only showed up at the download you could undo past one and not
+   notice; now that the page visibly closes around it, an undo that left it
+   cropped would look like the undo had failed. */
+const snap = () => JSON.stringify({
+  i: S.items, r: S.pageBox.map(p => p.userRot), f: S.fields,
+  c: S.pageBox.map(p => p.crop || null),
+});
 function restore(str) {
   const o = JSON.parse(str);
   S.items = o.i;
   S.fields = o.f || {};
   o.r.forEach((r, i) => { if (S.pageBox[i]) S.pageBox[i].userRot = r; });
+  (o.c || []).forEach((c, i) => { if (S.pageBox[i]) S.pageBox[i].crop = c || null; });
   S.sel = null;
   layoutPages(); paintItems(); paintFields(); syncBars(); renderVisible(); saveSoon();
 }
@@ -181,7 +189,8 @@ function saveSoon() {
         name: S.name, bytes: S.bytes,
         items: S.items.filter(i => !isText(i) || i.date || i.text.trim()),
         fields: S.fields,
-        rots: S.pageBox.map(p => p.userRot), ts: Date.now(),
+        rots: S.pageBox.map(p => p.userRot),
+        crops: S.pageBox.map(p => p.crop || null), ts: Date.now(),
       });
     } catch (_) {}
   }, 700);
@@ -438,7 +447,7 @@ async function openFile(file) {
   } finally { busy(false); }
 }
 
-async function loadDoc(buf, name, items, rots, fields) {
+async function loadDoc(buf, name, items, rots, fields, crops) {
   S.bytes = buf.slice(0);
   S.name = name;
   S.items = items || [];
@@ -461,6 +470,8 @@ async function loadDoc(buf, name, items, rots, fields) {
 
   armBack();
   await buildPages(rots);
+  (crops || []).forEach((c, i) => { if (S.pageBox[i]) S.pageBox[i].crop = c || null; });
+  if (crops?.some(Boolean)) layoutPages();
   syncBars();
   clearBoxCursor();
   KB.pi = 0; KB.key = null; KB.cur = null; KB.at = 0; KB.of = 0;
@@ -766,9 +777,32 @@ function layoutPagesInner() {
       r === 90 ? `translateX(${p.dw}px) rotate(90deg)` :
       r === 180 ? `translate(${p.dw}px, ${p.dh}px) rotate(180deg)` :
       r === 270 ? `translateY(${p.dh}px) rotate(270deg)` : 'none';
+    showCrop(p);
   });
   relayoutItems();
   layoutFields();
+}
+
+/* Show a crop the moment it is made, not at the download.
+
+   The page element keeps its full size — every coordinate in the app is a
+   fraction of the whole page, and rewriting all of that to mean "a fraction
+   of what is left" would be a change with no upside and a great many places
+   to get wrong. Instead the box is clipped to the part you kept and pulled
+   back by the amount removed, so the layout closes up around it. The border
+   box is untouched, which is what getBoundingClientRect reports, so taps,
+   hints, item placement and the pixel scan all carry on measuring the page
+   they have always measured. Only your eyes are told about it.
+
+   While the crop bar is open the page is shown whole, because you cannot drag
+   an edge outwards that you can no longer see. */
+function showCrop(p) {
+  const c = (cropPi === S.pageBox.indexOf(p)) ? null : cropNow(p);
+  if (!c) { p.el.style.clipPath = ''; p.el.style.margin = ''; return; }
+  const t = c.y0 * p.dh, b = (1 - c.y1) * p.dh;
+  const l = c.x0 * p.dw, r = (1 - c.x1) * p.dw;
+  p.el.style.clipPath = `inset(${t}px ${r}px ${b}px ${l}px)`;
+  p.el.style.margin = `${-t}px ${-r}px ${-b}px ${-l}px`;
 }
 
 function layoutPages() {
@@ -2326,10 +2360,41 @@ $$('.tool').forEach(b => b.addEventListener('click', () => {
   if (t === 'rotate') { S.tool = null; reflectTool(); openRotate(); return; }
   if (t === 'crop') { S.tool = null; reflectTool(); openCrop(); return; }
   if (t === 'clear') { S.tool = null; reflectTool(); openClear(); return; }
+  if (t === 'simple') { S.tool = null; reflectTool(); goSimple(); return; }
   S.tool = S.tool === t ? null : t;
   pendingSig = null;
   reflectTool();
 }));
+
+/* ---- how far along the row of tools you are
+
+   Five buttons fit on a phone and there are ten, so the row scrolls — and a
+   row that scrolls with nothing to say so reads as the whole set. The track
+   under the tools is the row, the bar on it is the part you can see, and the
+   chip at the right edge both announces the rest and goes there. Neither
+   moves on its own: the point is to be readable in the moment you glance at
+   it, not to catch the eye later. */
+const toolbarEl = $('#toolbar');
+function syncRail() {
+  const rail = $('#toolRail'), thumb = $('#toolThumb'), next = $('#toolNext');
+  if (!rail) return;
+  const room = toolbarEl.scrollWidth - toolbarEl.clientWidth;
+  if (room < 8) { rail.hidden = true; next.hidden = true; return; }
+  rail.hidden = false; next.hidden = false;
+  const seen = toolbarEl.clientWidth / toolbarEl.scrollWidth;
+  const at = toolbarEl.scrollLeft / room;
+  thumb.style.width = (seen * 100) + '%';
+  thumb.style.left = (at * (1 - seen) * 100) + '%';
+  // nothing more to the right: offer the way back rather than a dead arrow
+  next.classList.toggle('back', at > 0.98);
+}
+toolbarEl.addEventListener('scroll', syncRail, { passive: true });
+addEventListener('resize', syncRail);
+$('#toolNext').addEventListener('click', () => {
+  const room = toolbarEl.scrollWidth - toolbarEl.clientWidth;
+  const back = toolbarEl.scrollLeft / room > 0.98;
+  toolbarEl.scrollBy({ left: back ? -toolbarEl.clientWidth : toolbarEl.clientWidth, behavior: 'smooth' });
+});
 const PROMPT = {
   text: 'Tap a blank line to type on it',
   date: 'Tap the page to add the date',
@@ -3121,6 +3186,16 @@ document.addEventListener('keydown', e => {
                  /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
 
   const dir = ARROWS[e.key];
+
+  /* While the crop bar is open the arrows belong to the crop: same idea as
+     the on-screen pad beside it, and the only way to take a precise slice off
+     an edge with a trackpad. Shift strides. */
+  if (dir && cropPi >= 0 && !typing) {
+    e.preventDefault();
+    nudgeCrop(dir, e.shiftKey);
+    return;
+  }
+
   /* With the caret inside a text box the arrows belong to the caret, as they
      must. Shift is not otherwise spoken for — there is no ranged selection in
      these boxes worth extending — so Shift means "the arrows are for the
@@ -3772,6 +3847,7 @@ function fitViewport() {
   const typing = !HAS_KEYBOARD && !!ae && ed.contains(ae) &&
     (ae.isContentEditable || ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
   ed.classList.toggle('kb', shrunk || typing);
+  syncRail();
 }
 
 /* The keyboard finishes arriving after the focus event that summoned it, so
@@ -4028,21 +4104,37 @@ function currentPage() {
   });
   return best;
 }
+/* Rotate is a verb you repeat, not a value you pick. Four buttons offering
+   90, 180, 270 and "original" made you work out which one you wanted from a
+   page that was already sideways; two arrows let you press until it looks
+   right, and press the other way if you overshoot. The bar sits over the
+   tools rather than in a sheet, so the page stays in view while you turn it. */
 function openRotate() {
-  const i = currentPage();
-  $('#rotSheet').dataset.page = i;
-  $('#rotPage').textContent = `Page ${i + 1} of ${S.pageBox.length}`;
-  $('#rotSheet').hidden = false;
+  $('#rotbar').dataset.page = currentPage();
+  $('#rotbar').hidden = false;
+  labelRot();
 }
-$$('[data-rot]').forEach(b => b.addEventListener('click', () => {
-  const deg = +b.dataset.rot;
+function labelRot() {
+  const i = +$('#rotbar').dataset.page;
+  const n = S.pageBox.length;
+  $('#rotHint').textContent = n > 1 ? `Page ${i + 1} of ${n}` : 'This page';
+}
+function turn(by) {
   const all = $('#rotAll').checked;
-  const i = +$('#rotSheet').dataset.page;
+  const i = +$('#rotbar').dataset.page;
+  const p0 = S.pageBox[i];
+  if (!p0) return;
   push();
-  (all ? S.pageBox : [S.pageBox[i]]).forEach(p => { p.userRot = deg; p.renderKey = null; });
-  layoutPages(); renderVisible(); saveSoon();
-  $('#rotSheet').hidden = true;
-}));
+  const to = norm4(p0.userRot + by);
+  (all ? S.pageBox : [p0]).forEach(p => {
+    p.userRot = all ? norm4(p.userRot + by) : to;
+    p.renderKey = null;
+  });
+  layoutPages(); renderVisible(); hintsSoon(); saveSoon();
+}
+$('#rotCCW').addEventListener('click', () => turn(-90));
+$('#rotCW').addEventListener('click', () => turn(90));
+$('#rotDone').addEventListener('click', () => { $('#rotbar').hidden = true; });
 
 /* ============================================================== SIGNATURE */
 const sigSheet = $('#sigSheet');
@@ -4506,7 +4598,8 @@ async function buildPdf() {
        the viewer is told which part of it to show. Nothing is destroyed, so
        widening the crop later gets it all back — and a blackout, which really
        does have to destroy what it covers, is a separate thing entirely. */
-    const cr = S.pageBox[i]?.crop;
+    const pb2 = S.pageBox[i];
+    const cr = pb2 ? cropNow(pb2) : null;
     if (cr) {
       const [ax, ay] = unrotXY(rot, cr.x0, cr.y0);
       const [bx, by] = unrotXY(rot, cr.x1, cr.y1);
@@ -4540,6 +4633,7 @@ addEventListener('popstate', () => {
   const sheet = $$('.sheet-wrap').find(x => !x.hidden);
   if (sheet) { sheet.hidden = true; return armBack(); }
   if (!$('#cropbar').hidden) { closeCrop(); return armBack(); }
+  if (!$('#rotbar').hidden) { $('#rotbar').hidden = true; return armBack(); }
   if (!$('#pick').hidden) { $('#pick').hidden = true; closeDoc(); return armBack(); }
   if (!$('#simple').hidden) { showPage(); return armBack(); }
   if (!$('#done').hidden) {
@@ -4560,7 +4654,25 @@ addEventListener('popstate', () => {
    happened yet, and it leaves the page's own layout untouched. */
 let cropPi = -1;
 
-const cropOf = p => p.crop || { x0: 0, y0: 0, x1: 1, y1: 1 };
+/* A crop is remembered in the frame of the page as it looked when you made it
+   — the same rule objects follow — so turning the page afterwards turns the
+   crop with it instead of leaving it slicing the wrong side. Everything that
+   uses a crop asks for it in the frame of the moment. */
+const reframe = (from, to, x, y) => {
+  const [ux, uy] = unrotXY(from, x, y);
+  return unrotXY(norm4(360 - to), ux, uy);
+};
+function cropNow(p) {
+  const c = p.crop;
+  if (!c) return null;
+  const now = totalRot(p);
+  if (norm4(c.rot || 0) === now) return c;
+  const [ax, ay] = reframe(c.rot || 0, now, c.x0, c.y0);
+  const [bx, by] = reframe(c.rot || 0, now, c.x1, c.y1);
+  return { x0: Math.min(ax, bx), x1: Math.max(ax, bx),
+           y0: Math.min(ay, by), y1: Math.max(ay, by), rot: now };
+}
+const cropOf = p => cropNow(p) || { x0: 0, y0: 0, x1: 1, y1: 1 };
 
 function frontPage() {
   let best = 0, bestSeen = -1;
@@ -4572,8 +4684,17 @@ function frontPage() {
   return best;
 }
 
+/* Eight places to take hold of, not four. Most crops are one edge — the
+   shadow down the right of a scan, the header you do not want — and dragging
+   a corner to do that costs you the other axis as well and a second drag to
+   put it back. `CROP_GRIP` reads as a compass: 'n' is the top edge, 'nw' the
+   top-left corner, and every entry says which of x0/x1 and y0/y1 it owns. */
+const CROP_GRIP = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+const MIN_CROP = 0.08;
+let cropSel = 'se';                       // the handle the arrows will move
+
 function paintCrop() {
-  S.pageBox.forEach(p => p.layer.querySelector('.cropmask')?.remove());
+  S.pageBox.forEach(p => p.el.querySelector('.cropmask')?.remove());
   if (cropPi < 0) return;
   const p = S.pageBox[cropPi];
   if (!p) return;
@@ -4587,34 +4708,104 @@ function paintCrop() {
     `<div class="shade" style="left:0;top:${pct(c.y0)};width:${pct(c.x0)};height:${pct(c.y1 - c.y0)}"></div>` +
     `<div class="shade" style="right:0;top:${pct(c.y0)};width:${pct(1 - c.x1)};height:${pct(c.y1 - c.y0)}"></div>` +
     `<div class="frame" style="left:${pct(c.x0)};top:${pct(c.y0)};width:${pct(c.x1 - c.x0)};height:${pct(c.y1 - c.y0)}"></div>`;
-  for (const k of CORNERS) {
+  for (const k of CROP_GRIP) {
     const h = document.createElement('div');
-    h.className = 'crophandle';
+    const edge = k.length === 1;
+    h.className = 'crophandle' + (edge ? ` edge-${k}` : '') + (k === cropSel ? ' picked' : '');
     h.dataset.k = k;
-    h.style.left = ((k.includes('w') ? c.x0 : c.x1) * 100) + '%';
-    h.style.top = ((k[0] === 'n' ? c.y0 : c.y1) * 100) + '%';
+    const x = k.includes('w') ? c.x0 : k.includes('e') ? c.x1 : (c.x0 + c.x1) / 2;
+    const y = k.includes('n') ? c.y0 : k.includes('s') ? c.y1 : (c.y0 + c.y1) / 2;
+    h.style.left = (x * 100) + '%';
+    h.style.top = (y * 100) + '%';
     h.style.marginLeft = '-17px'; h.style.marginTop = '-17px';
     m.append(h);
   }
-  p.layer.append(m);
+  p.el.append(m);
 }
+
+/** Move one side of the draft, keeping the box at least MIN_CROP across. */
+function cropEdge(c, k, dx, dy) {
+  if (k.includes('w')) c.x0 = clamp(c.x0 + dx, 0, c.x1 - MIN_CROP);
+  if (k.includes('e')) c.x1 = clamp(c.x1 + dx, c.x0 + MIN_CROP, 1);
+  if (k.includes('n')) c.y0 = clamp(c.y0 + dy, 0, c.y1 - MIN_CROP);
+  if (k.includes('s')) c.y1 = clamp(c.y1 + dy, c.y0 + MIN_CROP, 1);
+}
+
+const CROP_LABEL = { n: 'Top edge', s: 'Bottom edge', e: 'Right edge', w: 'Left edge',
+                     nw: 'Top-left', ne: 'Top-right', sw: 'Bottom-left', se: 'Bottom-right' };
+function pickCrop(k) {
+  cropSel = k;
+  $('#cropHint').textContent = CROP_LABEL[k] || 'Drag an edge or a corner';
+  paintCrop();
+}
+
+/* The same idea as the arrows beside a text box: a finger is not precise
+   enough to trim four millimetres off a margin, and neither is a trackpad.
+   One press is a fifth of a percent of the page; held down, or with Shift,
+   it strides. The arrow keys do it too while the crop bar is open. */
+function nudgeCrop(dir, far) {
+  if (cropPi < 0) return;
+  const p = S.pageBox[cropPi];
+  if (!p?.draft) return;
+  const step = far ? 0.01 : 0.002;
+  const [dx, dy] = NUDGE[dir];
+  cropEdge(p.draft, cropSel, dx * step, dy * step);
+  paintCrop();
+}
+$('#cropNudge').addEventListener('pointerdown', e => {
+  const b = e.target.closest('.nud'); if (!b) return;
+  e.preventDefault();
+  const dir = b.dataset.d, pid = e.pointerId;
+  nudgeCrop(dir, false);
+  const t0 = performance.now();
+  let timer = null;
+  const hold = setTimeout(() => { timer = setInterval(() => nudgeCrop(dir, performance.now() - t0 > 900), 55); }, 340);
+  const off = ev => {
+    if (ev && ev.pointerId !== pid) return;
+    clearTimeout(hold); if (timer) clearInterval(timer);
+    window.removeEventListener('pointerup', off);
+    window.removeEventListener('pointercancel', off);
+  };
+  window.addEventListener('pointerup', off);
+  window.addEventListener('pointercancel', off);
+});
 
 function openCrop() {
   if (!S.pdf) return;
   select(null);
+  $('#rotbar').hidden = true;
   cropPi = frontPage();
   const p = S.pageBox[cropPi];
   p.draft = { ...cropOf(p) };
   $('#cropbar').hidden = false;
-  paintCrop();
-  toast('Drag the corners, then press Crop.', 2600);
+  $('#editor').classList.add('cropping');
+  showCrop(p);                            // show it whole again while you work
+  pickCrop(cropSel);
+  revealPage(cropPi);
 }
 function closeCrop() {
   const p = S.pageBox[cropPi];
   if (p) delete p.draft;
   cropPi = -1;
   $('#cropbar').hidden = true;
+  $('#editor').classList.remove('cropping');
+  if (p) showCrop(p);
   paintCrop();
+}
+
+/** Put a page in view — the crop bar is no use if the page is off screen.
+
+    Measured, not calculated: offsetTop here is relative to the positioned
+    ancestor rather than to the scrolling box, so it carries the height of
+    the bars above the stage with it, and scrolling by it puts the top of the
+    page — and the two handles on it — up underneath the header. */
+function revealPage(i) {
+  const p = S.pageBox[i];
+  if (!p) return;
+  requestAnimationFrame(() => {
+    const pr = p.el.getBoundingClientRect(), sr = stageEl.getBoundingClientRect();
+    stageEl.scrollTop = Math.max(0, stageEl.scrollTop + (pr.top - sr.top) - 22);
+  });
 }
 
 pagesEl.addEventListener('pointerdown', e => {
@@ -4622,15 +4813,17 @@ pagesEl.addEventListener('pointerdown', e => {
   if (!h || cropPi < 0) return;
   e.preventDefault(); e.stopPropagation();
   const p = S.pageBox[cropPi], k = h.dataset.k, pid = e.pointerId;
+  pickCrop(k);
   const r = p.el.getBoundingClientRect();
-  const MIN = 0.08;
   const move = ev => {
     if (ev.pointerId !== pid) return;
     const x = clamp((ev.clientX - r.left) / r.width, 0, 1);
     const y = clamp((ev.clientY - r.top) / r.height, 0, 1);
     const c = p.draft;
-    if (k.includes('w')) c.x0 = Math.min(x, c.x1 - MIN); else c.x1 = Math.max(x, c.x0 + MIN);
-    if (k[0] === 'n') c.y0 = Math.min(y, c.y1 - MIN); else c.y1 = Math.max(y, c.y0 + MIN);
+    if (k.includes('w')) c.x0 = Math.min(x, c.x1 - MIN_CROP);
+    if (k.includes('e')) c.x1 = Math.max(x, c.x0 + MIN_CROP);
+    if (k.includes('n')) c.y0 = Math.min(y, c.y1 - MIN_CROP);
+    if (k.includes('s')) c.y1 = Math.max(y, c.y0 + MIN_CROP);
     paintCrop();
   };
   const up = ev => {
@@ -4649,10 +4842,12 @@ $('#cropApply').addEventListener('click', () => {
   if (!p) return closeCrop();
   const c = p.draft;
   push();
-  p.crop = (c.x0 < 0.002 && c.y0 < 0.002 && c.x1 > 0.998 && c.y1 > 0.998) ? null : { ...c };
+  p.crop = (c.x0 < 0.002 && c.y0 < 0.002 && c.x1 > 0.998 && c.y1 > 0.998)
+    ? null : { ...c, rot: totalRot(p) };
   closeCrop();
+  layoutPages();
   saveSoon();
-  toast(p.crop ? 'Cropped. The page itself is unchanged until you save.' : 'Showing the whole page.', 3000);
+  toast(p.crop ? 'Cropped. Nothing is thrown away — widen it any time.' : 'Showing the whole page.', 2600);
 });
 $('#cropCancel').addEventListener('click', closeCrop);
 $('#cropReset').addEventListener('click', () => {
@@ -5210,10 +5405,12 @@ $('#simBack').addEventListener('click', () => {
   closeDoc();
 });
 $('#simReview').addEventListener('click', showPage);
-$('#btnSimple').addEventListener('click', () => {
+/* Simple view now lives at the far end of the tool row rather than in the
+   header, so the tool handler calls this by name. */
+function goSimple() {
   if (SIM.built) rebuildSimpleValues();
   showSimple();
-});
+}
 
 /* Coming back from the page view, the cards have to show what is now on the
    page — you may have typed into a field or ticked a box while you were
@@ -5292,7 +5489,7 @@ $('#btnResume').addEventListener('click', async () => {
   busy(true, 'Opening…');
   try {
     const d = await DB.get('doc');
-    if (d) await loadDoc(d.bytes, d.name, d.items, d.rots, d.fields);
+    if (d) await loadDoc(d.bytes, d.name, d.items, d.rots, d.fields, d.crops);
   } catch (_) { toast('That draft could not be restored.'); }
   finally { busy(false); }
 });
@@ -5344,4 +5541,5 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 wordsOrOcr, ocrPage,
                 buildSimple, showSimple, showPage, askView, SIMof: () => SIM,
                 scanLines, findCells, totalRot, scanBoxes, layoutPages, revealFocused,
-                scanPanels, scanCanvas, shotsToPdf, SCANof: () => SCAN, select, finalName, renderVisible };
+                scanPanels, scanCanvas, shotsToPdf, SCANof: () => SCAN, select, finalName, renderVisible,
+                openCrop, closeCrop, nudgeCrop, pickCrop, syncRail, turn, openRotate, cropOf };
