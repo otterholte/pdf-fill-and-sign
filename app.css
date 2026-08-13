@@ -683,3 +683,38 @@ select.fld{padding-right:0;}
 }
 .crophandle::after{content:"";width:16px;height:16px;border-radius:4px;background:#fff;border:3px solid var(--accent);}
 .danger-fill{background:var(--danger);color:#fff;}
+
+/* ------------------------------------------- five tools, the rest a swipe away
+   Nine buttons squeezed into a phone's width leaves each one too narrow to hit
+   and hides the fact that there are more. Five fit comfortably; Blackout,
+   Rotate, Crop and Clear live past the edge, with a fade at the right so it is
+   obvious the row keeps going. */
+@media (hover:none){
+  .tool{flex:0 0 20%;min-width:0;}
+  .toolbar{scroll-snap-type:x proximity;}
+  .tool{scroll-snap-align:start;}
+}
+.tool-more{
+  position:absolute;right:0;bottom:0;width:34px;
+  height:calc(var(--safe-b) + 62px);pointer-events:none;z-index:4;
+  background:linear-gradient(to right, transparent, var(--bg) 78%);
+}
+@media (hover:hover) and (pointer:fine){ .tool-more{display:none;} }
+.editor.kb .tool-more{display:none;}
+
+/* the prompt sits at the top: at the bottom it covered the very controls it
+   was telling you about */
+.placing{top:calc(var(--safe-t) + 60px);bottom:auto;}
+@media (hover:none){
+  .placing{top:calc(var(--safe-t) + 106px);bottom:auto;}
+  .editor.kb .placing{top:calc(var(--safe-t) + 106px);bottom:auto;}
+}
+
+/* nudge pad */
+.nudge{display:flex;align-items:center;gap:1px;flex:none;}
+.nud{
+  display:grid;place-items:center;width:34px;height:34px;border-radius:9px;color:var(--fg-2);
+  touch-action:none;
+}
+.nud svg{width:19px;height:19px;}
+.nud:active{background:var(--accent-soft);color:var(--accent);}

@@ -83,7 +83,10 @@ const MIN_STAMP_FS = 0.0085;
 const MAX_STAMP_FS = 0.055;
 const stampFsFor = w => clamp(DEF.stampFs * (w / DEF.sigW), MIN_STAMP_FS, MAX_STAMP_FS);
 /* tools that stay armed so you can tap several in a row */
-const STICKY = new Set(['check', 'x']);
+/* Nothing stays armed. A tool that keeps itself on turns the next scroll, the
+   next nudge of something you just placed, into another mark somewhere you
+   did not want one — and you only notice later. One tap, one mark. */
+const STICKY = new Set();
 /* distance from the top of a text line-box down to its baseline, in ems
    (line-height 1.25 on an Arial/Helvetica-metric face). Verified against
    the browser's own rendering — keeps the export pixel-aligned with the editor. */
@@ -2113,8 +2116,8 @@ $$('.tool').forEach(b => b.addEventListener('click', () => {
 const PROMPT = {
   text: 'Tap a blank line to type on it',
   date: 'Tap the page to add the date',
-  check: 'Tap to add checkmarks — tap Check again to stop',
-  x: 'Tap to add Xs — tap X again to stop',
+  check: 'Tap a box to tick it',
+  x: 'Tap a box to mark it',
   redact: 'Drag across whatever you want blacked out',
 };
 function reflectTool() {
@@ -2123,7 +2126,7 @@ function reflectTool() {
   $$('.page').forEach(p => p.classList.toggle('arm', !!S.tool || !!pendingSig));
   const on = !!S.tool || !!pendingSig;
   $('#placing').hidden = !on;
-  if (on) $('#placingText').textContent = pendingSig ? 'Tap the page to place your signature' : PROMPT[S.tool];
+  if (on) $('#placingText').textContent = pendingSig ? 'Tap where your signature goes' : PROMPT[S.tool];
 }
 $('#placingCancel').addEventListener('click', () => { S.tool = null; pendingSig = null; reflectTool(); });
 
@@ -2172,7 +2175,11 @@ pagesEl.addEventListener('pointerdown', e => {
   // a check or an X dropped on a tick box lands squarely inside it
   if (S.tool === 'check' || S.tool === 'x') {
     const B = findBox(p, x, y, 0.006);
-    if (B) { e.preventDefault(); clearBoxCursor(); cycleBox(pi, B, S.tool); return void markSpot(pi, boxKey(pi, B)); }
+    if (B) { e.preventDefault(); clearBoxCursor(); cycleBox(pi, B, S.tool); S.tool = null; reflectTool(); return void markSpot(pi, boxKey(pi, B)); }
+    /* Nowhere in particular: ask twice. Landing a mark on a box the scan
+       found is unambiguous, but a single tap on open paper is far more often
+       a scroll that did not travel, or a finger resting on the page. */
+    if (!twice) { e.preventDefault(); toast('Tap again to put it there.', 1800); return; }
   }
   if (S.tool || pendingSig) { e.preventDefault(); return place(pi, x, y); }
 
@@ -2506,6 +2513,16 @@ function startDrag(e, d) {
   const it = S.items.find(i => i.id === d.dataset.id);
   if (!it) return;
   const wasSel = S.sel === it.id;
+  /* A finger is blunt. Scrolling a page covered in things you have placed
+     dragged them about constantly, because the press that starts a scroll
+     lands on one of them. So on touch an object has to be selected before it
+     will move: the first tap chooses it, the second drags it. A mouse is
+     precise enough not to need the ceremony. */
+  if (e.pointerType === 'touch' && !wasSel) {
+    select(it.id);
+    if (it.lineKey) markSpot(it.page, it.lineKey);
+    return;
+  }
   const tnode = d.firstChild;
   const editing = isText(it) &&
     (tnode?.contentEditable === 'true' || tnode?.contentEditable === 'plaintext-only');
@@ -2718,6 +2735,47 @@ const bump = f => {
   if (it.type === 'sig') reseatStamp(it);
   relayoutItems(); saveSoon();
 };
+/* Nudge. A finger cannot place something to the pixel, and asking it to is
+   how you end up dragging the object right off the line you were aiming at.
+   Four arrows: a tap steps once, holding one scrubs — slowly at first, so a
+   short hold is still precise, then faster once you clearly mean to travel.
+   The step is a fraction of the page rather than a screen pixel, so it moves
+   the same amount however far you are zoomed in. */
+const NUDGE = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
+function nudge(dir, far) {
+  const it = getSel(); if (!it) return;
+  const [Wl, Hl] = itemFrame(it);
+  const step = (far ? 0.0045 : 0.0016);
+  const [dx, dy] = NUDGE[dir];
+  const partner = it.type === 'sig' ? stampOf(it) : (it.link ? S.items.find(i => i.id === it.link) : null);
+  const move = o => {
+    o.x = clamp(o.x + dx * step * (Hl / Wl), -0.06, 1.03);
+    o.y = clamp(o.y + dy * step, -0.03, 1.0);
+    const d = elOf(o.id); if (d) sizeItem(o, d);
+  };
+  move(it);
+  if (partner) move(partner);
+  saveSoon();
+}
+$('#nudge').addEventListener('pointerdown', e => {
+  const b = e.target.closest('.nud'); if (!b) return;
+  e.preventDefault();
+  const dir = b.dataset.d, pid = e.pointerId;
+  push();
+  nudge(dir, false);
+  let t0 = performance.now(), timer = null;
+  const tick = () => { nudge(dir, performance.now() - t0 > 900); };
+  const hold = setTimeout(() => { timer = setInterval(tick, 55); }, 340);
+  const off = ev => {
+    if (ev && ev.pointerId !== pid) return;
+    clearTimeout(hold); if (timer) clearInterval(timer);
+    window.removeEventListener('pointerup', off);
+    window.removeEventListener('pointercancel', off);
+  };
+  window.addEventListener('pointerup', off);
+  window.addEventListener('pointercancel', off);
+});
+
 $('#btnBigger').addEventListener('click', () => bump(1.15));
 $('#btnSmaller').addEventListener('click', () => bump(1 / 1.15));
 $('#btnDelete').addEventListener('click', () => { const it = getSel(); if (it) { push(); removeItem(it.id); } });
@@ -4279,7 +4337,15 @@ $('#btnContinue').addEventListener('click', () => {
      the document broke. */
   fitViewport();
   layoutPages();
+  /* Forget the pixels, not just the layout. The editor has been display:none
+     and a backgrounded canvas can lose its backing store while it is hidden,
+     so a redraw that trusts its own cache paints nothing and leaves your text
+     and ticks floating on a blank page. Throw the belief away and look again
+     once it has settled. */
+  S.pageBox.forEach(forget);
   renderVisible();
+  healing = 0;
+  setTimeout(healPages, 400);
 });
 $('#btnHome').addEventListener('click', () => { stopConfetti(); closeDoc(); });
 $('#btnNewDoc').addEventListener('click', () => {
