@@ -2400,9 +2400,17 @@ pagesEl.addEventListener('pointerdown', e => {
   }
   if (S.tool || pendingSig) { e.preventDefault(); return place(pi, x, y); }
 
-  // nothing armed: clicking straight into an empty tick box ticks it
+  /* Nothing armed: a tap straight into an empty tick box ticks it. On touch
+     it has to be a tap and not a scroll that happened to pass over the box,
+     so this waits for the finger to come back up — which also means the page
+     scrolls normally while it is down. */
   const B = findBox(p, x, y, 0.002);
-  if (B) { e.preventDefault(); clearBoxCursor(); cycleBox(pi, B, 'x'); return void markSpot(pi, boxKey(pi, B)); }
+  if (B) {
+    if (e.pointerType !== 'touch') e.preventDefault();
+    return onTap(e, () => {
+      clearBoxCursor(); cycleBox(pi, B, 'x'); markSpot(pi, boxKey(pi, B));
+    });
+  }
 
   // …and tapping a marked-up blank line starts typing on it
   const hint = findHint(p, x, y);
@@ -2731,6 +2739,57 @@ addEventListener('pointerup', lift, true);
 addEventListener('pointercancel', lift, true);
 const pinching = e => e.pointerType === 'touch' && touching.size > 1;
 
+/* --------------------------------------------------------- a real tap
+
+   On a page with thirty things written on it, most presses are not taps:
+   they are the start of a scroll, or the first finger of a pinch. Acting on
+   pointerdown meant every one of those landed on whatever happened to be
+   under the finger — picking up an entry you were only scrolling past,
+   dropping an X in a box you were scrolling over — and the only sign was
+   that the bar at the bottom had quietly changed to something else.
+
+   So on touch nothing happens until the finger comes back up in the same
+   place. Travel more than a few pixels, bring a second finger, or hold on
+   past the point where a tap is still a tap, and the press was navigation
+   and gets left alone. Crucially nothing is prevented while we wait, so the
+   page scrolls under the finger exactly as it does anywhere else.
+
+   A mouse needs none of this. A click is a click. */
+const TAP_SLOP = 8, TAP_MS = 700;
+function onTap(e, run) {
+  if (e.pointerType !== 'touch') return run();
+  if (pinching(e)) return;
+  const sx = e.clientX, sy = e.clientY, t0 = performance.now(), pid = e.pointerId;
+  let dead = false;
+  const off = () => {
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', off);
+    window.removeEventListener('pointerdown', second, true);
+    window.removeEventListener('pointermove', track);
+  };
+  /* A second finger any time during the gesture means a pinch, and asking
+     `touching.size` on the way up is too late to see it: the global bookkeeping
+     runs in the capture phase, so by the time this hears about the release the
+     finger that lifted has already been struck off. Watch the arrival instead. */
+  const second = ev => { if (ev.pointerId !== pid) dead = true; };
+  // travel is judged from every move, not only from where the finger ended up
+  const track = ev => {
+    if (ev.pointerId === pid && Math.hypot(ev.clientX - sx, ev.clientY - sy) > TAP_SLOP) dead = true;
+  };
+  const up = ev => {
+    if (ev.pointerId !== pid) return;
+    off();
+    if (dead) return;                                                    // pinch or scroll
+    if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > TAP_SLOP) return;
+    if (performance.now() - t0 > TAP_MS) return;                         // a long press
+    run();
+  };
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', off);
+  window.addEventListener('pointerdown', second, true);
+  window.addEventListener('pointermove', track);
+}
+
 /* drag — works on an empty box that is still being typed into: a real drag
    (more than a few pixels) takes over, a tap just moves the caret. */
 function startDrag(e, d) {
@@ -2742,10 +2801,18 @@ function startDrag(e, d) {
      dragged them about constantly, because the press that starts a scroll
      lands on one of them. So on touch an object has to be selected before it
      will move: the first tap chooses it, the second drags it. A mouse is
-     precise enough not to need the ceremony. */
+     precise enough not to need the ceremony.
+
+     And that first tap has to be an actual tap — see onTap. Choosing on
+     pointerdown meant the scroll that merely passed over something selected
+     it, which is how you end up looking at a bar full of controls for an
+     entry you never meant to touch. */
   if (e.pointerType === 'touch' && !wasSel) {
-    select(it.id);
-    if (it.lineKey) markSpot(it.page, it.lineKey);
+    onTap(e, () => {
+      if (!S.items.some(i => i.id === it.id)) return;      // deleted meanwhile
+      select(it.id);
+      if (it.lineKey) markSpot(it.page, it.lineKey);
+    });
     return;
   }
   const tnode = d.firstChild;
@@ -3046,21 +3113,34 @@ $('#btnDateFmt').addEventListener('click', () => {
    Holding an arrow repeats, and a burst of repeats is one undo step rather
    than forty — you meant to move it there once. Shift takes a bigger stride. */
 const ARROWS = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' };
-let arrowAt = 0;
+let arrowAt = 0, arrowT0 = 0;
 
 document.addEventListener('keydown', e => {
   if ($('#editor').hidden) return;
-  if (document.activeElement?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '')) return;
+  const typing = !!document.activeElement?.isContentEditable ||
+                 /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '');
 
   const dir = ARROWS[e.key];
-  if (dir && S.sel && !e.metaKey && !e.ctrlKey && !e.altKey && !KB.box) {
+  /* With the caret inside a text box the arrows belong to the caret, as they
+     must. Shift is not otherwise spoken for — there is no ranged selection in
+     these boxes worth extending — so Shift means "the arrows are for the
+     object, not the words": you can put a line of text exactly where you want
+     it without first clicking out of it and back into it.
+
+     A held key goes further per press after about a second, the same way the
+     pad on the phone does when you hold a corner down, and one held burst is
+     one undo step rather than forty. */
+  if (dir && S.sel && !e.metaKey && !e.ctrlKey && !e.altKey && !KB.box &&
+      (!typing || e.shiftKey)) {
     e.preventDefault();
     const now = performance.now();
-    if (now - arrowAt > 700) push();
+    if (now - arrowAt > 700) { push(); arrowT0 = now; }
     arrowAt = now;
-    nudge(dir, e.shiftKey);
+    nudge(dir, now - arrowT0 > 900);
     return;
   }
+
+  if (typing) return;
 
   if ((e.key === 'Backspace' || e.key === 'Delete') && S.sel) { e.preventDefault(); push(); removeItem(S.sel); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
@@ -3606,23 +3686,10 @@ function textOnLine(pi, L, key, focus = true) {
 /** A press on a blank might be the start of a scroll. Wait for the release
     and only treat it as a tap if the finger stayed put. */
 function armHintTap(e, pi, hint) {
-  if (pinching(e)) return;
-  const sx = e.clientX, sy = e.clientY, t0 = performance.now(), pid = e.pointerId;
-  const off = () => {
-    window.removeEventListener('pointerup', up);
-    window.removeEventListener('pointercancel', off);
-  };
-  const up = ev => {
-    if (ev.pointerId !== pid) return;
-    off();
-    if (touching.size > 1) return;                                   // a pinch
-    if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > 8) return;   // a scroll
-    if (performance.now() - t0 > 700) return;                        // a long press
+  onTap(e, () => {
     if (hint.kind === 'cell') textInCell(pi, hint.C, hint.key);
     else textOnLine(pi, hint.L, hint.key);
-  };
-  window.addEventListener('pointerup', up);
-  window.addEventListener('pointercancel', off);
+  });
 }
 
 /** Move the cursor onto a spot the user just acted on, so Next carries on

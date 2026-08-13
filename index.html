@@ -133,6 +133,46 @@
     </div>
   </div>
 
+  <!-- Two cards, one per kind of hand. Each shows only what is true of the
+       device it is for, and the colours differ so you can tell at a glance
+       which one is yours before you have read a word of it. -->
+  <section class="tips" aria-label="How to use it quickly">
+    <div class="tipcard tip-desk">
+      <h3>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="5" width="19" height="14" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M6.5 9h1M10 9h1M13.5 9h1M17 9h1M6.5 12.2h1M10 12.2h1M13.5 12.2h1M17 12.2h1M8.5 15.4h7" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        On a keyboard
+      </h3>
+      <dl>
+        <dt><kbd>Tab</kbd></dt><dd>Jump to the next blank, box or field</dd>
+        <dt><kbd>Enter</kbd></dt><dd>Tick the box you are on, or start typing on the blank</dd>
+        <dt><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></dt><dd>Nudge whatever is selected</dd>
+        <dt><kbd>Shift</kbd>+<kbd>↑</kbd><kbd>↓</kbd></dt><dd>Nudge it <em>while</em> you are still typing in it</dd>
+        <dt><kbd>Esc</kbd></dt><dd>Stop typing, keep what you wrote</dd>
+        <dt><kbd>Delete</kbd></dt><dd>Remove the selected thing</dd>
+        <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo &mdash; add <kbd>Shift</kbd> to redo</dd>
+        <dt>Double&#8209;click</dt><dd>A text box anywhere you like</dd>
+      </dl>
+      <p class="tipnote">Hover a blank and it brackets itself, so you can see exactly where it starts and stops before you commit to it.</p>
+    </div>
+
+    <div class="tipcard tip-touch">
+      <h3>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2.5" width="12" height="19" rx="2.8" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M10.6 5.2h2.8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="18.2" r="1.15" fill="currentColor"/></svg>
+        On a phone
+      </h3>
+      <dl>
+        <dt>Tap a blue line</dt><dd>Type on it, sized to match the words beside it</dd>
+        <dt>Tap a box</dt><dd>An X goes in. Tap again for a checkmark, again to clear it</dd>
+        <dt>Double&#8209;tap</dt><dd>A text box wherever you put your finger</dd>
+        <dt>Tap, then drag</dt><dd>One tap selects, the next moves it &mdash; scrolling past never grabs anything</dd>
+        <dt>Arrows in the bar</dt><dd>Tiny adjustments. Hold one down to go further</dd>
+        <dt>Pinch</dt><dd>Zoom in close. Two fingers never move your edits</dd>
+        <dt>Swipe the tools</dt><dd>Blackout, crop and clear are just past the right edge</dd>
+      </dl>
+      <p class="tipnote">Add it to your home screen and it opens straight to this page, with or without a signal.</p>
+    </div>
+  </section>
+
   <section class="seo">
     <h2>The free PDF tool that lets you finish your document and leave</h2>
     <p>Someone sent you a PDF. You need to fill in a few blank lines, sign it, and send it back. That is the whole job, and that is the whole app. There is no account to make, no trial to start, no watermark, and no payment screen waiting at the download button.</p>
@@ -269,11 +309,15 @@
   <!-- contextual bar for the selected object -->
   <div class="selbar" id="selbar" hidden>
     <div class="selbar-scroll">
+      <!-- Left, up, down, right. The two vertical arrows sit together in the
+           middle and are drawn heavier with a solid head, so which axis you
+           are about to move on is a matter of shape rather than of reading
+           an arrowhead at 19 pixels. -->
       <div class="nudge" id="nudge" role="group" aria-label="Nudge">
-        <button class="nud" data-d="up" aria-label="Move up"><svg viewBox="0 0 24 24"><path d="M12 19V6M6 11.5 12 5.5l6 6" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <button class="nud" data-d="left" aria-label="Move left"><svg viewBox="0 0 24 24"><path d="M19 12H6M11.5 6 5.5 12l6 6" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <button class="nud" data-d="down" aria-label="Move down"><svg viewBox="0 0 24 24"><path d="M12 5v13M6 12.5 12 18.5l6-6" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-        <button class="nud" data-d="right" aria-label="Move right"><svg viewBox="0 0 24 24"><path d="M5 12h13M12.5 6 18.5 12l-6 6" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="nud nud-x" data-d="left" aria-label="Move left"><svg viewBox="0 0 24 24"><path d="M19.5 12H7" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M11.4 6.6 5.6 12l5.8 5.4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+        <button class="nud nud-y" data-d="up" aria-label="Move up"><svg viewBox="0 0 24 24"><path d="M12 20.5v-9" fill="none" stroke="currentColor" stroke-width="3.1" stroke-linecap="round"/><path d="M12 3.4 19 12.4H5z" fill="currentColor"/></svg></button>
+        <button class="nud nud-y" data-d="down" aria-label="Move down"><svg viewBox="0 0 24 24"><path d="M12 3.5v9" fill="none" stroke="currentColor" stroke-width="3.1" stroke-linecap="round"/><path d="M12 20.6 5 11.6h14z" fill="currentColor"/></svg></button>
+        <button class="nud nud-x" data-d="right" aria-label="Move right"><svg viewBox="0 0 24 24"><path d="M4.5 12H17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/><path d="M12.6 6.6 18.4 12l-5.8 5.4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </div>
       <div class="sep"></div>
       <div class="swatches" id="swatches">
