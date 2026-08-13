@@ -470,6 +470,7 @@ async function loadDoc(buf, name, items, rots, fields, crops) {
 
   armBack();
   await buildPages(rots);
+  parkTools();
   (crops || []).forEach((c, i) => { if (S.pageBox[i]) S.pageBox[i].crop = c || null; });
   if (crops?.some(Boolean)) layoutPages();
   syncBars();
@@ -2375,26 +2376,62 @@ $$('.tool').forEach(b => b.addEventListener('click', () => {
    moves on its own: the point is to be readable in the moment you glance at
    it, not to catch the eye later. */
 const toolbarEl = $('#toolbar');
+let parked = false, parking = false;
 function syncRail() {
-  const rail = $('#toolRail'), thumb = $('#toolThumb'), next = $('#toolNext');
+  const rail = $('#toolRail'), thumb = $('#toolThumb');
+  const next = $('#toolNext'), prev = $('#toolPrev');
   if (!rail) return;
   const room = toolbarEl.scrollWidth - toolbarEl.clientWidth;
-  if (room < 8) { rail.hidden = true; next.hidden = true; return; }
-  rail.hidden = false; next.hidden = false;
+  /* Nothing to park or measure until the row has actually been laid out with
+     a width — which is not true while the editor is still hidden behind the
+     chooser, so this is the honest place to do it rather than a timer. */
+  if (room < 8) { rail.hidden = next.hidden = prev.hidden = true; return; }
+  rail.hidden = next.hidden = prev.hidden = false;
+  if (!parked && !parking) {
+    /* Next frame, and measured rather than derived. The chips have only just
+       stopped being hidden, so the row is about to lose their width — parking
+       against the width it has this instant lands a tool-and-a-bit too far
+       along. And offsetLeft answers a question about the layout tree, when
+       what is wanted is where the button is on the screen.
+
+       It counts as parked only once it has actually moved something: this
+       runs while the page chooser is still up, and a row that is laid out but
+       not on screen measures zero and would be quietly given up on. */
+    parking = true;
+    requestAnimationFrame(() => {
+      parking = false;
+      const first = toolbarEl.querySelector('.tool:not(.tool-alt)');
+      const r = toolbarEl.getBoundingClientRect();
+      if (!first || !r.width) return;
+      parked = true;
+      toolbarEl.scrollLeft += first.getBoundingClientRect().left - r.left;
+      syncRail();
+    });
+  }
   const seen = toolbarEl.clientWidth / toolbarEl.scrollWidth;
   const at = toolbarEl.scrollLeft / room;
   thumb.style.width = (seen * 100) + '%';
   thumb.style.left = (at * (1 - seen) * 100) + '%';
-  // nothing more to the right: offer the way back rather than a dead arrow
-  next.classList.toggle('back', at > 0.98);
+  // an arrow with nothing that way still says which way the row runs
+  prev.classList.toggle('spent', at < 0.02);
+  next.classList.toggle('spent', at > 0.98);
 }
 toolbarEl.addEventListener('scroll', syncRail, { passive: true });
 addEventListener('resize', syncRail);
-$('#toolNext').addEventListener('click', () => {
-  const room = toolbarEl.scrollWidth - toolbarEl.clientWidth;
-  const back = toolbarEl.scrollLeft / room > 0.98;
-  toolbarEl.scrollBy({ left: back ? -toolbarEl.clientWidth : toolbarEl.clientWidth, behavior: 'smooth' });
-});
+
+/* A press on either chip goes most of the way across rather than exactly one
+   screenful: landing dead on a boundary leaves half a button showing at each
+   edge and no sense of having arrived anywhere. */
+const slide = dir => toolbarEl.scrollBy({ left: dir * toolbarEl.clientWidth * 0.86, behavior: 'smooth' });
+$('#toolNext').addEventListener('click', () => slide(1));
+$('#toolPrev').addEventListener('click', () => slide(-1));
+
+/* Simple view sits at the near end of the row, parked just off the left edge:
+   the five you reach for are what you see, and one swipe right — or the green
+   chip — brings it in. Armed here, done by syncRail the first time the row is
+   wide enough to scroll, so it happens once per document and never yanks the
+   row back out from under a swipe. */
+function parkTools() { parked = false; syncRail(); }
 const PROMPT = {
   text: 'Tap a blank line to type on it',
   date: 'Tap the page to add the date',
@@ -4110,9 +4147,17 @@ function currentPage() {
    right, and press the other way if you overshoot. The bar sits over the
    tools rather than in a sheet, so the page stays in view while you turn it. */
 function openRotate() {
+  select(null);
+  closeCrop();
   $('#rotbar').dataset.page = currentPage();
   $('#rotbar').hidden = false;
+  $('#editor').classList.add('busytool');
   labelRot();
+  revealPage(+$('#rotbar').dataset.page);
+}
+function closeRotate() {
+  $('#rotbar').hidden = true;
+  $('#editor').classList.remove('busytool');
 }
 function labelRot() {
   const i = +$('#rotbar').dataset.page;
@@ -4134,7 +4179,7 @@ function turn(by) {
 }
 $('#rotCCW').addEventListener('click', () => turn(-90));
 $('#rotCW').addEventListener('click', () => turn(90));
-$('#rotDone').addEventListener('click', () => { $('#rotbar').hidden = true; });
+$('#rotDone').addEventListener('click', closeRotate);
 
 /* ============================================================== SIGNATURE */
 const sigSheet = $('#sigSheet');
@@ -4633,7 +4678,7 @@ addEventListener('popstate', () => {
   const sheet = $$('.sheet-wrap').find(x => !x.hidden);
   if (sheet) { sheet.hidden = true; return armBack(); }
   if (!$('#cropbar').hidden) { closeCrop(); return armBack(); }
-  if (!$('#rotbar').hidden) { $('#rotbar').hidden = true; return armBack(); }
+  if (!$('#rotbar').hidden) { closeRotate(); return armBack(); }
   if (!$('#pick').hidden) { $('#pick').hidden = true; closeDoc(); return armBack(); }
   if (!$('#simple').hidden) { showPage(); return armBack(); }
   if (!$('#done').hidden) {
@@ -4773,7 +4818,7 @@ $('#cropNudge').addEventListener('pointerdown', e => {
 function openCrop() {
   if (!S.pdf) return;
   select(null);
-  $('#rotbar').hidden = true;
+  closeRotate();
   cropPi = frontPage();
   const p = S.pageBox[cropPi];
   p.draft = { ...cropOf(p) };

@@ -243,7 +243,7 @@ a:hover{text-decoration:underline;}
 .stage{order:2;}
 .jumpbar{order:3;}
 .selbar{order:4;}
-.toolbar{order:5;}
+.toolwrap{order:5;}
 @media (hover:hover) and (pointer:fine){
   .jumpbar{order:1;border-top:0;border-bottom:1px solid var(--line);}
 }
@@ -476,10 +476,17 @@ select.fld{padding-right:0;}
 .penwrap input{width:104px;accent-color:var(--accent);}
 .slider.thick{margin-top:14px;}
 
-.toolbar{
-  flex:none;display:flex;align-items:stretch;
+/* The wrapper is the bar; the row inside it is the only part that scrolls,
+   so the chips at either end keep their space instead of riding over a label
+   the moment you swipe. */
+.toolwrap{
+  position:relative;flex:none;display:flex;align-items:stretch;
   background:var(--bg);border-top:1px solid var(--line);
-  padding:6px 4px calc(var(--safe-b) + 6px);
+  padding:6px 2px calc(var(--safe-b) + 9px);
+}
+.toolwrap[hidden]{display:none;}
+.toolbar{
+  flex:1 1 auto;min-width:0;display:flex;align-items:stretch;
   overflow-x:auto;scrollbar-width:none;
 }
 .toolbar::-webkit-scrollbar{display:none;}
@@ -492,7 +499,8 @@ select.fld{padding-right:0;}
 .tool.is-on{color:var(--accent);background:var(--accent-soft);}
 .tool:active{background:var(--bg-3);}
 @media(min-width:640px){
-  .toolbar{justify-content:center;gap:4px;padding-bottom:10px;}
+  .toolwrap{padding-bottom:13px;}
+  .toolbar{justify-content:center;gap:4px;}
   .tool{flex:0 0 auto;min-width:82px;}
   .tool span{font-size:11.5px;}
   .selbar-scroll{max-width:680px;margin:0 auto;}
@@ -738,7 +746,9 @@ select.fld{padding-right:0;}
 
 /* ---------------------------------------------------- scan a paper form */
 .btn-ghost.big{padding:14px 22px;font-size:16px;}
-#btnScan{margin-top:10px;display:inline-flex;align-items:center;justify-content:center;gap:9px;}
+#btnScan{margin-top:10px;display:inline-flex;align-items:center;justify-content:center;gap:11px;text-align:left;}
+.btn-lines{display:flex;flex-direction:column;gap:2px;line-height:1.25;}
+.btn-lines small{font-size:11.5px;font-weight:500;color:var(--fg-3);letter-spacing:0;}
 .btn-ico{width:19px;height:19px;flex:none;}
 .sheet-note{margin:0 0 16px;font-size:14px;line-height:1.5;color:var(--fg-2);}
 .sheet-tip{margin:12px 0 0;font-size:12.5px;line-height:1.45;color:var(--fg-3);}
@@ -806,19 +816,17 @@ select.fld{padding-right:0;}
 .crophandle.picked::after{background:var(--accent);border-color:#fff;box-shadow:0 0 0 2px var(--accent);}
 .danger-fill{background:var(--danger);color:#fff;}
 
-/* Cropping is one job. Everything that is not the page, the corners and the
-   two decisions goes away for the duration — a bar full of tools you cannot
-   use while dragging a corner is just something else covering the page. */
-.editor.cropping .jumpbar,
-.editor.cropping .toolbar,
-.editor.cropping .selbar,
-.editor.cropping .kbhint,
-.editor.cropping .tool-more,
-.editor.cropping .toolrail,
-.editor.cropping .toolnext,
+/* Cropping and rotating are each one job. Three stacked bars at the bottom of
+   a phone while you are using exactly one of them is most of the page gone to
+   controls you are not touching — so for the duration there is the page, and
+   the bar for the thing you came to do, and nothing else. */
+.editor.cropping .jumpbar, .editor.busytool .jumpbar,
+.editor.cropping .toolwrap, .editor.busytool .toolwrap,
+.editor.cropping .selbar,  .editor.busytool .selbar,
+.editor.cropping .kbhint,  .editor.busytool .kbhint,
 .editor.cropping .linehint,
 .editor.cropping .page-num{display:none;}
-.editor.cropping .stage{padding-top:8px;}
+.editor.cropping .stage,.editor.busytool .stage{padding-top:8px;}
 
 /* rotate: two icons, pressed as many times as it takes */
 .rotbar{gap:6px;}
@@ -838,20 +846,14 @@ select.fld{padding-right:0;}
    obvious the row keeps going. */
 @media (hover:none){
   .tool{flex:0 0 20%;min-width:0;}
-  .toolbar{scroll-snap-type:x proximity;}
-  .tool{scroll-snap-align:start;}
+  /* No scroll snapping. Proximity snapping fought every short swipe — the row
+     crept back to where it started and reaching Crop took three goes. A flick
+     should travel as far as it was thrown. */
+  .toolbar{overscroll-behavior-x:contain;}
 }
-.tool-more{
-  position:absolute;right:0;bottom:0;width:34px;
-  height:calc(var(--safe-b) + 62px);pointer-events:none;z-index:4;
-  background:linear-gradient(to right, transparent, var(--bg) 78%);
-}
-@media (hover:hover) and (pointer:fine){ .tool-more{display:none;} }
-.editor.kb .tool-more{display:none;}
-
 /* Simple view is a different kind of thing from the tools beside it — a way
    of looking at the document rather than something you add to it — so it gets
-   a divider, its own colour, and the far end of the row to itself. */
+   a divider, its own colour, and an end of the row to itself. */
 .tool-div{flex:0 0 1px;align-self:center;height:30px;background:var(--line);margin:0 7px;}
 .tool-alt{color:var(--tools);}
 .tool-alt.is-on,.tool-alt:active{color:var(--tools);background:var(--tools-soft);}
@@ -872,18 +874,17 @@ select.fld{padding-right:0;}
   transition:left .12s linear, width .12s linear;
 }
 .toolnext{
-  position:absolute;right:2px;z-index:6;
-  bottom:calc(var(--safe-b) + 16px);
-  width:24px;height:34px;display:grid;place-items:center;border-radius:8px;
+  flex:0 0 26px;align-self:center;z-index:6;
+  height:40px;display:grid;place-items:center;border-radius:9px;
   color:var(--accent);background:var(--accent-soft);
 }
 .toolnext[hidden]{display:none;}
 .toolnext svg{width:15px;height:15px;}
-/* at the far right there is nothing more that way: point back instead */
-.toolnext.back svg{transform:rotate(180deg);}
+/* the left-hand chip leads to Simple view, so it wears Simple view's colour */
+.toolprev{color:var(--tools);background:var(--tools-soft);}
+/* nothing further that way: dim it rather than leaving a live-looking arrow */
+.toolnext.spent{opacity:.3;}
 .editor.kb .toolrail,.editor.kb .toolnext{display:none;}
-/* the row needs a lane for the chip, or the last tool sits under it */
-@media (hover:none){ .toolbar{padding-right:30px;} }
 
 /* the prompt sits at the top: at the bottom it covered the very controls it
    was telling you about */
