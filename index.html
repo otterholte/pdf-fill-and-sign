@@ -138,16 +138,13 @@
 
     <p class="whylink"><button id="btnWhy" class="linkish">Why is this free?</button></p>
 
-    <div class="resume" id="resume" hidden>
-      <div class="resume-text">
-        <strong id="resumeName">Document.pdf</strong>
-        <span id="resumeWhen">Continue your last document?</span>
-      </div>
-      <button class="btn-ghost sm" id="btnResume">Continue</button>
-      <button class="btn-icon-sm" id="btnDiscard" aria-label="Delete saved draft">
-        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-      </button>
-    </div>
+    <!-- Everything opened on this device, kept on this device. Five at a
+         time; the rest behind one press. -->
+    <section class="recents" id="recents" hidden aria-label="Your documents">
+      <h2 class="recents-h">Your documents</h2>
+      <ul class="recents-list" id="recentsList"></ul>
+      <button class="linkish center" id="recentsMore" hidden>Show more</button>
+    </section>
   </div>
 
   <!-- Two cards, one per kind of hand. Each shows only what is true of the
@@ -214,47 +211,6 @@
 </main>
 
 <!-- ============ CHOOSE A VIEW ============ -->
-<div id="pick" class="pick" hidden>
-  <div class="pick-inner">
-    <p class="pick-file"><strong id="pickName">Document.pdf</strong><span id="pickMeta"></span></p>
-    <h2 class="pick-q">How do you want to fill this in?</h2>
-
-    <div class="pick-grid">
-      <button class="pick-card" id="pickSimple">
-        <span class="pick-art" aria-hidden="true">
-          <svg viewBox="0 0 88 64">
-            <rect x="8" y="8" width="34" height="5" rx="2.5" class="pa-dim"/>
-            <rect x="8" y="17" width="72" height="13" rx="4" class="pa-box"/>
-            <rect x="8" y="36" width="26" height="5" rx="2.5" class="pa-dim"/>
-            <rect x="8" y="45" width="72" height="13" rx="4" class="pa-box"/>
-          </svg>
-        </span>
-        <strong>Simple view</strong>
-        <span class="pick-sub" id="pickSimpleSub">One question at a time, filling the screen</span>
-      </button>
-
-      <button class="pick-card" id="pickPage">
-        <span class="pick-art" aria-hidden="true">
-          <svg viewBox="0 0 88 64">
-            <rect x="25" y="4" width="38" height="56" rx="3" class="pa-page"/>
-            <rect x="30" y="12" width="16" height="3" rx="1.5" class="pa-dim"/>
-            <rect x="30" y="19" width="28" height="2" rx="1" class="pa-rule"/>
-            <rect x="30" y="27" width="13" height="3" rx="1.5" class="pa-dim"/>
-            <rect x="30" y="34" width="28" height="2" rx="1" class="pa-rule"/>
-            <rect x="30" y="42" width="20" height="3" rx="1.5" class="pa-dim"/>
-            <rect x="30" y="49" width="28" height="2" rx="1" class="pa-rule"/>
-          </svg>
-        </span>
-        <strong>Page view</strong>
-        <span class="pick-sub">The document exactly as it looks</span>
-      </button>
-    </div>
-
-    <p class="pick-note" id="pickNote"></p>
-    <button class="linkish center" id="pickCancel">Open a different file</button>
-  </div>
-</div>
-
 <!-- ============ SIMPLE VIEW ============ -->
 <div id="simple" class="simple" hidden>
   <header class="topbar">
@@ -438,6 +394,12 @@
   <div class="cropbar" id="cropbar" hidden>
     <div class="crop-row">
       <span class="crop-hint" id="cropHint">Drag an edge or a corner</span>
+      <button class="btn-icon crop-rot" id="cropCCW" aria-label="Turn left">
+        <svg viewBox="0 0 24 24"><path d="M4 11.5a8 8 0 1 0 2.4-5.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M3.5 3.5v4.2h4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="btn-icon crop-rot" id="cropCW" aria-label="Turn right">
+        <svg viewBox="0 0 24 24"><path d="M20 11.5a8 8 0 1 1-2.4-5.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M20.5 3.5v4.2h-4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
       <div class="nudge crop-nudge" id="cropNudge" role="group" aria-label="Move the crop edge">
         <button class="nud nud-x" data-d="left" aria-label="Move left"><svg viewBox="0 0 24 24"><path d="M19.5 12H7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M11.4 6.6 5.6 12l5.8 5.4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         <button class="nud nud-y" data-d="up" aria-label="Move up"><svg viewBox="0 0 24 24"><path d="M12 20.5v-9" fill="none" stroke="currentColor" stroke-width="3.1" stroke-linecap="round"/><path d="M12 3.4 19 12.4H5z" fill="currentColor"/></svg></button>

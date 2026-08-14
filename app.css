@@ -1177,3 +1177,31 @@ select.fld{padding-right:0;}
   border-left:4.5px solid transparent;border-right:4.5px solid transparent;
   border-top:5.5px solid var(--fg-3);
 }
+
+/* ---------- your documents ----------
+   Every document this device has opened, newest first. A row is one press to
+   pick the work back up and one small ✕ (behind the are-you-sure sheet) to
+   let it go. */
+.recents{width:100%;max-width:430px;margin-top:34px;text-align:left;}
+.recents[hidden]{display:none;}
+.recents-h{margin:0 0 8px;font-size:13px;font-weight:700;letter-spacing:.02em;
+  text-transform:uppercase;color:var(--fg-3);}
+.recents-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;}
+.recent{display:flex;align-items:center;gap:6px;}
+.recent-open{
+  flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;gap:1px;
+  text-align:left;padding:10px 13px;border-radius:13px;
+  background:var(--bg-2);border:1px solid var(--line);
+}
+.recent-open:hover{background:var(--bg-3);}
+.recent-open strong{
+  font-size:14px;font-weight:650;letter-spacing:-.01em;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.recent-open span{font-size:12px;color:var(--fg-3);}
+.recent-del{flex:none;color:var(--fg-3);}
+#recentsMore{margin-top:10px;}
+
+/* the two turns inside the crop bar: quieter than the arrows beside them */
+.crop-rot{width:34px;height:34px;color:var(--accent);opacity:.85;}
+.crop-rot svg{width:19px;height:19px;}

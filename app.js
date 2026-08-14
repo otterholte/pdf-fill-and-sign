@@ -216,20 +216,45 @@ function redo() { if (!S.future.length) return; S.past.push(snap()); restore(S.f
 $('#btnUndo').addEventListener('click', undo);
 $('#btnRedo').addEventListener('click', redo);
 
-/* ------------------------------------------------------------- autosave */
+/* ------------------------------------------------- every document, kept
+   Everything opened on this device stays on this device — the source bytes
+   and whatever was typed onto them — until its owner deletes it. A document
+   is keyed by the hash of its own bytes, so opening the same file again next
+   month finds last month's work waiting in it. The index is small and read
+   often; the payloads are heavy and read one at a time.
+
+   Thirty documents is the ceiling. At a few megabytes each that is well
+   under what IndexedDB minds, and past it the oldest quietly makes room —
+   a cap is a promise about the future, and a promise kept by asking first
+   would be asking every day. */
+const MAX_DOCS = 30;
+async function docId(buf) {
+  try {
+    const h = await crypto.subtle.digest('SHA-256', buf.slice(0));
+    return [...new Uint8Array(h).slice(0, 12)].map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch (_) { return 'r' + Math.random().toString(36).slice(2, 14); }
+}
+const dixGet = async () => (await DB.get('dix')) || [];
+async function dixPut(list) { await DB.set('dix', list); }
+
 let saveT;
 function saveSoon() {
   clearTimeout(saveT);
   saveT = setTimeout(async () => {
-    if (!S.bytes) return;
+    if (!S.bytes || !S.docId) return;
     try {
-      await DB.set('doc', {
+      await DB.set('d:' + S.docId, {
         name: S.name, bytes: S.bytes,
         items: S.items.filter(i => !isText(i) || i.date || i.text.trim()),
         fields: S.fields,
         rots: S.pageBox.map(p => p.userRot),
         crops: S.pageBox.map(p => p.crop || null), ts: Date.now(),
       });
+      const dix = (await dixGet()).filter(d => d.id !== S.docId);
+      dix.unshift({ id: S.docId, name: S.name, ts: Date.now(),
+                    pages: S.pdf?.numPages || 1, kb: Math.round(S.bytes.byteLength / 1024) });
+      for (const old of dix.slice(MAX_DOCS)) { try { await DB.del('d:' + old.id); } catch (_) {} }
+      await dixPut(dix.slice(0, MAX_DOCS));
     } catch (_) {}
   }, 700);
 }
@@ -431,11 +456,53 @@ async function drawShots() {
   $('#scanPrev').hidden = false;
 }
 
+/* ---------------------------------------------------------------- deskew
+   A photographed page is always a few degrees off square, and every one of
+   those degrees is paid for later: the crop keeps desk in the corners or
+   trims paper to avoid it, and text runs uphill. The same eye that finds the
+   page for smart crop can read the angle it is lying at — its two long
+   margins fitted with straight lines — so straighten the photograph before
+   it ever becomes a PDF. Small angles only, and only when both margins agree:
+   a confident wrong turn is worse than a tolerated slant. */
+function tiltOfCanvas(cv) {
+  try {
+    const W2 = 440, k = W2 / cv.width, H2 = Math.max(40, Math.round(cv.height * k));
+    const c = document.createElement('canvas');
+    c.width = W2; c.height = H2;
+    const x2 = c.getContext('2d', { alpha: false, willReadFrequently: true });
+    x2.fillStyle = '#fff'; x2.fillRect(0, 0, W2, H2);
+    x2.drawImage(cv, 0, 0, W2, H2);
+    const d = x2.getImageData(0, 0, W2, H2).data;
+    const lum = new Uint8Array(W2 * H2);
+    for (let i = 0, m = 0; m < lum.length; m++, i += 4) {
+      lum[m] = (d[i] * 77 + d[i + 1] * 151 + d[i + 2] * 28) >> 8;
+    }
+    const r = paperAnalyse(lum, W2, H2);
+    return (r && !r.full) ? (r.tilt || 0) : 0;
+  } catch (_) { return 0; }
+}
+function unskew(cv, ref) {
+  /* The angle is read from the photograph, not from the chosen look: the
+     scan look whitens the desk away, and with no desk there is no edge to
+     read an angle from — but the page is still lying at one. */
+  const t = tiltOfCanvas(ref || cv);
+  if (!t) return cv;
+  const out = document.createElement('canvas');
+  out.width = cv.width; out.height = cv.height;
+  const cx = out.getContext('2d');
+  cx.fillStyle = '#fff'; cx.fillRect(0, 0, out.width, out.height);
+  cx.translate(out.width / 2, out.height / 2);
+  cx.rotate(t * Math.PI / 180);
+  cx.drawImage(cv, -cv.width / 2, -cv.height / 2);
+  return out;
+}
+
 /** one page per photo, at the size the paper really is */
 async function shotsToPdf() {
   const doc = await PDFDocument.create();
   for (const s of SCAN.shots) {
-    const cv = s.cv || scanCanvas(s.bm, SCAN.look);
+    const base = s.cv || scanCanvas(s.bm, SCAN.look);
+    const cv = unskew(base, SCAN.look === 'photo' ? base : scanCanvas(s.bm, 'photo'));
     const blob = await toBlob(cv, 0.82);
     const img = await doc.embedJpg(await blob.arrayBuffer());
     /* Keep the photo's own shape — nothing is stretched to fit a paper size
@@ -474,7 +541,12 @@ $('#btnScanGo').addEventListener('click', async () => {
     SCAN.shots = [];
     closeLink();          // the phone's address dies with the hand-off
     await loadDoc(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), name, [], null);
-    askView(name);
+    /* A photograph goes straight to the crop screen: the page has already
+       been straightened, smart crop offers the paper, and the same bar can
+       turn it — one screen between the camera and the filling-in. */
+    showPage();
+    openCrop();
+    runSmartCrop();
   } catch (err) {
     console.error(err);
     toast('That photo could not be turned into a PDF.', 5000);
@@ -679,7 +751,7 @@ async function openFile(file) {
   try {
     const buf = await file.arrayBuffer();
     await loadDoc(buf, file.name || 'Document.pdf', [], null);
-    askView(file.name || 'Document.pdf');
+    showPage();
   } catch (err) {
     console.error(err);
     const locked = err?.name === 'PasswordException' || /password/i.test(err?.message || '');
@@ -692,6 +764,19 @@ async function openFile(file) {
 async function loadDoc(buf, name, items, rots, fields, crops) {
   S.bytes = buf.slice(0);
   S.name = name;
+  S.docId = await docId(S.bytes);
+  /* Opening a file this device has seen before finds the work already on it —
+     unless this call is itself carrying state (a restore, or a fresh scan). */
+  if (!items?.length && !fields) {
+    try {
+      const prev = await DB.get('d:' + S.docId);
+      if (prev) {
+        items = prev.items; rots = rots ?? prev.rots;
+        fields = prev.fields; crops = crops ?? prev.crops;
+        if (prev.name) name = S.name = prev.name;
+      }
+    } catch (_) {}
+  }
   S.items = items || [];
   S.sel = null; S.tool = null; S.past = []; S.future = []; S.zoom = 1;
   snugged = false; centreWanted = false;
@@ -706,7 +791,6 @@ async function loadDoc(buf, name, items, rots, fields, crops) {
   $('#docPages').textContent = `${S.pdf.numPages} page${S.pdf.numPages > 1 ? 's' : ''} · stays on this device`;
   $('#home').hidden = true;
   $('#done').hidden = true;
-  $('#pick').hidden = true;
   $('#simple').hidden = true;
   $('#editor').hidden = false;
   SIM = { qs: [], scanned: false, built: false };
@@ -739,7 +823,6 @@ function closeDoc() {
   SIM = { qs: [], scanned: false, built: false };
   simSignTarget = null;
   $('#simple').hidden = true;
-  $('#pick').hidden = true;
   clearTimeout(hintsT);
   clearBoxCursor();
   KB.pi = 0; KB.key = null; KB.cur = null; KB.at = 0; KB.of = 0;
@@ -2983,10 +3066,14 @@ pagesEl.addEventListener('pointerdown', e => {
 
   if (S.tool === 'redact') { e.preventDefault(); return startRubber(e, pi, x, y); }
 
-  // a check or an X dropped on a tick box lands squarely inside it
+  // a check or an X dropped on a tick box lands squarely inside it — and a
+  // tap into a table cell or answer box the scan found is the same wish:
+  // put the mark in *this* rectangle, at a sensible size, not on top of it
   if (S.tool === 'check' || S.tool === 'x') {
     const B = findBox(p, x, y, 0.006);
     if (B) { e.preventDefault(); clearBoxCursor(); cycleBox(pi, B, S.tool); S.tool = null; reflectTool(); return void markSpot(pi, boxKey(pi, B)); }
+    const C = pageCells(p).find(c => x > c.x0 && x < c.x1 && y > c.y0 && y < c.y1);
+    if (C) { e.preventDefault(); clearBoxCursor(); cycleBox(pi, C, S.tool); S.tool = null; reflectTool(); return; }
     /* Nowhere in particular: ask twice. Landing a mark on a box the scan
        found is unambiguous, but a single tap on open paper is far more often
        a scroll that did not travel, or a finger resting on the page. */
@@ -3196,7 +3283,9 @@ function place(pi, x, y) {
     it = { id, page: pi, rot, type: 'redact', x: clamp(x - DEF.redW / 2, 0, 1 - DEF.redW),
            y: clamp(y - DEF.redH / 2, 0, 1 - DEF.redH), w: DEF.redW, h: DEF.redH };
   } else {
-    const s = DEF.mark;
+    /* the same ceiling a box-drop respects: a loose tick is a hand-drawn
+       tick, not a poster */
+    const s = Math.min(DEF.mark, (22 * PX) / pageHpt(p));
     it = { id, page: pi, rot, type: tool, x: clamp(x - (s * Hl / Wl) / 2, 0, 1),
            y: clamp(y - s / 2, 0, 1 - s), size: s, color: COLORS[0] };
   }
@@ -5367,7 +5456,6 @@ addEventListener('popstate', () => {
   if (sheet) { sheet.hidden = true; return armBack(); }
   if (!$('#cropbar').hidden) { closeCrop(); return armBack(); }
   if (!$('#rotbar').hidden) { closeRotate(); return armBack(); }
-  if (!$('#pick').hidden) { $('#pick').hidden = true; closeDoc(); return armBack(); }
   if (!$('#simple').hidden) { showPage(); return armBack(); }
   if (!$('#done').hidden) {
     stopConfetti(); $('#done').hidden = true; $('#editor').hidden = false;
@@ -5650,7 +5738,18 @@ async function paperEdges(p) {
   for (let i = 0, m = 0; m < lum.length; m++, i += 4) {
     lum[m] = (d[i] * 77 + d[i + 1] * 151 + d[i + 2] * 28) >> 8;
   }
+  const r = paperAnalyse(lum, W, H);
+  return r && (r.full ? { x0: 0, y0: 0, x1: 1, y1: 1 } : r.rect);
+}
 
+/* The shared eye: everything smart crop and the deskew know about telling a
+   page from what it is lying on, over one luminance plane. Returns null when
+   no page can be made out, {full:true} when the page IS the whole frame, and
+   otherwise the tight crop rectangle plus the tilt of the page in degrees —
+   the tilt read by fitting straight lines to the patch's left and right
+   margins, which on a photographed page are long, clean, and honest about
+   the angle in a way no corner ever is. */
+function paperAnalyse(lum, W, H) {
   /* Grade the page in 4px cells: how bright, and how busy. `edge` is a pixel
      noticeably different from its right or lower neighbour — grain, weave,
      speckle, or ink. Paper margins have almost none; a desk has them all over. */
@@ -5754,7 +5853,7 @@ async function paperEdges(p) {
         if (redo && redo.n >= GW * GH * 0.12) best = redo;
       }
     }
-    if (best.borders === 4) return { x0: 0, y0: 0, x1: 1, y1: 1 };   // truly nothing to trim
+    if (best.borders === 4) return { full: true };   // truly nothing to trim
   }
 
   /* A solid band of ink across the page — a section header, a heavy rule —
@@ -5804,10 +5903,12 @@ async function paperEdges(p) {
   const medRow = med([...rowCnt]);
   if (!medRow) return null;
   const lefts = [], rights = [];
+  const edgeYs = [], edgeL = [], edgeR = [];
   let ry0 = -1, ry1 = -1;
   for (let y = 0; y < GH; y++) {
     if (rowCnt[y] < medRow * 0.6) continue;
     lefts.push(left[y]); rights.push(right[y]);
+    edgeYs.push(y); edgeL.push(left[y]); edgeR.push(right[y]);
     /* The x-extremes may come from any row that plausibly crosses the page,
        but the top and bottom must come from rows holding nearly a full row of
        paper: on a tilted page a 60%-row sits well past the corner, out where
@@ -5863,9 +5964,32 @@ async function paperEdges(p) {
   const c = { x0: clamp((PX0 + 1) / W, 0, 1), x1: clamp(PX1 / W, 0, 1),
               y0: clamp((PY0 + 1) / H, 0, 1), y1: clamp(PY1 / H, 0, 1) };
   if (c.x1 - c.x0 < 0.2 || c.y1 - c.y0 < 0.2) return null;     // that is not a page
-  return c;
+
+  /* The tilt. Both long margins vote, the middle 80% of rows only — corners
+     lie — and the votes must agree within a degree, because two edges of one
+     sheet cannot honestly disagree about how it is lying. */
+  const fit = (ys, xs) => {
+    const n = ys.length;
+    if (n < 12) return null;
+    let sy = 0, sx = 0, syy = 0, sxy = 0;
+    for (let i = 0; i < n; i++) { sy += ys[i]; sx += xs[i]; syy += ys[i] * ys[i]; sxy += ys[i] * xs[i]; }
+    const den = n * syy - sy * sy;
+    if (!den) return null;
+    return (n * sxy - sy * sx) / den;            // cells of x per cell of y
+  };
+  const lo2 = Math.floor(edgeYs.length * 0.1), hi2 = Math.ceil(edgeYs.length * 0.9);
+  const ys2 = edgeYs.slice(lo2, hi2);
+  const aL = fit(ys2, edgeL.slice(lo2, hi2));
+  const aR = fit(ys2, edgeR.slice(lo2, hi2));
+  let tilt = 0;
+  if (aL != null && aR != null) {
+    const dL = Math.atan(aL) * 180 / Math.PI, dR = Math.atan(aR) * 180 / Math.PI;
+    if (Math.abs(dL - dR) <= 1.2) tilt = (dL + dR) / 2;
+  }
+  if (Math.abs(tilt) < 0.25 || Math.abs(tilt) > 8) tilt = 0;
+  return { rect: c, tilt };
 }
-$('#cropSmart').addEventListener('click', async () => {
+async function runSmartCrop() {
   const p = S.pageBox[cropPi];
   if (!p) return;
   const b = $('#cropSmart');
@@ -5883,7 +6007,29 @@ $('#cropSmart').addEventListener('click', async () => {
   p.draft = tight ? { x0: 0, y0: 0, x1: 1, y1: 1 } : c;
   paintCrop();
   $('#cropHint').textContent = tight ? 'Already down to the page' : 'Found the page';
-});
+}
+$('#cropSmart').addEventListener('click', runSmartCrop);
+
+/* Turning the page without leaving the crop: the draft is remembered in the
+   frame of the page as it stands, so it is carried through the turn the same
+   way a committed crop is, and lands on the same part of the paper. */
+function cropTurn(by) {
+  const p = S.pageBox[cropPi];
+  if (!p) return;
+  const from = totalRot(p);
+  const d = p.draft || { x0: 0, y0: 0, x1: 1, y1: 1 };
+  push();
+  p.userRot = norm4(p.userRot + by);
+  p.renderKey = null;
+  const to = totalRot(p);
+  const [ax, ay] = reframe(from, to, d.x0, d.y0);
+  const [bx, by2] = reframe(from, to, d.x1, d.y1);
+  p.draft = { x0: Math.min(ax, bx), x1: Math.max(ax, bx),
+              y0: Math.min(ay, by2), y1: Math.max(ay, by2) };
+  layoutPages(); renderVisible(); paintCrop(); revealPage(cropPi); saveSoon();
+}
+$('#cropCCW').addEventListener('click', () => cropTurn(-90));
+$('#cropCW').addEventListener('click', () => cropTurn(90));
 
 $('#cropCancel').addEventListener('click', closeCrop);
 $('#cropReset').addEventListener('click', () => {
@@ -5928,6 +6074,15 @@ $('#btnFinish').addEventListener('click', async () => {
   busy(true, 'Building your PDF…');
   try {
     lastBlob = await buildPdf();
+    /* Look at what was just built before offering it to anyone. A mail app
+       handed a file whose bytes are not a PDF attaches it anyway, and the
+       failure surfaces days later at the far end as "couldn't download
+       attachment" — the worst possible place to learn about it. */
+    const head = new TextDecoder().decode(await lastBlob.slice(0, 5).arrayBuffer());
+    const tail = new TextDecoder().decode(await lastBlob.slice(Math.max(0, lastBlob.size - 1024)).arrayBuffer());
+    if (lastBlob.size < 600 || head !== '%PDF-' || !tail.includes('%%EOF')) {
+      throw new Error('built file failed its own check');
+    }
   } catch (e) {
     console.error(e);
     busy(false);
@@ -6415,7 +6570,6 @@ async function buildSimple() {
 
 /* ---- moving between the two views ---- */
 function showSimple() {
-  $('#pick').hidden = true;
   $('#editor').hidden = true;
   $('#done').hidden = true;
   $('#home').hidden = true;
@@ -6424,7 +6578,6 @@ function showSimple() {
   if (!SIM.built) buildSimple();
 }
 function showPage() {
-  $('#pick').hidden = true;
   simEl().hidden = true;
   $('#done').hidden = true;
   $('#home').hidden = true;
@@ -6470,74 +6623,87 @@ $('#simToPage').addEventListener('click', showPage);
    Show it the moment the file opens, then fill in what was found. Reading
    the form takes a second on a long document and there is nothing to gain
    from making someone watch a spinner before they can even choose. */
-async function askView(name) {
-  $('#pickName').textContent = name;
-  $('#pickMeta').textContent =
-    `${S.pdf.numPages} page${S.pdf.numPages > 1 ? 's' : ''} · nothing is uploaded`;
-  $('#pickSimpleSub').textContent = 'Reading the form…';
-  $('#pickNote').textContent = '';
-  $('#home').hidden = true;
-  $('#editor').hidden = true;
-  simEl().hidden = true;
-  $('#pick').hidden = false;
 
-  let r;
-  try { r = await readQuestions(); } catch (_) { r = { questions: [], scanned: false }; }
-  if ($('#pick').hidden) return;                 // they already chose
-  const n = r.questions.length;
-  const named = r.questions.filter(q => !/^Blank \d+$/.test(q.label)).length;
-  $('#pickSimpleSub').textContent = n
-    ? `${n} thing${n > 1 ? 's' : ''} to fill in, one at a time`
-    : 'One question at a time, filling the screen';
-  $('#pickNote').textContent =
-    !n ? 'No blanks were found in this document — page view lets you put text anywhere.'
-    : r.scanned ? 'This is a scan. Simple view will read the labels off the page — that takes a few seconds the first time.'
-    : named < n ? `${named} of ${n} blanks could be named from the document’s own text.`
-    : '';
-}
-
-function showPick(name, counts) {
-  $('#pickName').textContent = name;
-  $('#pickMeta').textContent = counts.meta;
-  $('#pickSimpleSub').textContent = counts.sub;
-  $('#pickNote').textContent = counts.note;
-  $('#home').hidden = true;
-  $('#editor').hidden = true;
-  simEl().hidden = true;
-  $('#pick').hidden = false;
-}
-$('#pickSimple').addEventListener('click', showSimple);
-$('#pickPage').addEventListener('click', showPage);
-$('#pickCancel').addEventListener('click', () => { $('#pick').hidden = true; closeDoc(); });
 
 /* ============================================================ DRAFTS / OPEN */
 async function checkResume() {
+  /* One draft used to live here under a seven-day clock. Now every document
+     stays until its owner deletes it, so the clock is gone and the card grew
+     into a list. The old single draft, if one exists, is walked over. */
   try {
-    const d = await DB.get('doc');
-    if (d && Date.now() - (d.ts || 0) > DRAFT_TTL) { await DB.del('doc'); }
-    const fresh = await DB.get('doc');
-    const anyField = v => v !== '' && v !== false && v != null;
-    const has = fresh && fresh.bytes &&
-      ((fresh.items?.length || 0) > 0 || Object.values(fresh.fields || {}).some(anyField));
-    $('#resume').hidden = !has;
-    if (has) {
-      $('#resumeName').textContent = fresh.name;
-      const days = Math.max(0, 7 - Math.floor((Date.now() - fresh.ts) / 86400000));
-      $('#resumeWhen').textContent = `Continue your last document? Kept ${days} more day${days === 1 ? '' : 's'}.`;
+    const legacy = await DB.get('doc');
+    if (legacy?.bytes) {
+      const id = await docId(legacy.bytes);
+      if (!(await DB.get('d:' + id))) {
+        await DB.set('d:' + id, legacy);
+        const dix = await dixGet();
+        dix.unshift({ id, name: legacy.name || 'Document.pdf', ts: legacy.ts || Date.now(), pages: 1, kb: Math.round(legacy.bytes.byteLength / 1024) });
+        await dixPut(dix.slice(0, MAX_DOCS));
+      }
+      await DB.del('doc');
     }
   } catch (_) {}
+  await renderRecents();
 }
-$('#btnResume').addEventListener('click', async () => {
-  busy(true, 'Opening…');
-  try {
-    const d = await DB.get('doc');
-    if (d) await loadDoc(d.bytes, d.name, d.items, d.rots, d.fields, d.crops);
-  } catch (_) { toast('That draft could not be restored.'); }
-  finally { busy(false); }
-});
-/* Deleting saved work is the one thing here that cannot be undone — the
-   draft is the only copy of what was typed, and a mis-tap on a small ✕ next
-   to a Continue button is an easy mis-tap to make. So both destroyers ask
+
+const agoLabel = ts => {
+  const m = Math.floor((Date.now() - ts) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} hour${h > 1 ? 's' : ''} ago`;
+  const d = Math.floor(h / 24);
+  return d < 30 ? `${d} day${d > 1 ? 's' : ''} ago` : new Date(ts).toLocaleDateString();
+};
+let recentsOpen = false;
+async function renderRecents() {
+  let dix = [];
+  try { dix = await dixGet(); } catch (_) {}
+  $('#recents').hidden = !dix.length;
+  if (!dix.length) return;
+  const list = $('#recentsList');
+  list.innerHTML = '';
+  const shown = recentsOpen ? dix : dix.slice(0, 5);
+  for (const d of shown) {
+    const li = document.createElement('li');
+    li.className = 'recent';
+    li.innerHTML =
+      `<button class="recent-open"><strong></strong><span></span></button>
+       <button class="btn-icon-sm recent-del" aria-label="Delete this document">
+         <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+       </button>`;
+    li.querySelector('strong').textContent = d.name;
+    li.querySelector('span').textContent =
+      `${d.pages} page${d.pages > 1 ? 's' : ''} · ${agoLabel(d.ts)}`;
+    li.querySelector('.recent-open').addEventListener('click', async () => {
+      busy(true, 'Opening…');
+      try {
+        const full = await DB.get('d:' + d.id);
+        if (!full) throw new Error('gone');
+        await loadDoc(full.bytes, full.name, full.items, full.rots, full.fields, full.crops);
+        showPage();
+      } catch (_) { toast('That document could not be opened.'); renderRecents(); }
+      finally { busy(false); }
+    });
+    li.querySelector('.recent-del').addEventListener('click', () => {
+      askWipe(`Delete \u201c${d.name}\u201d?`,
+              'The document and everything you added to it will be removed from this device. This cannot be undone.',
+              async () => {
+                await DB.del('d:' + d.id);
+                await dixPut((await dixGet()).filter(x => x.id !== d.id));
+                renderRecents();
+                toast('Deleted.');
+              });
+    });
+    list.append(li);
+  }
+  const more = $('#recentsMore');
+  more.hidden = recentsOpen || dix.length <= 5;
+  more.textContent = `Show ${dix.length - 5} more`;
+}
+$('#recentsMore').addEventListener('click', () => { recentsOpen = true; renderRecents(); });
+/* Deleting saved work is the one thing here that cannot be undone, and a
+   mis-tap on a small X is an easy mis-tap to make. So every destroyer asks
    first, through one sheet that says exactly what is about to go. */
 function askWipe(title, what, go) {
   $('#wipeTitle').textContent = title;
@@ -6551,17 +6717,14 @@ $('#wipeGo').addEventListener('click', async () => {
   if (wipeAction) await wipeAction();
   wipeAction = null;
 });
-$('#btnDiscard').addEventListener('click', () => {
-  askWipe(`Delete “${$('#resumeName').textContent}”?`,
-          'Everything you typed and placed on it will be removed from this device. This cannot be undone.',
-          async () => { await DB.del('doc'); checkResume(); toast('Draft deleted.'); });
-});
 $('#btnWipe').addEventListener('click', () => {
   askWipe('Delete all local data?',
-          'Your saved draft and your saved signatures will be removed from this device. This cannot be undone.',
+          'Every saved document and every saved signature will be removed from this device. This cannot be undone.',
           async () => {
-            await DB.del('doc'); await DB.del('sigs');
-            checkResume();
+            for (const d of await dixGet()) { try { await DB.del('d:' + d.id); } catch (_) {} }
+            await DB.del('dix'); await DB.del('doc'); await DB.del('sigs');
+            recentsOpen = false;
+            renderRecents();
             toast('All local document data and saved signatures deleted.');
           });
 });
@@ -6580,7 +6743,7 @@ async function checkShared() {
     await c.delete('shared.pdf');
     busy(true, 'Opening…');
     await loadDoc(buf, name, [], null);
-    askView(name);
+    showPage();
     busy(false);
     return true;
   } catch (_) { return false; }
@@ -6607,11 +6770,11 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 pageBg, forget, paintHints, findHint, textOnLine,
                 readQuestions, pageWords, labelFor, pageCells, scanVRules, textInCell,
                 wordsOrOcr, ocrPage,
-                buildSimple, showSimple, showPage, askView, SIMof: () => SIM,
+                buildSimple, showSimple, showPage, SIMof: () => SIM,
                 scanLines, findCells, totalRot, scanBoxes, layoutPages, revealFocused,
                 scanPanels, scanCanvas, shotsToPdf, SCANof: () => SCAN, select, finalName, renderVisible,
                 MARKS: { path: MARK_PATH, width: MARK_W }, markCanvas,
                 zoomFloor, zoomTo, paperEdges, setDocName, paintItems,
-                openQr, closeLink, LINKof: () => LINK,
+                openQr, closeLink, LINKof: () => LINK, tiltOfCanvas, unskew, paperAnalyse, renderRecents, dixGet,
                 copySel, pasteClip, setMarq, clearMarq, MARQof: () => MARQ,
                 openCrop, closeCrop, nudgeCrop, pickCrop, syncRail, turn, openRotate, cropOf };
