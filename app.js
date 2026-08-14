@@ -5161,17 +5161,22 @@ $('#cropApply').addEventListener('click', () => {
    where it stops is exactly the sort of looking a person is bad at with a
    fingertip and a computer is good at.
 
-   The method is the one this app already trusts for tables — a page is a
-   rectangle, so find its sides separately rather than hunting for corners.
-   Split the pixels into dark and bright with Otsu's cut, which asks the
-   picture where its two groups are instead of being told a number that only
-   suits one kind of scan. Then walk in from each of the four edges for as
-   long as the rows, or columns, are not mostly paper.
+   Brightness alone cannot do it: a sheet of paper on a pale wooden desk is a
+   bright rectangle on a bright background, and any test that only asks "is
+   this row mostly light?" swallows the desk whole. What tells paper apart
+   from everything a page gets photographed on is that paper is bright *and
+   flat* — wood has grain, cloth has weave, a tabletop has speckle and shine,
+   and all of that is texture the paper does not have. So the page is graded
+   in small cells, each asked to be both bright and smooth, and the paper is
+   found as the largest connected patch of cells that pass. Printed text
+   punches holes in that patch, but holes in the middle do not move its edges.
 
-   Walking *in from the edge* rather than looking for the longest bright run
-   matters: plenty of forms have a solid black band across them for a section
-   heading, and a run would stop dead at the first one and hand back the top
-   third of the page as though that were the whole sheet.
+   The crop is then fitted *inside* the patch, not around it: a photographed
+   page is always a few degrees off square, and the box around a tilted
+   rectangle keeps a triangle of desk in every corner. Rows thinner than the
+   patch's usual width — the pointed tips of the tilt — are set aside, and the
+   crop takes the widest rectangle the remaining rows all contain. A sliver of
+   the page's own margin is spent to make every last splinter of desk go.
 
    Nothing is applied: it sets the same draft your fingers set, and the Crop
    button below still has the last word. */
@@ -5188,17 +5193,10 @@ function otsu(hist, total) {
   }
   return cut;
 }
-/** walk in from both ends while `ok` is false, as [first, lastInclusive] */
-function trimEnds(ok) {
-  let a = 0, b = ok.length - 1;
-  while (a <= b && !ok[a]) a++;
-  while (b > a && !ok[b]) b--;
-  return a > b ? null : [a, b];
-}
 async function paperEdges(p) {
   const cv = document.createElement('canvas');
   const v0 = p.page.getViewport({ scale: 1, rotation: totalRot(p) });
-  const vp = p.page.getViewport({ scale: 300 / v0.width, rotation: totalRot(p) });
+  const vp = p.page.getViewport({ scale: 440 / v0.width, rotation: totalRot(p) });
   cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
   const ctx = cv.getContext('2d', { alpha: false, willReadFrequently: true });
   /* White underneath, because that is what a PDF page is: it draws no
@@ -5213,28 +5211,150 @@ async function paperEdges(p) {
   let d;
   try { d = ctx.getImageData(0, 0, W, H).data; } catch (_) { return null; }
   const lum = new Uint8Array(W * H);
-  const hist = new Uint32Array(256);
   for (let i = 0, m = 0; m < lum.length; m++, i += 4) {
-    const v = (d[i] * 77 + d[i + 1] * 151 + d[i + 2] * 28) >> 8;
-    lum[m] = v; hist[v]++;
+    lum[m] = (d[i] * 77 + d[i + 1] * 151 + d[i + 2] * 28) >> 8;
   }
-  const cut = Math.max(otsu(hist, W * H), 70);
 
-  const rowOK = new Uint8Array(H), colOK = new Uint8Array(W);
-  const rowN = new Uint32Array(H), colN = new Uint32Array(W);
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) if (lum[y * W + x] > cut) { rowN[y]++; colN[x]++; }
+  /* Grade the page in 4px cells: how bright, and how busy. `edge` is a pixel
+     noticeably different from its right or lower neighbour — grain, weave,
+     speckle, or ink. Paper margins have almost none; a desk has them all over. */
+  const C = 4, GW = Math.ceil(W / C), GH = Math.ceil(H / C);
+  const cellSum = new Float64Array(GW * GH), cellEdge = new Uint16Array(GW * GH), cellN = new Uint16Array(GW * GH);
+  for (let y = 0; y < H - 1; y++) {
+    const g = (y >> 2) * GW;
+    for (let x = 0; x < W - 1; x++) {
+      const m = y * W + x, c = g + (x >> 2);
+      cellSum[c] += lum[m]; cellN[c]++;
+      if (Math.abs(lum[m] - lum[m + 1]) > 14 || Math.abs(lum[m] - lum[m + W]) > 14) cellEdge[c]++;
+    }
   }
-  for (let y = 0; y < H; y++) rowOK[y] = rowN[y] > W * 0.55 ? 1 : 0;
-  for (let x = 0; x < W; x++) colOK[x] = colN[x] > H * 0.55 ? 1 : 0;
-  const ys = trimEnds(rowOK), xs = trimEnds(colOK);
-  if (!ys || !xs) return null;
+  /* Bright is judged by Otsu over the cell means — the picture says where its
+     own two groups sit — with a floor so a photograph that is dark all over
+     does not get half of its darkness called paper. */
+  const hist = new Uint32Array(256);
+  const mean = new Uint8Array(GW * GH);
+  for (let c = 0; c < GW * GH; c++) {
+    mean[c] = cellN[c] ? Math.round(cellSum[c] / cellN[c]) : 0;
+    hist[mean[c]]++;
+  }
+  const cut = Math.max(otsu(hist, GW * GH), 140);
+  /* Texture is judged over a cell *and its neighbours*: grain comes in lines
+     with flat wood between them, and a cell that happens to fall between two
+     grain lines is still desk. Paper margins are smooth for whole regions at
+     a time, so widening the test costs them nothing. */
+  const busy = new Uint8Array(GW * GH);
+  for (let c = 0; c < GW * GH; c++) busy[c] = (cellN[c] && cellEdge[c] / cellN[c] > 0.20) ? 1 : 0;
+  const paper = new Uint8Array(GW * GH);
+  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+    const c = y * GW + x;
+    if (mean[c] < cut || !cellN[c]) continue;
+    let b = 0;
+    for (let dy = -1; dy <= 1 && !b; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = x + dx, ny = y + dy;
+      if (nx >= 0 && ny >= 0 && nx < GW && ny < GH && busy[ny * GW + nx]) { b = 1; break; }
+    }
+    paper[c] = b ? 0 : 1;
+  }
 
-  /* Shave the one pixel of blur where the paper meets what is behind it —
-     at this width one pixel is a third of a percent of the page, and leaving
-     it in is a grey hairline down the side of a finished crop. */
-  const c = { x0: (xs[0] + 1) / W, x1: xs[1] / W,
-              y0: (ys[0] + 1) / H, y1: ys[1] / H };
+  /* The page is the largest connected patch of paper cells. */
+  const seen = new Uint8Array(GW * GH);
+  let best = null;
+  const qx = new Int32Array(GW * GH), qy = new Int32Array(GW * GH);
+  for (let sy = 0; sy < GH; sy++) for (let sx = 0; sx < GW; sx++) {
+    const s = sy * GW + sx;
+    if (!paper[s] || seen[s]) continue;
+    let head = 0, tail = 0, n = 0;
+    qx[tail] = sx; qy[tail++] = sy; seen[s] = 2;
+    const cells = [];
+    while (head < tail) {
+      const x = qx[head], y = qy[head++]; n++;
+      cells.push(y * GW + x);
+      if (x > 0 && paper[y * GW + x - 1] && seen[y * GW + x - 1] < 2) { seen[y * GW + x - 1] = 2; qx[tail] = x - 1; qy[tail++] = y; }
+      if (x < GW - 1 && paper[y * GW + x + 1] && seen[y * GW + x + 1] < 2) { seen[y * GW + x + 1] = 2; qx[tail] = x + 1; qy[tail++] = y; }
+      if (y > 0 && paper[(y - 1) * GW + x] && seen[(y - 1) * GW + x] < 2) { seen[(y - 1) * GW + x] = 2; qx[tail] = x; qy[tail++] = y - 1; }
+      if (y < GH - 1 && paper[(y + 1) * GW + x] && seen[(y + 1) * GW + x] < 2) { seen[(y + 1) * GW + x] = 2; qx[tail] = x; qy[tail++] = y + 1; }
+    }
+    if (!best || n > best.n) best = { n, cells };
+  }
+  if (!best || best.n < GW * GH * 0.12) return null;
+
+  /* A solid band of ink across the page — a section header, a heavy rule —
+     cuts the margin above it off from the rest of the sheet, and the patch
+     walk cannot cross it. Ink is not desk: let the patch absorb any paper
+     within a couple of cells of it, a few times over, so everything on the
+     sheet rejoins it. The desk cannot ride back in this way, because desk
+     cells were disqualified before connectivity was ever asked about. */
+  /* The reach has to clear a heavy band and the veto margin either side of it
+     in a single hop, because the cells inside the gap are ink, not paper, and
+     will never join to serve as stepping stones. Twelve cells is ~48px in the
+     scan — a fat section header with its shadows, but not the desk on the far
+     side of a page edge, which is disqualified regardless of distance. */
+  const inPatch = new Uint8Array(GW * GH);
+  for (const c of best.cells) inPatch[c] = 1;
+  const R = 12;
+  for (let round = 0; round < 3; round++) {
+    const grew = [];
+    for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+      const c = y * GW + x;
+      if (!paper[c] || inPatch[c]) continue;
+      let near = 0;
+      for (let dy = -R; dy <= R && !near; dy++) for (let dx = -R; dx <= R; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && ny >= 0 && nx < GW && ny < GH && inPatch[ny * GW + nx]) { near = 1; break; }
+      }
+      if (near) grew.push(c);
+    }
+    if (!grew.length) break;
+    for (const c of grew) { inPatch[c] = 1; best.cells.push(c); }
+  }
+
+  /* Per-row and per-column shape of the patch. Text is holes in the middle;
+     the extremes are the paper's own margins, which is what an edge is. The
+     cell *count* travels alongside, because a row is only believed to cross
+     the page if it actually holds a page-row's worth of paper — a couple of
+     strays out on the desk make a wide span but not a wide row. */
+  const left = new Int32Array(GH).fill(-1), right = new Int32Array(GH).fill(-1);
+  const top = new Int32Array(GW).fill(-1), bot = new Int32Array(GW).fill(-1);
+  const rowCnt = new Int32Array(GH), colCnt = new Int32Array(GW);
+  for (const c of best.cells) {
+    const x = c % GW, y = (c / GW) | 0;
+    if (left[y] < 0 || x < left[y]) left[y] = x;
+    if (x > right[y]) right[y] = x;
+    if (top[x] < 0 || y < top[x]) top[x] = y;
+    if (y > bot[x]) bot[x] = y;
+    rowCnt[y]++; colCnt[x]++;
+  }
+  /* Fit the crop inside the patch. A photographed page sits a few degrees off
+     square, and the pointed tips of the tilt are rows far thinner than the
+     page's usual measure — set those aside, then land each edge on a high
+     percentile of what the remaining rows agree on, which is the inscribed
+     rectangle with a shrug at a few odd rows either way. */
+  const med = a => { const s = a.filter(v => v > 0).sort((q, w) => q - w); return s.length ? s[s.length >> 1] : 0; };
+  const pick = (a, f) => a.slice().sort((q, w) => q - w)[Math.min(a.length - 1, Math.floor(a.length * f))];
+  const medRow = med([...rowCnt]);
+  if (!medRow) return null;
+  const lefts = [], rights = [];
+  let y0 = -1, y1 = -1;
+  for (let y = 0; y < GH; y++) {
+    if (rowCnt[y] < medRow * 0.6) continue;
+    lefts.push(left[y]); rights.push(right[y]);
+    if (y0 < 0) y0 = y;
+    y1 = y;
+  }
+  if (lefts.length < 4) return null;
+  const x0 = pick(lefts, 0.92), x1 = pick(rights, 0.08);
+
+  /* A patch that reaches every edge of the canvas is a page that was never on
+     a desk at all — say "nothing to trim" rather than shaving the insets off
+     a document that arrived clean. */
+  if (x0 <= 1 && y0 <= 1 && x1 >= GW - 2 && y1 >= GH - 2) return { x0: 0, y0: 0, x1: 1, y1: 1 };
+
+  /* One cell in from every side plus a hair of margin: the cost is a sliver
+     of the page's own border, the return is that no splinter of desk survives
+     along any edge. */
+  const IN = 0.004;
+  const c = { x0: clamp(((x0 + 1) * C) / W + IN, 0, 1), x1: clamp((x1 * C) / W - IN, 0, 1),
+              y0: clamp(((y0 + 1) * C) / H + IN, 0, 1), y1: clamp((y1 * C) / H - IN, 0, 1) };
   if (c.x1 - c.x0 < 0.2 || c.y1 - c.y0 < 0.2) return null;     // that is not a page
   return c;
 }
