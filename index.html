@@ -143,10 +143,10 @@
         On a keyboard
       </h3>
       <dl>
-        <dt><kbd>Tab</kbd></dt><dd>Jump to the next blank, box or field &mdash; and <kbd>Shift</kbd>+<kbd>Tab</kbd> back</dd>
-        <dt><kbd>Enter</kbd></dt><dd>Tick the box you are on, or start typing on the blank</dd>
-        <dt><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></dt><dd>Shift whatever is selected a hair at a time</dd>
-        <dt><kbd>Shift</kbd>+<kbd>↑↓</kbd></dt><dd>The same, <em>while</em> you are still typing in it</dd>
+        <dt><kbd>Tab</kbd></dt><dd>Jump to the next blank, box or field</dd>
+        <dt><kbd>Shift</kbd>+<kbd>Tab</kbd></dt><dd>Back to the one before it</dd>
+        <dt><kbd>↑</kbd><kbd>↓</kbd></dt><dd>Nudge whatever is selected &mdash; even while you are typing in it</dd>
+        <dt><kbd>Shift</kbd>+<kbd>↑↓</kbd></dt><dd>Make it bigger or smaller</dd>
         <dt>Double&#8209;click</dt><dd>A text box wherever the page offered you nothing</dd>
       </dl>
       <p class="tipnote">Hover a blank and it brackets itself, so you can see exactly where it starts and stops before you commit to it.</p>
@@ -266,10 +266,12 @@
     <button class="btn-icon" id="btnBack" aria-label="Back">
       <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
-    <div class="topbar-title">
+    <!-- The name is where you would look for it and where you would press to
+         change it, so it is a button rather than a label. -->
+    <button class="topbar-title" id="btnRename" title="Rename this document">
       <span id="docName">Document.pdf</span>
       <small id="docPages"></small>
-    </div>
+    </button>
     <button class="btn-icon" id="btnUndo" aria-label="Undo" disabled>
       <svg viewBox="0 0 24 24"><path d="M9 7L4.5 11.5 9 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4.5 11.5H14a5.5 5.5 0 0 1 0 11h-2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </button>
@@ -420,6 +422,16 @@
         <button class="nud nud-x" data-d="right" aria-label="Move right"><svg viewBox="0 0 24 24"><path d="M4.5 12H17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><path d="M12.6 6.6 18.4 12l-5.8 5.4" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </div>
     </div>
+    <!-- Finding the paper is a job for the machine: it can see where the white
+         stops far better than a finger can. It only sets the four edges — the
+         Crop button still applies them, so a guess is always yours to correct
+         or throw away. -->
+    <div class="crop-row">
+      <button class="btn-ghost sm smartcrop" id="cropSmart">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5V5.5A1.5 1.5 0 0 1 5.5 4h3M15.5 4h3A1.5 1.5 0 0 1 20 5.5v3M20 15.5v3a1.5 1.5 0 0 1-1.5 1.5h-3M8.5 20h-3A1.5 1.5 0 0 1 4 18.5v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="m12 8.6.95 2.45L15.4 12l-2.45.95L12 15.4l-.95-2.45L8.6 12l2.45-.95z" fill="currentColor"/></svg>
+        Smart crop
+      </button>
+    </div>
     <div class="crop-row">
       <button class="btn-ghost sm" id="cropReset">Whole page</button>
       <button class="btn-ghost sm" id="cropCancel">Cancel</button>
@@ -470,6 +482,21 @@
     <p class="sheet-note" id="clearWhat">Everything you have added to this page will be removed. The document itself is untouched, and you can undo it.</p>
     <button class="btn-primary wide danger-fill" id="clearGo">Clear the page</button>
     <button class="btn-ghost wide" data-close>Keep it</button>
+  </div>
+</div>
+
+<div class="sheet-wrap" id="renameSheet" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet" role="dialog" aria-label="Rename this document">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head"><h2>Name this document</h2>
+      <button class="btn-icon" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </div>
+    <label class="namefield">File name
+      <input type="text" id="renameInput" spellcheck="false" autocomplete="off">
+    </label>
+    <p class="sheet-tip">This is the name it will be saved under. The document itself is not touched.</p>
+    <button class="btn-primary wide" id="renameGo">Rename</button>
   </div>
 </div>
 

@@ -30,6 +30,12 @@
   --sheet:#ffffff;
   --radius:14px;
   --shadow:0 1px 2px rgba(15,18,22,.06), 0 8px 24px rgba(15,18,22,.08);
+  /* The gap above the first page, and the gutter beside it — half again as
+     wide, so the paper is clearly standing on the grey rather than jammed
+     into the corners of it. One pair of numbers, whatever the page's size or
+     shape, because a letter page and a wide scan should sit the same way. */
+  --stage-top:14px;
+  --gutter:21px;
   --safe-b:env(safe-area-inset-bottom, 0px);
   --safe-t:env(safe-area-inset-top, 0px);
   --font:-apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -291,8 +297,14 @@ a:hover{text-decoration:underline;}
   padding:calc(var(--safe-t) + 8px) 8px 8px;
   background:var(--bg);border-bottom:1px solid var(--line);z-index:5;
 }
-.topbar-title{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.2;padding:0 4px;}
-.topbar-title span{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:-.01em;}
+.topbar-title{
+  flex:1;min-width:0;display:flex;flex-direction:column;align-items:flex-start;
+  line-height:1.2;padding:3px 6px;margin:0 -2px;
+  font:inherit;color:inherit;text-align:left;background:none;border:0;border-radius:9px;cursor:pointer;
+}
+.topbar-title:hover{background:var(--bg-3);}
+.topbar-title:active{background:var(--bg-3);}
+.topbar-title span{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:-.01em;max-width:100%;}
 .topbar-title small{font-size:11px;color:var(--fg-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
 /* move from blank to blank with no keyboard — loud on purpose, because a
@@ -351,7 +363,7 @@ a:hover{text-decoration:underline;}
 .editor.kb .toolbar,
 .editor.kb .kbhint{display:none;}
 
-.stage{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:14px 0 0;}
+.stage{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:var(--stage-top) 0 0;}
 .pages{display:flex;flex-direction:column;align-items:center;gap:14px;padding-bottom:24px;width:max-content;min-width:100%;}
 .page{position:relative;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.18), 0 6px 18px rgba(0,0,0,.12);flex:none;}
 .page canvas{display:block;width:100%;height:100%;}
@@ -564,6 +576,14 @@ select.fld{padding-right:0;}
 .penwrap{display:flex;align-items:center;gap:10px;flex:1;min-width:0;}
 .pen-ico{width:21px;height:21px;flex:none;color:var(--fg-2);}
 .penwrap input[type=range]{flex:1;min-width:0;accent-color:var(--accent);}
+/* On a phone the slider takes the width because a thumb needs the travel. A
+   mouse does not: a track the width of the window is a long way to drag for
+   nine steps, so give it the length it actually needs and let the rest of the
+   row breathe. */
+@media (hover:hover) and (pointer:fine){
+  .sigbar .penwrap{flex:0 0 auto;gap:8px;}
+  .sigbar .penwrap input[type=range]{flex:0 0 auto;width:132px;}
+}
 
 /* ---------- the signature row ----------
    Stands exactly where the tool row stands and looks like it, because it is
@@ -924,6 +944,17 @@ select.fld{padding-right:0;}
 .crop-nudge .nud[hidden]{display:none;}
 .crop-row .btn-ghost.sm{flex:1;}
 .crop-row .btn-save{flex:1;}
+/* Its own line, and quieter than the three below it: an offer, not the thing
+   you came here to press. */
+.crop-row .btn-ghost.sm.smartcrop{
+  display:flex;align-items:center;justify-content:center;gap:7px;
+  flex:0 0 auto;align-self:center;padding:5px 14px;
+  background:transparent;border-color:color-mix(in srgb, var(--accent) 36%, transparent);
+  color:var(--accent);font-weight:650;
+}
+.smartcrop svg{width:16px;height:16px;flex:none;}
+.smartcrop[disabled]{opacity:.55;}
+.crop-row:has(> .smartcrop){justify-content:center;}
 /* the rotate bar is one row, not two */
 .rotbar{flex-direction:row;align-items:center;}
 

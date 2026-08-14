@@ -554,11 +554,14 @@ $('#btnBack').addEventListener('click', () => {
 });
 
 /* ================================================================ RENDERING */
-/* A gutter wide enough to see the edge of the paper against the grey, and
-   not a pixel more. Twenty was two thirds of a character's width thrown away
-   on both sides of a phone, which on a form is the difference between reading
-   a caption and squinting at it. */
-const fitWidth = () => Math.min(stageEl.clientWidth - 8, 980);
+/* The paper stands on the grey with the same margin all round it: whatever
+   gap sits between the header and the top of the page, and half as much again
+   down each side. Both numbers live in the stylesheet so the padding above and
+   the gutter beside cannot drift apart, and neither depends on the size or the
+   shape of the page — a landscape scan is framed like a letter page. */
+const cssPx = n => parseFloat(getComputedStyle(document.documentElement).getPropertyValue(n)) || 0;
+const GUTTER = () => cssPx('--gutter') || 21;
+const fitWidth = () => Math.min(Math.max(stageEl.clientWidth - GUTTER() * 2, 200), 980);
 const totalRot = p => (((p.baseRot + p.userRot) % 360) + 360) % 360;
 
 async function buildPages(rots) {
@@ -1004,14 +1007,35 @@ window.addEventListener('resize', () => {
        to fit, with the field you were aiming at now too small to read. */
     const w = fitWidth();
     if (w !== lastFitW) { lastFitW = w; S.baseW = w; layoutPages(); }
+    /* A window that got shorter can leave you below the floor — zoomed out
+       past what now fits. Come back up to it rather than staying somewhere
+       the zoom controls can no longer reach. */
+    const lo = zoomFloor();
+    if (S.zoom < lo - 0.001) { S.zoom = lo; layoutPages(); }
     renderVisible();
   }, 180);
 });
 
 /* ------------------------------------------------------------ zoom */
+/* How far out you are allowed to go. Fitting the *width* is the right floor on
+   a phone, where the page is tall and you scroll it. It is the wrong one on a
+   desktop: the page is capped at 980 across and is then taller than the room
+   under the header, so "all the way out" left you looking at the top half of
+   page one with no way to see a whole page at once. So the floor is whatever
+   it takes to stand one entire page in the window — and never above 1, which
+   is what it works out to on a phone anyway, so nothing changes there. */
+function zoomFloor() {
+  const p = S.pageBox[0];
+  if (!p || !S.baseW) return 1;
+  const flip = totalRot(p) % 180 !== 0;
+  const h1 = S.baseW * (flip ? p.uw / p.uh : p.uh / p.uw);   // page height at zoom 1
+  const room = stageEl.clientHeight - cssPx('--stage-top') * 2;
+  if (h1 <= 0 || room <= 0) return 1;
+  return clamp(room / h1, 0.25, 1);
+}
 function zoomTo(z, mx, my) {
   const z0 = S.zoom;
-  S.zoom = clamp(z, 1, 6);
+  S.zoom = clamp(z, zoomFloor(), 6);
   const f = S.zoom / z0;
   layoutPages();
   stageEl.scrollLeft = (stageEl.scrollLeft + mx) * f - mx;
@@ -1034,7 +1058,7 @@ function zoomTo(z, mx, my) {
   stageEl.addEventListener('touchmove', e => {
     if (e.touches.length !== 2 || !d0) return;
     e.preventDefault();
-    const z = clamp(z0 * clamp(dist(e.touches) / d0, 0.25, 8), 1, 6);
+    const z = clamp(z0 * clamp(dist(e.touches) / d0, 0.25, 8), zoomFloor(), 6);
     const f = z / z0;
     S.zoom = z; layoutPages();
     stageEl.scrollLeft = (sc0.l + mid.x) * f - mid.x;
@@ -2017,14 +2041,21 @@ function inkSpan(scan) {
    to reclaim on both sides, and never by much: the page edges going off
    screen is a surprise, so a sliver of paper is deliberately left showing and
    the whole thing is capped. Touch anything first — zoom, place something —
-   and it does not fire at all. */
+   and it does not fire at all.
+
+   And never past the frame. The gutter beside the page is a promise about how
+   a document is presented — the same margin whatever its shape — so this may
+   only spend room the width cap left over, which is why it does its work on a
+   wide screen and quietly stands down on a narrow one, where the page is
+   already as wide as the frame allows. */
 let snugged = false;
 function snugFit(p) {
   if (snugged || S.zoom !== 1 || S.items.length || S.pageBox[0] !== p) return;
   const s = p.ink;
   if (!s) return;
   if (s.x0 < 0.06 || 1 - s.x1 < 0.06) return;        // margins already tight
-  const z = clamp(0.96 / (s.x1 - s.x0), 1, 1.18);
+  const room = (stageEl.clientWidth - GUTTER() * 2) / (S.baseW || 1);
+  const z = clamp(Math.min(0.96 / (s.x1 - s.x0), room), 1, 1.18);
   if (z < 1.05) return;                              // not worth the movement
   snugged = true;
   S.zoom = z;
@@ -3274,13 +3305,15 @@ $$('#swatches .sw').forEach(b => b.addEventListener('click', () => {
   push(); it.color = b.dataset.color;
   paintItems(); select(it.id);
 }));
-const bump = f => {
+/* `held` is for a key being leant on: forty presses in a second are one thing
+   you did, so they share the undo step the first press opened. */
+const bump = (f, held) => {
   const sel = getSel(); if (!sel) return;
   // sizing a timestamp sizes the signature it belongs to
   const it = (sel.link && S.items.find(i => i.id === sel.link)) || sel;
   const d = elOf(it.id);
   if (!d) return;
-  push();
+  if (!held) push();
   /* Grow about the middle, so the object stays where you put it instead of
      creeping down and to the right every time you press the button. Text
      sitting on a blank line is the exception: there, the bottom edge *is* the
@@ -3400,22 +3433,34 @@ document.addEventListener('keydown', e => {
     return;
   }
 
-  /* With the caret inside a text box the arrows belong to the caret, as they
-     must. Shift is not otherwise spoken for — there is no ranged selection in
-     these boxes worth extending — so Shift means "the arrows are for the
-     object, not the words": you can put a line of text exactly where you want
-     it without first clicking out of it and back into it.
+  /* Up and down belong to the object, always. Left and right belong to the
+     caret while you are typing, because inside a line of words that is what
+     they can only mean — and Shift hands them to the object too, so a text
+     box can be walked sideways into place without clicking out of it and
+     back into it.
+
+     Shift with up or down is the size of the thing rather than its position:
+     the two buttons in the selection bar, on the keyboard. Nothing is lost by
+     spending Shift here — these boxes hold one short answer and there is no
+     ranged selection in them worth extending.
 
      A held key goes further per press after about a second, the same way the
      pad on the phone does when you hold a corner down, and one held burst is
      one undo step rather than forty. */
+  const vert = dir === 'up' || dir === 'down';
   if (dir && S.sel && !e.metaKey && !e.ctrlKey && !e.altKey && !KB.box &&
-      (!typing || e.shiftKey)) {
+      (vert || !typing || e.shiftKey)) {
     e.preventDefault();
     const now = performance.now();
-    if (now - arrowAt > 700) { push(); arrowT0 = now; }
+    const held = now - arrowAt <= 700;
+    if (!held) arrowT0 = now;
     arrowAt = now;
-    nudge(dir, now - arrowT0 > 900);
+    if (e.shiftKey && vert) {
+      bump(dir === 'up' ? 1.06 : 1 / 1.06, held);
+    } else {
+      if (!held) push();
+      nudge(dir, now - arrowT0 > 900);
+    }
     return;
   }
 
@@ -4370,6 +4415,36 @@ function openSig() {
   setupPad(); drawFontOptions(); refreshSaved(); updateUse();
 }
 $$('[data-close]').forEach(b => b.addEventListener('click', () => { b.closest('.sheet-wrap').hidden = true; }));
+
+/* ------------------------------------------------------- rename in place
+   The name in the corner is the one the file will be saved under, so the
+   place to change it is the place it is written. Waiting until the save
+   screen meant living with "Scan 2024-11-03 (1).pdf" for the whole job and
+   only then being asked what it should have been called. */
+function setDocName(name) {
+  S.name = /\.pdf$/i.test(name) ? name : name + '.pdf';
+  $('#docName').textContent = S.name;
+  $('#simName').textContent = S.name;
+}
+$('#btnRename').addEventListener('click', () => {
+  if (!S.pdf) return;
+  $('#renameInput').value = S.name.replace(/\.pdf$/i, '');
+  $('#renameSheet').hidden = false;
+  requestAnimationFrame(() => { const i = $('#renameInput'); i.focus(); i.select(); });
+});
+function doRename() {
+  const v = ($('#renameInput').value || '').trim();
+  $('#renameSheet').hidden = true;
+  if (!v) return;
+  setDocName(v);
+  saveSoon();
+  toast('Renamed.', 1800);
+}
+$('#renameGo').addEventListener('click', doRename);
+$('#renameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); doRename(); }
+  if (e.key === 'Escape') { e.preventDefault(); $('#renameSheet').hidden = true; }
+});
 $$('.tab').forEach(t => t.addEventListener('click', () => {
   sigTab = t.dataset.tab;
   $$('.tab').forEach(x => x.classList.toggle('is-on', x === t));
@@ -5079,6 +5154,110 @@ $('#cropApply').addEventListener('click', () => {
   saveSoon();
   toast(p.crop ? 'Cropped. Nothing is thrown away — widen it any time.' : 'Showing the whole page.', 2600);
 });
+/* ---------------------------------------------------------- smart crop
+   A photograph of a form has the desk in it, and a scan often has a black
+   rim where the lid did not reach. Both are the same shape of problem: the
+   paper is a bright rectangle sitting inside something darker, and finding
+   where it stops is exactly the sort of looking a person is bad at with a
+   fingertip and a computer is good at.
+
+   The method is the one this app already trusts for tables — a page is a
+   rectangle, so find its sides separately rather than hunting for corners.
+   Split the pixels into dark and bright with Otsu's cut, which asks the
+   picture where its two groups are instead of being told a number that only
+   suits one kind of scan. Then walk in from each of the four edges for as
+   long as the rows, or columns, are not mostly paper.
+
+   Walking *in from the edge* rather than looking for the longest bright run
+   matters: plenty of forms have a solid black band across them for a section
+   heading, and a run would stop dead at the first one and hand back the top
+   third of the page as though that were the whole sheet.
+
+   Nothing is applied: it sets the same draft your fingers set, and the Crop
+   button below still has the last word. */
+function otsu(hist, total) {
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sumB = 0, wB = 0, best = 0, cut = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t]; if (!wB) continue;
+    const wF = total - wB; if (!wF) break;
+    sumB += t * hist[t];
+    const v = wB * wF * Math.pow(sumB / wB - (sum - sumB) / wF, 2);
+    if (v > best) { best = v; cut = t; }
+  }
+  return cut;
+}
+/** walk in from both ends while `ok` is false, as [first, lastInclusive] */
+function trimEnds(ok) {
+  let a = 0, b = ok.length - 1;
+  while (a <= b && !ok[a]) a++;
+  while (b > a && !ok[b]) b--;
+  return a > b ? null : [a, b];
+}
+async function paperEdges(p) {
+  const cv = document.createElement('canvas');
+  const v0 = p.page.getViewport({ scale: 1, rotation: totalRot(p) });
+  const vp = p.page.getViewport({ scale: 300 / v0.width, rotation: totalRot(p) });
+  cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+  const ctx = cv.getContext('2d', { alpha: false, willReadFrequently: true });
+  /* White underneath, because that is what a PDF page is: it draws no
+     background of its own, and every viewer — this one included — puts it on
+     white paper. A born-digital page therefore comes out all paper and the
+     answer is "there is nothing to trim", which is the truth. */
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+  try { await p.task?.promise; } catch (_) {}
+  await p.page.render({ canvasContext: ctx, viewport: vp }).promise;
+
+  const W = cv.width, H = cv.height;
+  let d;
+  try { d = ctx.getImageData(0, 0, W, H).data; } catch (_) { return null; }
+  const lum = new Uint8Array(W * H);
+  const hist = new Uint32Array(256);
+  for (let i = 0, m = 0; m < lum.length; m++, i += 4) {
+    const v = (d[i] * 77 + d[i + 1] * 151 + d[i + 2] * 28) >> 8;
+    lum[m] = v; hist[v]++;
+  }
+  const cut = Math.max(otsu(hist, W * H), 70);
+
+  const rowOK = new Uint8Array(H), colOK = new Uint8Array(W);
+  const rowN = new Uint32Array(H), colN = new Uint32Array(W);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) if (lum[y * W + x] > cut) { rowN[y]++; colN[x]++; }
+  }
+  for (let y = 0; y < H; y++) rowOK[y] = rowN[y] > W * 0.55 ? 1 : 0;
+  for (let x = 0; x < W; x++) colOK[x] = colN[x] > H * 0.55 ? 1 : 0;
+  const ys = trimEnds(rowOK), xs = trimEnds(colOK);
+  if (!ys || !xs) return null;
+
+  /* Shave the one pixel of blur where the paper meets what is behind it —
+     at this width one pixel is a third of a percent of the page, and leaving
+     it in is a grey hairline down the side of a finished crop. */
+  const c = { x0: (xs[0] + 1) / W, x1: xs[1] / W,
+              y0: (ys[0] + 1) / H, y1: ys[1] / H };
+  if (c.x1 - c.x0 < 0.2 || c.y1 - c.y0 < 0.2) return null;     // that is not a page
+  return c;
+}
+$('#cropSmart').addEventListener('click', async () => {
+  const p = S.pageBox[cropPi];
+  if (!p) return;
+  const b = $('#cropSmart');
+  b.disabled = true;
+  const was = $('#cropHint').textContent;
+  $('#cropHint').textContent = 'Looking for the edges…';
+  let c = null;
+  try { c = await paperEdges(p); } catch (e) { console.warn('smart crop', e); }
+  b.disabled = false;
+  if (cropPi < 0) return;                       // they left while it was thinking
+  if (!c) { $('#cropHint').textContent = was; return toast('Could not tell where the page stops — drag the edges instead.', 3400); }
+  const tight = c.x0 < 0.012 && c.y0 < 0.012 && c.x1 > 0.988 && c.y1 > 0.988;
+  /* Nothing to trim means exactly that — hand back the whole page, so
+     pressing Crop after it is the no-op it looks like. */
+  p.draft = tight ? { x0: 0, y0: 0, x1: 1, y1: 1 } : c;
+  paintCrop();
+  $('#cropHint').textContent = tight ? 'Already down to the page' : 'Found the page';
+});
+
 $('#cropCancel').addEventListener('click', closeCrop);
 $('#cropReset').addEventListener('click', () => {
   const p = S.pageBox[cropPi];
@@ -5779,4 +5958,5 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 scanLines, findCells, totalRot, scanBoxes, layoutPages, revealFocused,
                 scanPanels, scanCanvas, shotsToPdf, SCANof: () => SCAN, select, finalName, renderVisible,
                 MARKS: { path: MARK_PATH, width: MARK_W }, markCanvas,
+                zoomFloor, zoomTo, paperEdges, setDocName, paintItems,
                 openCrop, closeCrop, nudgeCrop, pickCrop, syncRail, turn, openRotate, cropOf };
