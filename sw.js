@@ -1,5 +1,5 @@
 /* Fill & Sign service worker — offline shell + Android share-target intake. */
-const V = 'fillandsign-v3';
+const V = 'fillandsign-v4';
 const SHARE = 'fillandsign-share';
 const SHELL = [
   './', 'index.html', 'app.css', 'app.js', 'manifest.webmanifest',
@@ -7,6 +7,7 @@ const SHELL = [
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/shrink.svg',
   'vendor/pdf.min.mjs', 'vendor/pdf.worker.min.mjs', 'vendor/pdf-lib.min.js',
   'vendor/caveat.woff2', 'vendor/dancing.woff2',
+  'vendor/peerjs.min.js', 'vendor/qrcode.js',
 ];
 
 self.addEventListener('install', e => {

@@ -241,7 +241,15 @@ function saveSoon() {
 $('#btnOpen').addEventListener('click', () => { $('#openPick').hidden = false; });
 $('#wayPdf').addEventListener('click', () => { $('#openPick').hidden = true; $('#fileInput').click(); });
 $('#wayPic').addEventListener('click', () => { $('#openPick').hidden = true; SCAN.shots = []; $('#picInput').click(); });
-$('#wayCam').addEventListener('click', () => { $('#openPick').hidden = true; SCAN.shots = []; $('#camInput').click(); });
+$('#wayCam').addEventListener('click', () => {
+  $('#openPick').hidden = true;
+  SCAN.shots = [];
+  /* A phone opens its camera. A laptop's webcam faces the wrong way for
+     paper, but the phone in the same room does not — so on a fine-pointer
+     machine this becomes "use your phone as the camera" instead. */
+  if (matchMedia('(hover:hover) and (pointer:fine)').matches) openQr();
+  else $('#camInput').click();
+});
 $('#fileInput').addEventListener('change', e => {
   const f = e.target.files[0]; if (f) openFile(f);
   e.target.value = '';
@@ -464,6 +472,7 @@ $('#btnScanGo').addEventListener('click', async () => {
     $('#scanPrev').hidden = true;
     SCAN.shots.forEach(s => s.bm.close?.());
     SCAN.shots = [];
+    closeLink();          // the phone's address dies with the hand-off
     await loadDoc(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), name, [], null);
     askView(name);
   } catch (err) {
@@ -471,6 +480,195 @@ $('#btnScanGo').addEventListener('click', async () => {
     toast('That photo could not be turned into a PDF.', 5000);
   } finally { SCAN.busy = false; busy(false); }
 });
+
+/* ================================================= THE PHONE AS THE CAMERA
+   A laptop asked to photograph a paper form is the wrong tool holding the
+   job. The phone in the same room is the right one, so hand it the camera:
+   the laptop shows a QR carrying a one-time address, the phone scans it,
+   opens this same page in camera-only dress, and every photo it takes rides
+   a WebRTC data channel straight to the laptop — encrypted by the protocol,
+   device to device, over the local network when both ends share one.
+
+   The only outside party is the signalling broker that introduces the two
+   browsers to each other, because two web pages cannot dial one another
+   unaided. It carries a handshake of about a kilobyte and none of the
+   photo; the promise on the home page survives intact. The address is
+   sixteen random characters from a CSPRNG, minted fresh every time the
+   sheet opens and dead the moment it closes. */
+let LINK = {};
+let linkLibs = null;
+const loadLink = () => (linkLibs ??= Promise.all(
+  ['vendor/peerjs.min.js', 'vendor/qrcode.js'].map(src => new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = res; s.onerror = () => { linkLibs = null; rej(new Error(src)); };
+    document.head.append(s);
+  }))));
+
+const linkId = () => {
+  const a = new Uint8Array(16), abc = 'abcdefghjkmnpqrstuvwxyz23456789';
+  crypto.getRandomValues(a);
+  return 'fs' + [...a].map(v => abc[v % abc.length]).join('');
+};
+/* tests point both ends at a broker of their own via ?ph=host:port/path */
+function linkOpts() {
+  const m = new URLSearchParams(location.search).get('ph');
+  if (!m) return undefined;
+  const [hostport, ...rest] = m.split('/');
+  const [host, port] = hostport.split(':');
+  return { host, port: +port || 443, path: '/' + rest.join('/'),
+           secure: !/^(127\.0\.0\.1|localhost)$/.test(host), key: 'peerjs' };
+}
+const linkParam = () => {
+  const m = new URLSearchParams(location.search).get('ph');
+  return m ? '&ph=' + encodeURIComponent(m) : '';
+};
+
+const qrStatus = (msg, mood) => {
+  const el = $('#qrStatus');
+  el.textContent = msg;
+  el.classList.toggle('is-live', mood === 'live');
+  el.classList.toggle('is-bad', mood === 'bad');
+};
+
+function closeLink() {
+  try { LINK.peer?.destroy(); } catch (_) {}
+  LINK = {};
+}
+
+async function openQr() {
+  closeLink();
+  $('#qrImg').hidden = true;
+  $('#qrSpin').hidden = false;
+  $('#qrSheet').hidden = false;
+  qrStatus('Making a code…');
+  try { await loadLink(); }
+  catch (_) { return qrStatus('Could not load — check your connection and try again.', 'bad'); }
+
+  const id = linkId();
+  const peer = new Peer(id, linkOpts());
+  LINK = { peer, id, got: 0 };
+  peer.on('error', e => {
+    if (LINK.peer !== peer) return;
+    qrStatus('Lost the connection — close this and try again.', 'bad');
+    console.warn('link', e?.type || e);
+  });
+  peer.on('open', () => {
+    if (LINK.peer !== peer) return;
+    const url = `${location.origin}${location.pathname}?join=${id}${linkParam()}`;
+    LINK.url = url;
+    const qr = qrcode(0, 'M');
+    qr.addData(url);
+    qr.make();
+    $('#qrImg').src = qr.createDataURL(8, 24);
+    $('#qrImg').hidden = false;
+    $('#qrSpin').hidden = true;
+    qrStatus('Waiting for your phone…');
+  });
+  peer.on('connection', conn => {
+    if (LINK.peer !== peer) return;
+    LINK.conn = conn;
+    conn.on('open', () => qrStatus('Phone connected — take the photo over there.', 'live'));
+    conn.on('data', async d => {
+      if (!d || d.t !== 'photo' || !d.buf) return;
+      try {
+        const file = new File([d.buf], d.name || 'Phone photo.jpg', { type: 'image/jpeg' });
+        const before = SCAN.shots.length;
+        $('#qrSheet').hidden = true;
+        await addShots([file]);
+        /* only say "landed" once it is really in the tray — the phone's tick
+           should never outrun the truth */
+        if (SCAN.shots.length > before) conn.send({ t: 'got', n: ++LINK.got });
+        else conn.send({ t: 'err' });
+      } catch (_) { conn.send({ t: 'err' }); }
+    });
+    conn.on('close', () => {
+      if (LINK.conn === conn) qrStatus('Waiting for your phone…');
+    });
+  });
+}
+$('#qrFallback').addEventListener('click', () => {
+  $('#qrSheet').hidden = true;
+  closeLink();
+  $('#picInput').click();
+});
+$('#qrSheet').querySelectorAll('[data-close]').forEach(b =>
+  b.addEventListener('click', () => { if (!SCAN.shots.length) closeLink(); }));
+/* the hand-off is over when the scan becomes a document, or is abandoned */
+$('#scanPrev').querySelectorAll('[data-close]').forEach(b =>
+  b.addEventListener('click', closeLink));
+
+/* ---- the phone's side: scanning the code lands here */
+const psStatus = (msg, mood) => {
+  const el = $('#psStatus');
+  el.textContent = msg;
+  el.classList.toggle('is-live', mood === 'live');
+  el.classList.toggle('is-bad', mood === 'bad');
+};
+async function shrinkPhoto(file) {
+  /* The phone can always decode its own photograph, so re-encode it here:
+     a 12-megapixel HEIC becomes a two-megabyte JPEG every browser can open,
+     and the transfer takes seconds instead of a minute. */
+  let bm;
+  try { bm = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+  catch (_) { try { bm = await createImageBitmap(file); } catch (_) { return file.arrayBuffer(); } }
+  const k = Math.min(1, 2600 / Math.max(bm.width, bm.height));
+  const cv = document.createElement('canvas');
+  cv.width = Math.round(bm.width * k); cv.height = Math.round(bm.height * k);
+  cv.getContext('2d').drawImage(bm, 0, 0, cv.width, cv.height);
+  bm.close?.();
+  const blob = await toBlob(cv, 0.9);
+  return blob.arrayBuffer();
+}
+async function phoneMode(id) {
+  $('#home').hidden = true;
+  $('#phoneSend').hidden = false;
+  document.title = 'Send a photo — Fill & Sign';
+  let sent = 0, sending = 0;
+  try { await loadLink(); }
+  catch (_) { return psStatus('Could not load. Check your signal and scan the code again.', 'bad'); }
+  const peer = new Peer(undefined, linkOpts());
+  LINK = { peer };
+  const bad = m => { psStatus(m, 'bad'); $('#psShoot').disabled = true; $('#psPick').disabled = true; };
+  peer.on('error', e => bad(
+    e?.type === 'peer-unavailable'
+      ? 'Could not find your computer. Is the code still on its screen? Scan it again if not.'
+      : 'The connection failed. Scan the code on your computer again.'));
+  peer.on('open', () => {
+    const conn = peer.connect(id, { reliable: true });
+    LINK.conn = conn;
+    const t = setTimeout(() => bad('Could not reach your computer. Is the code still on its screen?'), 15000);
+    conn.on('open', () => {
+      clearTimeout(t);
+      psStatus('Connected. Lay the form flat and fill the frame.', 'live');
+      $('#psShoot').disabled = false;
+      $('#psPick').disabled = false;
+    });
+    conn.on('data', d => {
+      if (d?.t === 'err') { sending--; psStatus('That one did not arrive — take it again.', 'bad'); return; }
+      if (d?.t !== 'got') return;
+      sent = d.n; sending--;
+      $('#psCount').hidden = false;
+      $('#psCount').textContent = `${sent} photo${sent > 1 ? 's' : ''} landed on your computer ✓`;
+      if (!sending) psStatus('Take another page, or just put the phone down — you are done here.', 'live');
+      $('#psShoot').textContent = 'Take another photo';
+    });
+    conn.on('close', () => bad('Your computer closed the connection.'));
+  });
+  const send = async files => {
+    for (const f of files) {
+      sending++;
+      psStatus('Sending…');
+      try { LINK.conn.send({ t: 'photo', name: f.name || 'Phone photo.jpg', buf: await shrinkPhoto(f) }); }
+      catch (_) { sending--; bad('That photo could not be sent — try it again.'); }
+    }
+  };
+  $('#psShoot').addEventListener('click', () => $('#psCamInput').click());
+  $('#psPick').addEventListener('click', () => $('#psPicInput').click());
+  ['#psCamInput', '#psPicInput'].forEach(sel => $(sel).addEventListener('change', e => {
+    const fs = [...e.target.files]; e.target.value = '';
+    if (fs.length) send(fs);
+  }));
+}
 
 async function openFile(file) {
   if (!/pdf/i.test(file.type) && !/\.pdf$/i.test(file.name)) return toast('That file is not a PDF.');
@@ -6158,6 +6356,8 @@ if ('launchQueue' in window) {
 
 /* ---------------------------------------------------------------- startup */
 (async function init() {
+  const join = new URLSearchParams(location.search).get('join');
+  if (join) { phoneMode(join); return; }        // this visit is a camera, nothing else
   if (!(await checkShared())) await checkResume();
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     try { await navigator.serviceWorker.register('sw.js'); } catch (_) {}
@@ -6174,4 +6374,5 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 scanPanels, scanCanvas, shotsToPdf, SCANof: () => SCAN, select, finalName, renderVisible,
                 MARKS: { path: MARK_PATH, width: MARK_W }, markCanvas,
                 zoomFloor, zoomTo, paperEdges, setDocName, paintItems,
+                openQr, closeLink, LINKof: () => LINK,
                 openCrop, closeCrop, nudgeCrop, pickCrop, syncRail, turn, openRotate, cropOf };
