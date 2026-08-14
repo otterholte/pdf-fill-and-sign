@@ -1123,3 +1123,32 @@ select.fld{padding-right:0;}
 .ps-status.is-bad{color:var(--danger);font-weight:650;}
 .ps-card .btn-ghost.wide{margin-top:10px;}
 .ps-count{margin:14px 0 0;font-size:14.5px;font-weight:650;color:var(--ok);}
+
+/* ---------- gathering several things at once ----------
+   The rectangle a mouse draws across empty paper, and the quieter outline on
+   everything it has caught — quieter than .sel because none of these is
+   "picked up", they are merely counted. */
+.marquee{
+  position:fixed;z-index:60;pointer-events:none;border-radius:3px;
+  border:1.5px dashed var(--accent);
+  background:color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.it.msel{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px;}
+/* the bar in its group dress: a count, a rule, and Delete */
+.selcount{display:none;font-size:13.5px;font-weight:650;color:var(--fg-2);white-space:nowrap;}
+.selbar.multi .selcount{display:block;}
+.selbar.multi #nudge,.selbar.multi .nudge + .sep,.selbar.multi #swatches,.selbar.multi #sepColor,
+.selbar.multi #btnSmaller,.selbar.multi #btnBigger,.selbar.multi #btnDupe,
+.selbar.multi #sepStamp,.selbar.multi #btnStamp,.selbar.multi #btnDateFmt{display:none;}
+
+/* ---------- the folded colour row (phones) ----------
+   One swatch — the colour in use — until it is asked to be three. The caret
+   under it is the whole affordance: this is a button that opens, not just a
+   dot that shows. */
+.swatches.folded .sw:not(.is-on){display:none;}
+.swatches.folded{position:relative;padding-right:13px;}
+.swatches.folded::after{
+  content:'';position:absolute;right:0;top:50%;margin-top:-2.5px;
+  border-left:4.5px solid transparent;border-right:4.5px solid transparent;
+  border-top:5.5px solid var(--fg-3);
+}

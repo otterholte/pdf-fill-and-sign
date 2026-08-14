@@ -2631,6 +2631,7 @@ function paintItems() {
     const d = itemEl(it);
     if (S.sel === it.id) d.classList.add('sel');
   });
+  applyMarq();          // a repaint must not shake the group out of hand
   hintsSoon();
 }
 function relayoutItems() {
@@ -2643,6 +2644,7 @@ const elOf = id => pagesEl.querySelector(`[data-id="${id}"]`);
 const getSel = () => S.items.find(i => i.id === S.sel);
 
 function select(id) {
+  if (id) clearMarq(true);          // picking one thing up puts the group down
   // flush whatever is being typed before judging whether a box is empty
   const ae = document.activeElement;
   if (ae && ae.isContentEditable) ae.blur();
@@ -2656,6 +2658,85 @@ function select(id) {
   $$('.it').forEach(d => d.classList.toggle('sel', d.dataset.id === id));
   syncBars();
   if (prev && prev.id !== id) hintsSoon();
+}
+
+/* ------------------------------------------------- selecting several at once
+   Drawn with the mouse across empty paper, the way files are gathered on a
+   desktop. The group borrows the selection bar in a plainer dress — a count
+   and Delete — because ten things selected at once were almost certainly
+   selected to be removed at once. A click anywhere puts the group down. */
+let MARQ = [];
+function setMarq(ids) {
+  MARQ = ids.filter(id => S.items.some(i => i.id === id));
+  if (!MARQ.length) return clearMarq();
+  S.sel = null;
+  $$('.it').forEach(d => {
+    d.classList.remove('sel');
+    d.classList.toggle('msel', MARQ.includes(d.dataset.id));
+  });
+  keepView(() => {
+    $('#selbar').hidden = false;
+    $('#selbar').classList.add('multi');
+    houseButtons(false);
+  });
+  $('#selCount').textContent = `${MARQ.length} selected`;
+}
+function clearMarq(quiet) {
+  if (!MARQ.length && !$('#selbar').classList.contains('multi')) return;
+  MARQ = [];
+  $$('.it.msel').forEach(d => d.classList.remove('msel'));
+  $('#selbar').classList.remove('multi');
+  if (!quiet) keepView(() => { $('#selbar').hidden = !getSel(); });
+}
+const applyMarq = () => {
+  if (MARQ.length) setMarq(MARQ);   // re-checks existence after a repaint
+};
+
+function startMarquee(e) {
+  const start = { x: e.clientX, y: e.clientY }, pid = e.pointerId;
+  let box = null;
+  const rectNow = ev => ({
+    x0: Math.min(start.x, ev.clientX), y0: Math.min(start.y, ev.clientY),
+    x1: Math.max(start.x, ev.clientX), y1: Math.max(start.y, ev.clientY),
+  });
+  const hits = R => $$('.it').filter(d => {
+    const r = d.getBoundingClientRect();
+    return r.left < R.x1 && r.right > R.x0 && r.top < R.y1 && r.bottom > R.y0;
+  }).map(d => d.dataset.id);
+  const move = ev => {
+    if (ev.pointerId !== pid) return;
+    if (!box) {
+      if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) < 6) return;
+      box = document.createElement('div');
+      box.className = 'marquee';
+      document.body.append(box);
+      select(null); clearMarq(true);
+    }
+    ev.preventDefault();
+    const R = rectNow(ev);
+    Object.assign(box.style, { left: R.x0 + 'px', top: R.y0 + 'px',
+                               width: (R.x1 - R.x0) + 'px', height: (R.y1 - R.y0) + 'px' });
+    const ids = hits(R);
+    $$('.it').forEach(d => d.classList.toggle('msel', ids.includes(d.dataset.id)));
+  };
+  const up = ev => {
+    if (ev && ev.pointerId !== pid) return;
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+    if (!box) {                                   // it was only ever a click
+      focusStage(); leaveSpot();
+      if (S.sel) select(null);
+      clearMarq();
+      return;
+    }
+    const R = rectNow(ev);
+    box.remove();
+    setMarq(hits(R));
+  };
+  window.addEventListener('pointermove', move, { passive: false });
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
 }
 
 /* The bars live in the same column as the stage, so one appearing takes its
@@ -2710,6 +2791,11 @@ function syncBars() {
   $('#swatches').hidden = !colorable;
   $('#sepColor').hidden = !colorable;
   $$('#swatches .sw').forEach(b => b.classList.toggle('is-on', b.dataset.color === it.color));
+  /* On a phone the three swatches fold to the one in use — the bar is short
+     of room, and the colour is nearly always left alone. A tap unfolds them. */
+  $('#swatches').classList.toggle('folded', matchMedia('(hover:none)').matches);
+  /* a copy of a signature is a job for the sheet, not a button */
+  $('#btnDupe').hidden = !colorable;
 
   const stampBtn = $('#btnStamp');
   stampBtn.hidden = it.type !== 'sig';
@@ -2929,9 +3015,15 @@ pagesEl.addEventListener('pointerdown', e => {
      is just an impatient single tap. */
   if (twice) { e.preventDefault(); return placeLooseText(pi, x, y); }
 
+  /* A mouse pressed on empty paper might be about to draw a box around
+     several things at once. If it never travels, the pointer-up treats it as
+     the plain click it was: deselect and move on. */
+  if (e.pointerType === 'mouse') { e.preventDefault(); return startMarquee(e); }
+
   focusStage();
   leaveSpot();
   if (S.sel) select(null);
+  clearMarq();
 });
 
 /* ------------------------------------------------------------- tick boxes */
@@ -3499,9 +3591,11 @@ function startResize(e, d) {
 
 /* selection bar */
 $$('#swatches .sw').forEach(b => b.addEventListener('click', () => {
+  const wrap = $('#swatches');
+  if (wrap.classList.contains('folded')) { wrap.classList.remove('folded'); return; }
   const it = getSel(); if (!it) return;
   push(); it.color = b.dataset.color;
-  paintItems(); select(it.id);
+  paintItems(); select(it.id);        // syncBars folds the row back up on touch
 }));
 /* `held` is for a key being leant on: forty presses in a second are one thing
    you did, so they share the undo step the first press opened. */
@@ -3574,7 +3668,78 @@ $('#nudge').addEventListener('pointerdown', e => {
 
 $('#btnBigger').addEventListener('click', () => bump(1.15));
 $('#btnSmaller').addEventListener('click', () => bump(1 / 1.15));
-$('#btnDelete').addEventListener('click', () => { const it = getSel(); if (it) { push(); removeItem(it.id); } });
+$('#btnDelete').addEventListener('click', () => {
+  if (MARQ.length) {
+    push();
+    const ids = [...MARQ];
+    clearMarq();
+    ids.forEach(removeItem);
+    saveSoon();
+    return;
+  }
+  const it = getSel(); if (it) { push(); removeItem(it.id); }
+});
+
+/* ------------------------------------------------- copy, paste, duplicate
+   The clipboard is the app's own: what you copy is the object as placed —
+   its words, its colour, its size — and paste sets the copy down a little
+   below and to the right, stepping further with each paste so ten copies do
+   not land in one pile. A signature brings its timestamp along; a copy of a
+   line of text lets go of the blank it was snapped to, because the blank is
+   already spoken for. */
+let CLIP = null, pasteN = 0;
+const cloneItem = it => {
+  const c = JSON.parse(JSON.stringify(it));
+  delete c.lineKey; delete c.cell;
+  return c;
+};
+function copySel() {
+  let list = MARQ.length
+    ? MARQ.map(id => S.items.find(i => i.id === id)).filter(Boolean)
+    : (getSel() ? [getSel()] : []);
+  if (!list.length) return false;
+  const ids = new Set(list.map(i => i.id));
+  for (const it of [...list]) {
+    if (it.type === 'sig') { const st = stampOf(it); if (st && !ids.has(st.id)) { list.push(st); ids.add(st.id); } }
+    if (it.link && !ids.has(it.link)) { const sg = S.items.find(i => i.id === it.link); if (sg) { list.push(sg); ids.add(sg.id); } }
+  }
+  CLIP = list.map(cloneItem);
+  pasteN = 0;
+  toast(CLIP.length > 1 ? `Copied ${CLIP.length} things.` : 'Copied.', 1400);
+  return true;
+}
+function pasteClip() {
+  if (!CLIP?.length) return;
+  push();
+  pasteN++;
+  const off = 0.014 * pasteN;
+  const map = {};
+  const fresh = CLIP.map(src => {
+    const it = cloneItem(src);
+    map[src.id] = it.id = uid();
+    it.x = clamp(it.x + off, -0.02, 1.02);
+    it.y = clamp(it.y + off, -0.02, 1.0);
+    return it;
+  });
+  for (const it of fresh) if (it.link && map[it.link]) it.link = map[it.link];
+  S.items.push(...fresh);
+  paintItems();
+  if (fresh.length === 1) select(fresh[0].id);
+  else setMarq(fresh.map(i => i.id));
+  saveSoon();
+}
+$('#btnDupe').addEventListener('click', () => {
+  const it = getSel(); if (!it) return;
+  push();
+  const c = cloneItem(it);
+  c.id = uid();
+  c.x = clamp(c.x + 0.015, -0.02, 1.02);
+  c.y = clamp(c.y + 0.015, -0.02, 1.0);
+  S.items.push(c);
+  paintItems();
+  select(c.id);
+  saveSoon();
+});
 /* Duplicate used to sit here too. Copying something you have placed is a
    rare thing to want on a form — you are filling in one of each — and it was
    holding a permanent slot in a bar that has to fit on a phone beside the
@@ -3667,10 +3832,18 @@ document.addEventListener('keydown', e => {
   /* Escape lets go. It matters more than it used to: while something is
      selected its own controls are standing where the tool row stands, and
      tapping bare paper is not always convenient on a full page. */
-  if (e.key === 'Escape' && S.sel) { e.preventDefault(); select(null); return; }
-  if ((e.key === 'Backspace' || e.key === 'Delete') && S.sel) { e.preventDefault(); push(); removeItem(S.sel); }
+  if (e.key === 'Escape' && (S.sel || MARQ.length)) { e.preventDefault(); select(null); clearMarq(); return; }
+  if ((e.key === 'Backspace' || e.key === 'Delete') && (S.sel || MARQ.length)) {
+    e.preventDefault(); push();
+    if (MARQ.length) { const ids = [...MARQ]; clearMarq(); ids.forEach(removeItem); saveSoon(); }
+    else removeItem(S.sel);
+  }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+  /* the caret keeps its native copy while typing — the guard above already
+     returned — so down here Ctrl+C means the object, and Ctrl+V a fresh one */
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'c') { if (copySel()) e.preventDefault(); }
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'v') { if (CLIP?.length) { e.preventDefault(); pasteClip(); } }
 });
 
 /* ================================================ KEYBOARD FILLING (desktop)
@@ -6375,4 +6548,5 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 MARKS: { path: MARK_PATH, width: MARK_W }, markCanvas,
                 zoomFloor, zoomTo, paperEdges, setDocName, paintItems,
                 openQr, closeLink, LINKof: () => LINK,
+                copySel, pasteClip, setMarq, clearMarq, MARQof: () => MARQ,
                 openCrop, closeCrop, nudgeCrop, pickCrop, syncRail, turn, openRotate, cropOf };
