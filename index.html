@@ -392,6 +392,18 @@
   </div>
 
   <div class="cropbar" id="cropbar" hidden>
+    <!-- Straighten. A photographed page is never quite square, and the last
+         tenth of a degree is a matter of taste, so the machine's answer is
+         only ever a starting position on a dial you can turn. -->
+    <div class="skew-row" id="skewRow">
+      <div class="skew-head">
+        <span class="skew-lab">Straighten</span>
+        <button class="skew-val" id="skewVal" title="Back to square">0.0&deg;</button>
+      </div>
+      <canvas class="skew-rule" id="skewRule" role="slider" tabindex="0"
+              aria-label="Straighten, in degrees" aria-valuemin="-15" aria-valuemax="15" aria-valuenow="0"></canvas>
+    </div>
+
     <div class="crop-row">
       <span class="crop-hint" id="cropHint">Drag an edge or a corner</span>
       <button class="btn-icon crop-rot" id="cropCCW" aria-label="Turn left">
@@ -412,9 +424,9 @@
          Crop button still applies them, so a guess is always yours to correct
          or throw away. -->
     <div class="crop-row">
-      <button class="btn-ghost sm smartcrop" id="cropSmart">
+      <button class="btn-ghost smartcrop" id="cropSmart">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8.5V5.5A1.5 1.5 0 0 1 5.5 4h3M15.5 4h3A1.5 1.5 0 0 1 20 5.5v3M20 15.5v3a1.5 1.5 0 0 1-1.5 1.5h-3M8.5 20h-3A1.5 1.5 0 0 1 4 18.5v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="m12 8.6.95 2.45L15.4 12l-2.45.95L12 15.4l-.95-2.45L8.6 12l2.45-.95z" fill="currentColor"/></svg>
-        Smart crop
+        Straighten &amp; crop
       </button>
     </div>
     <div class="crop-row">

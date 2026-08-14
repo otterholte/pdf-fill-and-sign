@@ -955,24 +955,28 @@ select.fld{padding-right:0;}
 }
 .cropbar[hidden]{display:none;}
 .crop-row{display:flex;align-items:center;gap:8px;}
-.crop-hint{flex:1;font-size:12.5px;color:var(--accent);font-weight:600;}
+/* The row is its buttons and nothing else. The hint still exists — it is what
+   a screen reader is told, and what the tests read — but it takes no room and
+   says nothing to the eye; the panel above and the button below do the
+   talking. */
+.crop-hint{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;}
+.crop-row:has(> .crop-nudge){justify-content:center;gap:10px;}
 .crop-nudge{flex:none;}
 .crop-nudge .nud{width:38px;height:34px;}
 .crop-nudge .nud-x{color:var(--accent);opacity:.8;}
 .crop-nudge .nud[hidden]{display:none;}
 .crop-row .btn-ghost.sm{flex:1;}
 .crop-row .btn-save{flex:1;}
-/* Its own line, and quieter than the three below it: an offer, not the thing
-   you came here to press. */
-.crop-row .btn-ghost.sm.smartcrop{
-  display:flex;align-items:center;justify-content:center;gap:7px;
-  flex:0 0 auto;align-self:center;padding:5px 14px;
-  background:transparent;border-color:color-mix(in srgb, var(--accent) 36%, transparent);
-  color:var(--accent);font-weight:650;
+/* The one press that does the whole job, so it is the size of one: its own
+   line, full width, and the only thing on it. */
+.crop-row .btn-ghost.smartcrop{
+  display:flex;align-items:center;justify-content:center;gap:9px;
+  flex:1 1 auto;padding:11px 16px;font-size:15.5px;
+  background:var(--accent-soft);border-color:color-mix(in srgb, var(--accent) 42%, transparent);
+  color:var(--accent);font-weight:700;
 }
-.smartcrop svg{width:16px;height:16px;flex:none;}
+.smartcrop svg{width:20px;height:20px;flex:none;}
 .smartcrop[disabled]{opacity:.55;}
-.crop-row:has(> .smartcrop){justify-content:center;}
 /* the rotate bar is one row, not two */
 .rotbar{flex-direction:row;align-items:center;}
 
@@ -1205,3 +1209,25 @@ select.fld{padding-right:0;}
 /* the two turns inside the crop bar: quieter than the arrows beside them */
 .crop-rot{width:34px;height:34px;color:var(--accent);opacity:.85;}
 .crop-rot svg{width:19px;height:19px;}
+
+/* ---------- the straighten dial ----------
+   A ruler that slides under a fixed needle, the way a camera app does it:
+   the number is the correction being applied, and the small dot shows where
+   square is, so "how far off am I" is a glance rather than a calculation. */
+/* Its own part of the screen, above the turning and nudging: a panel with its
+   own ground, so the dial reads as a thing in itself rather than another row
+   of the same bar. */
+.skew-row{
+  display:flex;flex-direction:column;gap:2px;
+  padding:6px 10px 2px;margin:-2px 0 2px;
+  background:var(--bg);border:1px solid var(--line);border-radius:14px;
+}
+.skew-head{display:flex;align-items:center;justify-content:center;gap:10px;}
+.skew-lab{font-size:12.5px;font-weight:650;color:var(--accent);letter-spacing:-.005em;}
+.skew-val{
+  font-size:13px;font-weight:750;color:var(--accent);
+  background:var(--bg);border:1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-radius:999px;padding:2px 10px;font-variant-numeric:tabular-nums;min-width:56px;
+}
+.skew-rule{width:100%;height:34px;display:block;touch-action:none;cursor:ew-resize;}
+.skew-rule:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px;}

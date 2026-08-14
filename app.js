@@ -228,6 +228,7 @@ $('#btnRedo').addEventListener('click', redo);
    a cap is a promise about the future, and a promise kept by asking first
    would be asking every day. */
 const MAX_DOCS = 30;
+let keepDocId = null;      // a rebuild of the same document keeps its place
 async function docId(buf) {
   try {
     const h = await crypto.subtle.digest('SHA-256', buf.slice(0));
@@ -464,9 +465,75 @@ async function drawShots() {
    margins fitted with straight lines — so straighten the photograph before
    it ever becomes a PDF. Small angles only, and only when both margins agree:
    a confident wrong turn is worse than a tolerated slant. */
+/* The angle a document is lying at, read from its own writing.
+
+   Margin-fitting was the wrong instrument: it needs two long clean edges,
+   and a photograph of paper on paper — a sheet on a stack, a form on a desk
+   pad — hands it two edges that disagree, at which point it honestly gives
+   up and reports nothing. But a form is full of a far better signal. Its
+   rules and its lines of text are all parallel, and they are only *sharp*
+   when the page is square: tilt it and every row of ink smears across
+   several rows of the image.
+
+   So try angles, and keep the one that makes the horizontal profile of the
+   ink as spiky as possible — sum of squared row counts, the classic measure
+   of "how much does this histogram stand up". Coarse pass at half a degree,
+   then a tenth-degree refinement around the winner. It reads the writing
+   rather than the paper, so it works on a page with no visible edges at
+   all, and it is what a person means by "lined up". */
+function skewOf(lum, W, H) {
+  /* ink = darker than the local page, sampled cheaply: compare each pixel to
+     the mean of its own row band, so a shadowed corner does not read as ink */
+  const pts = [];
+  const rowMean = new Float64Array(H);
+  for (let y = 0; y < H; y++) {
+    let s = 0;
+    for (let x = 0; x < W; x++) s += lum[y * W + x];
+    rowMean[y] = s / W;
+  }
+  let all = 0;
+  for (let y = 0; y < H; y++) all += rowMean[y];
+  all /= H;
+  const cut = Math.min(all - 18, 205);
+  for (let y = 0; y < H; y += 1) {
+    for (let x = 0; x < W; x += 1) {
+      if (lum[y * W + x] < cut) pts.push(x - W / 2, y - H / 2);
+    }
+  }
+  if (pts.length < 400) return 0;                    // nothing written on it
+  const n = pts.length / 2;
+  const span = Math.ceil(Math.hypot(W, H)) + 2;
+  const hist = new Int32Array(span);
+  const score = deg => {
+    hist.fill(0);
+    const t = deg * Math.PI / 180, si = Math.sin(t), co = Math.cos(t);
+    const off = span / 2;
+    for (let i = 0; i < n; i++) {
+      const x = pts[i * 2], y = pts[i * 2 + 1];
+      hist[(y * co - x * si + off) | 0]++;
+    }
+    let v = 0;
+    for (let i = 0; i < span; i++) v += hist[i] * hist[i];
+    return v;
+  };
+  let best = 0, bestV = -1;
+  for (let d = -15; d <= 15.0001; d += 0.5) {
+    const v = score(d);
+    if (v > bestV) { bestV = v; best = d; }
+  }
+  for (let d = best - 0.5; d <= best + 0.5001; d += 0.1) {
+    const v = score(d);
+    if (v > bestV) { bestV = v; best = d; }
+  }
+  const flat = score(0);
+  /* a page already square scores its best at zero; only claim a tilt when
+     turning it genuinely sharpens the writing */
+  if (bestV < flat * 1.02) return 0;
+  return Math.abs(best) < 0.15 ? 0 : +best.toFixed(2);
+}
 function tiltOfCanvas(cv) {
   try {
-    const W2 = 440, k = W2 / cv.width, H2 = Math.max(40, Math.round(cv.height * k));
+    const W2 = 460, k = W2 / cv.width, H2 = Math.max(40, Math.round(cv.height * k));
     const c = document.createElement('canvas');
     c.width = W2; c.height = H2;
     const x2 = c.getContext('2d', { alpha: false, willReadFrequently: true });
@@ -477,8 +544,24 @@ function tiltOfCanvas(cv) {
     for (let i = 0, m = 0; m < lum.length; m++, i += 4) {
       lum[m] = (d[i] * 77 + d[i + 1] * 151 + d[i + 2] * 28) >> 8;
     }
+    /* Read the writing *inside the paper*. A desk has grain, and grain has no
+       preferred direction — measured across the whole photograph it drowns
+       out the rules on the page. So find the page first, then look only at
+       what is written on it. */
+    let sub = lum, sw = W2, sh = H2;
     const r = paperAnalyse(lum, W2, H2);
-    return (r && !r.full) ? (r.tilt || 0) : 0;
+    if (r && !r.full && r.rect) {
+      const x0 = Math.max(0, Math.round(r.rect.x0 * W2) + 2);
+      const x1 = Math.min(W2, Math.round(r.rect.x1 * W2) - 2);
+      const y0 = Math.max(0, Math.round(r.rect.y0 * H2) + 2);
+      const y1 = Math.min(H2, Math.round(r.rect.y1 * H2) - 2);
+      if (x1 - x0 > 60 && y1 - y0 > 60) {
+        sw = x1 - x0; sh = y1 - y0;
+        sub = new Uint8Array(sw * sh);
+        for (let y = 0; y < sh; y++) sub.set(lum.subarray((y0 + y) * W2 + x0, (y0 + y) * W2 + x1), y * sw);
+      }
+    }
+    return skewOf(sub, sw, sh);
   } catch (_) { return 0; }
 }
 function unskew(cv, ref) {
@@ -492,7 +575,7 @@ function unskew(cv, ref) {
   const cx = out.getContext('2d');
   cx.fillStyle = '#fff'; cx.fillRect(0, 0, out.width, out.height);
   cx.translate(out.width / 2, out.height / 2);
-  cx.rotate(t * Math.PI / 180);
+  cx.rotate(-t * Math.PI / 180);   // the angle it is at; turn it back
   cx.drawImage(cv, -cv.width / 2, -cv.height / 2);
   return out;
 }
@@ -764,7 +847,8 @@ async function openFile(file) {
 async function loadDoc(buf, name, items, rots, fields, crops) {
   S.bytes = buf.slice(0);
   S.name = name;
-  S.docId = await docId(S.bytes);
+  S.docId = keepDocId || await docId(S.bytes);
+  keepDocId = null;
   /* Opening a file this device has seen before finds the work already on it —
      unless this call is itself carrying state (a restore, or a fresh scan). */
   if (!items?.length && !fields) {
@@ -5608,12 +5692,15 @@ function openCrop() {
   p.draft = { ...cropOf(p) };
   $('#cropbar').hidden = false;
   $('#editor').classList.add('cropping');
+  setSkew(0, true);
+  requestAnimationFrame(drawRule);
   showCrop(p);                            // show it whole again while you work
   pickCrop(cropSel);
   revealPage(cropPi);
 }
 function closeCrop() {
   const p = S.pageBox[cropPi];
+  clearSkewPreview();
   if (p) delete p.draft;
   cropPi = -1;
   $('#cropbar').hidden = true;
@@ -5666,11 +5753,21 @@ pagesEl.addEventListener('pointerdown', e => {
   window.addEventListener('pointercancel', up);
 }, true);
 
-$('#cropApply').addEventListener('click', () => {
-  const p = S.pageBox[cropPi];
+$('#cropApply').addEventListener('click', async () => {
+  let p = S.pageBox[cropPi];
   if (!p) return closeCrop();
+  /* Turn first, then trim: a crop is a rectangle on a page, and which part of
+     the paper it covers depends on which way the paper is lying. */
+  if (skewDeg) {
+    const deg = skewDeg;
+    push();
+    busy(true, 'Straightening…');
+    try { await bakeSkew(deg); } catch (e) { console.warn('straighten', e); }
+    busy(false);
+    p = S.pageBox[cropPi];
+    if (!p) return closeCrop();
+  } else { push(); }
   const c = p.draft;
-  push();
   p.crop = (c.x0 < 0.002 && c.y0 < 0.002 && c.x1 > 0.998 && c.y1 > 0.998)
     ? null : { ...c, rot: totalRot(p) };
   closeCrop();
@@ -5990,14 +6087,33 @@ function paperAnalyse(lum, W, H) {
   return { rect: c, tilt };
 }
 async function runSmartCrop() {
-  const p = S.pageBox[cropPi];
+  let p = S.pageBox[cropPi];
   if (!p) return;
   const b = $('#cropSmart');
   b.disabled = true;
   const was = $('#cropHint').textContent;
+  /* Square it up before looking for its edges. A crop is an upright
+     rectangle, so on a page lying at an angle the best one available still
+     keeps desk in two corners or loses paper in the other two — there is no
+     good answer until the page is straight. */
+  const label = b.querySelector('span') || null;
+  const say = t => { const n = [...b.childNodes].find(n => n.nodeType === 3 && n.textContent.trim());
+                     if (n) n.textContent = ' ' + t + ' '; };
+  skewBusy = true;
+  try {
+    say('Lining the page up…');
+    $('#cropHint').textContent = 'Lining the page up…';
+    clearSkewPreview();
+    const tilt = tiltOfCanvas(p.cv);
+    if (tilt) { await bakeSkew(-tilt); p = S.pageBox[cropPi]; }
+  } catch (e) { console.warn('straighten', e); }
+  skewBusy = false;
+  if (!p || cropPi < 0) { b.disabled = false; return; }
+  say('Looking for the edges…');
   $('#cropHint').textContent = 'Looking for the edges…';
   let c = null;
   try { c = await paperEdges(p); } catch (e) { console.warn('smart crop', e); }
+  say('Straighten & crop');
   b.disabled = false;
   if (cropPi < 0) return;                       // they left while it was thinking
   if (!c) { $('#cropHint').textContent = was; return toast('Could not tell where the page stops — drag the edges instead.', 3400); }
@@ -6006,14 +6122,147 @@ async function runSmartCrop() {
      pressing Crop after it is the no-op it looks like. */
   p.draft = tight ? { x0: 0, y0: 0, x1: 1, y1: 1 } : c;
   paintCrop();
-  $('#cropHint').textContent = tight ? 'Already down to the page' : 'Found the page';
+  $('#cropHint').textContent = tight ? 'Already down to the page' : 'Straightened, and found the page';
 }
 $('#cropSmart').addEventListener('click', runSmartCrop);
+
+/* ------------------------------------------------------- the straighten dial
+   The value is the correction: how far the page is being turned, clockwise
+   positive, exactly as it reads on the dial. While the dial moves only the
+   rendered canvas turns — the crop frame stays square to the screen, which is
+   what makes "line the writing up with this edge" possible — and the turn is
+   written into the document when Crop is pressed. */
+let skewDeg = 0, skewBusy = false;
+const PPD = 9;                                   // pixels per degree on the rule
+function drawRule() {
+  const cv = $('#skewRule');
+  const r = cv.getBoundingClientRect();
+  if (!r.width) return;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+  const x = cv.getContext('2d');
+  x.scale(dpr, dpr);
+  const W = r.width, H = r.height, mid = W / 2;
+  const css = getComputedStyle(document.documentElement);
+  const line = (css.getPropertyValue('--fg-3') || '#79828e').trim();
+  const acc = (css.getPropertyValue('--accent') || '#1b4fd8').trim();
+  x.clearRect(0, 0, W, H);
+  for (let d = -24; d <= 24; d++) {
+    const px = mid + (d - skewDeg) * PPD;
+    if (px < -2 || px > W + 2) continue;
+    const major = d % 5 === 0;
+    x.globalAlpha = major ? 0.85 : 0.38;
+    x.strokeStyle = line;
+    x.lineWidth = major ? 1.6 : 1;
+    const hh = major ? H * 0.56 : H * 0.3;
+    x.beginPath(); x.moveTo(px, (H - hh) / 2); x.lineTo(px, (H + hh) / 2); x.stroke();
+  }
+  x.globalAlpha = 1;
+  const zx = mid - skewDeg * PPD;                // where square actually is
+  if (zx >= 0 && zx <= W) { x.fillStyle = line; x.beginPath(); x.arc(zx, H - 3.5, 2.1, 0, 7); x.fill(); }
+  x.strokeStyle = acc; x.lineWidth = 2.6; x.lineCap = 'round';
+  x.beginPath(); x.moveTo(mid, 3); x.lineTo(mid, H - 3); x.stroke();
+}
+function setSkew(v, quiet) {
+  skewDeg = clamp(Math.round(v * 10) / 10, -15, 15);
+  $('#skewVal').textContent = (skewDeg > 0 ? '+' : '') + skewDeg.toFixed(1) + '\u00b0';
+  $('#skewRule').setAttribute('aria-valuenow', skewDeg);
+  const p = S.pageBox[cropPi];
+  if (p?.cv) {
+    p.cv.style.transform = skewDeg ? `rotate(${skewDeg}deg)` : '';
+    p.cv.style.transformOrigin = '50% 50%';
+  }
+  drawRule();
+  if (!quiet && cropPi >= 0) {
+    $('#cropHint').textContent = skewDeg ? 'Crop keeps the turn' : 'Drag an edge or a corner';
+  }
+}
+function clearSkewPreview() {
+  S.pageBox.forEach(p => { if (p.cv) p.cv.style.transform = ''; });
+  skewDeg = 0;
+}
+$('#skewVal').addEventListener('click', () => setSkew(0));
+$('#skewRule').addEventListener('pointerdown', e => {
+  if (skewBusy) return;
+  e.preventDefault();
+  const pid = e.pointerId, x0 = e.clientX, v0 = skewDeg;
+  $('#skewRule').setPointerCapture?.(pid);
+  const move = ev => { if (ev.pointerId === pid) setSkew(v0 - (ev.clientX - x0) / PPD); };
+  const up = ev => {
+    if (ev && ev.pointerId !== pid) return;
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+    window.removeEventListener('pointercancel', up);
+  };
+  window.addEventListener('pointermove', move, { passive: false });
+  window.addEventListener('pointerup', up);
+  window.addEventListener('pointercancel', up);
+});
+$('#skewRule').addEventListener('keydown', e => {
+  const step = e.shiftKey ? 1 : 0.1;
+  if (e.key === 'ArrowLeft') { e.preventDefault(); setSkew(skewDeg - step); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); setSkew(skewDeg + step); }
+  if (e.key === 'Home') { e.preventDefault(); setSkew(0); }
+});
+
+/* Write the turn into the document. The page is redrawn as itself, turned
+   about its middle — vectors stay vectors, a photograph stays a photograph —
+   and everything already placed on that page turns with it. */
+async function straightenBytes(pi, deg) {
+  const src = await PDFDocument.load(S.bytes.slice(0), { ignoreEncryption: true });
+  const out = await PDFDocument.create();
+  for (let i = 0; i < src.getPageCount(); i++) {
+    const sp = src.getPage(i);
+    const w = sp.getWidth(), h = sp.getHeight();
+    const emb = await out.embedPage(sp);
+    const np = out.addPage([w, h]);
+    if (i === pi) {
+      np.drawRectangle({ x: 0, y: 0, width: w, height: h, color: rgb(1, 1, 1) });
+      /* the dial turns clockwise on screen; a PDF turns the other way */
+      const f = -deg * Math.PI / 180, cx = w / 2, cy = h / 2;
+      np.drawPage(emb, {
+        x: cx - (cx * Math.cos(f) - cy * Math.sin(f)),
+        y: cy - (cx * Math.sin(f) + cy * Math.cos(f)),
+        rotate: degrees(-deg),
+      });
+    } else {
+      np.drawPage(emb, { x: 0, y: 0 });
+    }
+    const r = sp.getRotation();
+    if (r && r.angle) np.setRotation(r);
+  }
+  return out.save();
+}
+async function bakeSkew(deg) {
+  const pi = cropPi, p = S.pageBox[pi];
+  if (!p || !deg) return false;
+  const draft = p.draft ? { ...p.draft } : null;
+  const rots = S.pageBox.map(b => b.userRot);
+  const crops = S.pageBox.map(b => b.crop || null);
+  const t = deg * Math.PI / 180;
+  for (const it of S.items) {
+    if (it.page !== pi) continue;
+    const [Wl, Hl] = localDims(p.lw, p.lh, it.rot);
+    const dx = (it.x - 0.5) * Wl, dy = (it.y - 0.5) * Hl;
+    it.x = (dx * Math.cos(t) - dy * Math.sin(t)) / Wl + 0.5;
+    it.y = (dx * Math.sin(t) + dy * Math.cos(t)) / Hl + 0.5;
+  }
+  const bytes = await straightenBytes(pi, deg);
+  clearSkewPreview();
+  keepDocId = S.docId;
+  await loadDoc(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+                S.name, S.items, rots, S.fields, crops);
+  showPage();
+  openCrop();
+  if (draft && S.pageBox[cropPi]) { S.pageBox[cropPi].draft = draft; paintCrop(); }
+  return true;
+}
 
 /* Turning the page without leaving the crop: the draft is remembered in the
    frame of the page as it stands, so it is carried through the turn the same
    way a committed crop is, and lands on the same part of the paper. */
-function cropTurn(by) {
+async function cropTurn(by) {
+  if (skewDeg) { const d = skewDeg; skewBusy = true; try { await bakeSkew(d); } finally { skewBusy = false; } }
   const p = S.pageBox[cropPi];
   if (!p) return;
   const from = totalRot(p);
@@ -6775,6 +7024,6 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 scanPanels, scanCanvas, shotsToPdf, SCANof: () => SCAN, select, finalName, renderVisible,
                 MARKS: { path: MARK_PATH, width: MARK_W }, markCanvas,
                 zoomFloor, zoomTo, paperEdges, setDocName, paintItems,
-                openQr, closeLink, LINKof: () => LINK, tiltOfCanvas, unskew, paperAnalyse, renderRecents, dixGet,
+                openQr, closeLink, LINKof: () => LINK, tiltOfCanvas, skewOf, setSkew, bakeSkew, runSmartCrop, skewNow: () => skewDeg, unskew, paperAnalyse, renderRecents, dixGet,
                 copySel, pasteClip, setMarq, clearMarq, MARQof: () => MARQ,
                 openCrop, closeCrop, nudgeCrop, pickCrop, syncRail, turn, openRotate, cropOf };
