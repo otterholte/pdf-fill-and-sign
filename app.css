@@ -560,6 +560,31 @@ select.fld{padding-right:0;}
 }
 .selbar-scroll > .sep::before{content:"";width:1px;height:22px;background:var(--line);}
 .selbar-scroll::-webkit-scrollbar{display:none;}
+
+/* On a phone the same row carries one more button than it used to, so it
+   dresses tighter: narrower nudges and buttons, leaner dividers. And while
+   the colour row is unfolded the size-and-duplicate cluster steps out — you
+   are choosing a colour just then, and three swatches plus that cluster is
+   the one combination no small screen can seat. */
+@media (hover:none){
+  .selbar-scroll{gap:2px;padding:7px 6px;}
+  .selbar-scroll .btn-icon{width:33px;height:33px;}
+  .selbar-scroll .nud{width:31px;}
+  .selbar-scroll > .sep{min-width:4px;max-width:34px;}
+  .selbar-scroll:has(#swatches:not(.folded):not([hidden])) #btnSmaller,
+  .selbar-scroll:has(#swatches:not(.folded):not([hidden])) #btnBigger,
+  .selbar-scroll:has(#swatches:not(.folded):not([hidden])) #sepDupe,
+  .selbar-scroll:has(#swatches:not(.folded):not([hidden])) #btnDupe,
+  .selbar-scroll:has(#swatches:not(.folded):not([hidden])) #sepColor,
+  .selbar-scroll:has(#swatches:not(.folded):not([hidden])) #btnDateFmt{display:none;}
+  /* a dated line already carries its format chip; the chip wins the seat,
+     and everything around it pulls in a little further to seat it */
+  .selbar-scroll:has(#btnDateFmt:not([hidden])) #sepDupe,
+  .selbar-scroll:has(#btnDateFmt:not([hidden])) #btnDupe{display:none;}
+  .selbar-scroll:has(#btnDateFmt:not([hidden])) .nud{width:28px;}
+  .selbar-scroll:has(#btnDateFmt:not([hidden])) .btn-icon{width:30px;}
+  #btnDateFmt{font-size:11.5px;padding:7px 7px;}
+}
 .swatches{display:flex;gap:8px;padding-left:2px;flex:none;}
 .swatches[hidden]{display:none;}
 .sw{width:25px;height:25px;border-radius:50%;background:var(--c);border:2px solid var(--bg);box-shadow:0 0 0 1.5px var(--line);flex:none;}
@@ -1138,7 +1163,7 @@ select.fld{padding-right:0;}
 .selcount{display:none;font-size:13.5px;font-weight:650;color:var(--fg-2);white-space:nowrap;}
 .selbar.multi .selcount{display:block;}
 .selbar.multi #nudge,.selbar.multi .nudge + .sep,.selbar.multi #swatches,.selbar.multi #sepColor,
-.selbar.multi #btnSmaller,.selbar.multi #btnBigger,.selbar.multi #btnDupe,
+.selbar.multi #btnSmaller,.selbar.multi #btnBigger,.selbar.multi #btnDupe,.selbar.multi #sepDupe,
 .selbar.multi #sepStamp,.selbar.multi #btnStamp,.selbar.multi #btnDateFmt{display:none;}
 
 /* ---------- the folded colour row (phones) ----------

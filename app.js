@@ -2796,6 +2796,7 @@ function syncBars() {
   $('#swatches').classList.toggle('folded', matchMedia('(hover:none)').matches);
   /* a copy of a signature is a job for the sheet, not a button */
   $('#btnDupe').hidden = !colorable;
+  $('#sepDupe').hidden = !colorable;
 
   const stampBtn = $('#btnStamp');
   stampBtn.hidden = it.type !== 'sig';
