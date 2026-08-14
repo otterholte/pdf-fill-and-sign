@@ -465,127 +465,17 @@ async function drawShots() {
    margins fitted with straight lines — so straighten the photograph before
    it ever becomes a PDF. Small angles only, and only when both margins agree:
    a confident wrong turn is worse than a tolerated slant. */
-/* The angle a document is lying at, read from its own writing.
-
-   Margin-fitting was the wrong instrument: it needs two long clean edges,
-   and a photograph of paper on paper — a sheet on a stack, a form on a desk
-   pad — hands it two edges that disagree, at which point it honestly gives
-   up and reports nothing. But a form is full of a far better signal. Its
-   rules and its lines of text are all parallel, and they are only *sharp*
-   when the page is square: tilt it and every row of ink smears across
-   several rows of the image.
-
-   So try angles, and keep the one that makes the horizontal profile of the
-   ink as spiky as possible — sum of squared row counts, the classic measure
-   of "how much does this histogram stand up". Coarse pass at half a degree,
-   then a tenth-degree refinement around the winner. It reads the writing
-   rather than the paper, so it works on a page with no visible edges at
-   all, and it is what a person means by "lined up". */
-function skewOf(lum, W, H) {
-  /* ink = darker than the local page, sampled cheaply: compare each pixel to
-     the mean of its own row band, so a shadowed corner does not read as ink */
-  const pts = [];
-  const rowMean = new Float64Array(H);
-  for (let y = 0; y < H; y++) {
-    let s = 0;
-    for (let x = 0; x < W; x++) s += lum[y * W + x];
-    rowMean[y] = s / W;
-  }
-  let all = 0;
-  for (let y = 0; y < H; y++) all += rowMean[y];
-  all /= H;
-  const cut = Math.min(all - 18, 205);
-  for (let y = 0; y < H; y += 1) {
-    for (let x = 0; x < W; x += 1) {
-      if (lum[y * W + x] < cut) pts.push(x - W / 2, y - H / 2);
-    }
-  }
-  if (pts.length < 400) return 0;                    // nothing written on it
-  const n = pts.length / 2;
-  const span = Math.ceil(Math.hypot(W, H)) + 2;
-  const hist = new Int32Array(span);
-  const score = deg => {
-    hist.fill(0);
-    const t = deg * Math.PI / 180, si = Math.sin(t), co = Math.cos(t);
-    const off = span / 2;
-    for (let i = 0; i < n; i++) {
-      const x = pts[i * 2], y = pts[i * 2 + 1];
-      hist[(y * co - x * si + off) | 0]++;
-    }
-    let v = 0;
-    for (let i = 0; i < span; i++) v += hist[i] * hist[i];
-    return v;
-  };
-  let best = 0, bestV = -1;
-  for (let d = -15; d <= 15.0001; d += 0.5) {
-    const v = score(d);
-    if (v > bestV) { bestV = v; best = d; }
-  }
-  for (let d = best - 0.5; d <= best + 0.5001; d += 0.1) {
-    const v = score(d);
-    if (v > bestV) { bestV = v; best = d; }
-  }
-  const flat = score(0);
-  /* a page already square scores its best at zero; only claim a tilt when
-     turning it genuinely sharpens the writing */
-  if (bestV < flat * 1.02) return 0;
-  return Math.abs(best) < 0.15 ? 0 : +best.toFixed(2);
-}
-function tiltOfCanvas(cv) {
-  try {
-    const W2 = 460, k = W2 / cv.width, H2 = Math.max(40, Math.round(cv.height * k));
-    const c = document.createElement('canvas');
-    c.width = W2; c.height = H2;
-    const x2 = c.getContext('2d', { alpha: false, willReadFrequently: true });
-    x2.fillStyle = '#fff'; x2.fillRect(0, 0, W2, H2);
-    x2.drawImage(cv, 0, 0, W2, H2);
-    const d = x2.getImageData(0, 0, W2, H2).data;
-    const lum = new Uint8Array(W2 * H2);
-    for (let i = 0, m = 0; m < lum.length; m++, i += 4) {
-      lum[m] = (d[i] * 77 + d[i + 1] * 151 + d[i + 2] * 28) >> 8;
-    }
-    /* Read the writing *inside the paper*. A desk has grain, and grain has no
-       preferred direction — measured across the whole photograph it drowns
-       out the rules on the page. So find the page first, then look only at
-       what is written on it. */
-    let sub = lum, sw = W2, sh = H2;
-    const r = paperAnalyse(lum, W2, H2);
-    if (r && !r.full && r.rect) {
-      const x0 = Math.max(0, Math.round(r.rect.x0 * W2) + 2);
-      const x1 = Math.min(W2, Math.round(r.rect.x1 * W2) - 2);
-      const y0 = Math.max(0, Math.round(r.rect.y0 * H2) + 2);
-      const y1 = Math.min(H2, Math.round(r.rect.y1 * H2) - 2);
-      if (x1 - x0 > 60 && y1 - y0 > 60) {
-        sw = x1 - x0; sh = y1 - y0;
-        sub = new Uint8Array(sw * sh);
-        for (let y = 0; y < sh; y++) sub.set(lum.subarray((y0 + y) * W2 + x0, (y0 + y) * W2 + x1), y * sw);
-      }
-    }
-    return skewOf(sub, sw, sh);
-  } catch (_) { return 0; }
-}
-function unskew(cv, ref) {
-  /* The angle is read from the photograph, not from the chosen look: the
-     scan look whitens the desk away, and with no desk there is no edge to
-     read an angle from — but the page is still lying at one. */
-  const t = tiltOfCanvas(ref || cv);
-  if (!t) return cv;
-  const out = document.createElement('canvas');
-  out.width = cv.width; out.height = cv.height;
-  const cx = out.getContext('2d');
-  cx.fillStyle = '#fff'; cx.fillRect(0, 0, out.width, out.height);
-  cx.translate(out.width / 2, out.height / 2);
-  cx.rotate(-t * Math.PI / 180);   // the angle it is at; turn it back
-  cx.drawImage(cv, -cv.width / 2, -cv.height / 2);
-  return out;
-}
+/* Straightening is a thing you do, not a thing done to you. Guessing the
+   angle from a photograph is right often enough to be tempting and wrong
+   often enough to be infuriating — a wrong guess costs more than no guess,
+   because it has to be undone before it can be fixed. So the dial in the
+   crop and rotate bars is the whole feature, and nothing turns on its own. */
 
 /** one page per photo, at the size the paper really is */
 async function shotsToPdf() {
   const doc = await PDFDocument.create();
   for (const s of SCAN.shots) {
-    const base = s.cv || scanCanvas(s.bm, SCAN.look);
-    const cv = unskew(base, SCAN.look === 'photo' ? base : scanCanvas(s.bm, 'photo'));
+    const cv = s.cv || scanCanvas(s.bm, SCAN.look);
     const blob = await toBlob(cv, 0.82);
     const img = await doc.embedJpg(await blob.arrayBuffer());
     /* Keep the photo's own shape — nothing is stretched to fit a paper size
@@ -2085,7 +1975,62 @@ function scanVRules(scan) {
 }
 
 /** the boxes of a ruled grid, and which horizontals were spent building them */
-function findCells(hs, vs, W, H, mask) {
+/* Mend a rule a photograph has broken.
+
+   A fold down the page, a band of glare, a crease where the paper was
+   stapled: any of them wipes a short segment out of every rule it crosses,
+   and a rule that no longer reaches both sides of a cell is not that cell's
+   lid. The cost is not one cell — it is the entire block of the table the
+   fold runs through, which is how a page comes back with its top and bottom
+   found and its middle apparently blank.
+
+   Two segments at the same height with a small gap between them are one
+   rule that something got in the way of. Small is the operative word: wide
+   enough to bridge a fold, too narrow to join two tables standing side by
+   side. The pieces are remembered, because whichever rules end up serving as
+   lids must all be struck off the list of blank lines to write on. */
+function mendRules(hs, vs, W) {
+  const out = [];
+  /* Is this gap a fold, or the gutter between two tables standing side by
+     side? Two tables each have their own border, so uprights stand at both
+     ends of a gutter. A fold has none — it is a rule with a bite out of it. */
+  const walled = (a, b, top) => {
+    const at = x => vs.some(v => Math.abs((v.x0 + v.x1) / 2 - x) <= 6 &&
+                                 v.y0 - 6 <= top && v.y1 + 6 >= top);
+    return at(a) && at(b);
+  };
+  for (const h of [...hs].sort((a, b) => (a.top - b.top) || (a.x0 - b.x0))) {
+    const thick = Math.max(3, h.bot - h.top + 1);
+    const prev = out.find(o => {
+      if (Math.abs(o.top - h.top) > thick || h.x0 <= o.x1) return false;
+      const gap = h.x0 - o.x1;
+      /* small relative to the shorter of the two pieces — a fold is narrow
+         compared with what it interrupts — and small on the page besides */
+      const shorter = Math.min(o.x1 - o.x0, h.x1 - h.x0);
+      if (gap > Math.min(W * 0.12, shorter * 0.6)) return false;
+      /* Only rules that plainly belong to a table. A mended rule becomes a
+         lid, and a lid is struck off the list of blanks to write on — so
+         joining two write-on lines that happen to sit at the same height
+         costs two places to write and buys nothing. A table row runs from
+         one border to the other, so ask for an upright at each far end. */
+      if (!walled(o.x0, h.x1, h.top)) return false;
+      return !walled(o.x1, h.x0, h.top);
+    });
+    if (prev) {
+      prev.x1 = Math.max(prev.x1, h.x1);
+      prev.top = Math.min(prev.top, h.top);
+      prev.bot = Math.max(prev.bot, h.bot);
+      prev.parts.push(h);
+    } else {
+      out.push({ ...h, parts: [h] });
+    }
+  }
+  return out;
+}
+
+function findCells(hs0, vs, W, H, mask) {
+  const hs = mendRules(hs0, vs, W);
+  if (window.__mendDbg) window.__mendDbg({ W, H, bands: hs0.map(h=>[h.x0,h.x1,h.top,h.bot]), vs: vs.map(v=>[v.x0,v.x1,v.y0,v.y1]) });
   const cells = [], usedH = new Set();
   /* A form's outer border is the one upright most likely to be missing: it
      runs the whole page, so any fold, shadow or soft edge in a scan breaks it
@@ -2159,7 +2104,8 @@ function findCells(hs, vs, W, H, mask) {
         const T = spans[a], B = spans[a + 1];
         if (B.top - T.bot < minH) continue;
         if (split(T.bot, B.top)) continue;
-        usedH.add(T); usedH.add(B);
+        (T.parts || [T]).forEach(x => usedH.add(x));
+        (B.parts || [B]).forEach(x => usedH.add(x));
         /* Where the ink sits inside the box matters more than whether there
            is any. A government form prints the caption *inside* the cell, at
            the top, and leaves the room below it for the answer — "Last",
@@ -4977,10 +4923,12 @@ function openRotate() {
   $('#rotbar').dataset.page = currentPage();
   $('#rotbar').hidden = false;
   $('#editor').classList.add('busytool');
+  skewInto($('#rotbar'), +$('#rotbar').dataset.page);
   labelRot();
   revealPage(+$('#rotbar').dataset.page);
 }
 function closeRotate() {
+  clearSkewPreview();
   $('#rotbar').hidden = true;
   $('#editor').classList.remove('busytool');
 }
@@ -4989,7 +4937,8 @@ function labelRot() {
   const n = S.pageBox.length;
   $('#rotHint').textContent = n > 1 ? `Page ${i + 1} of ${n}` : 'This page';
 }
-function turn(by) {
+async function turn(by) {
+  if (skewDeg) { const d = skewDeg; skewBusy = true; try { await bakeSkew(d); } finally { skewBusy = false; } }
   const all = $('#rotAll').checked;
   const i = +$('#rotbar').dataset.page;
   const p0 = S.pageBox[i];
@@ -5004,7 +4953,15 @@ function turn(by) {
 }
 $('#rotCCW').addEventListener('click', () => turn(-90));
 $('#rotCW').addEventListener('click', () => turn(90));
-$('#rotDone').addEventListener('click', closeRotate);
+$('#rotDone').addEventListener('click', async () => {
+  if (skewDeg) {
+    const d = skewDeg;
+    push(); busy(true, 'Straightening…');
+    try { await bakeSkew(d); } catch (e) { console.warn('straighten', e); }
+    busy(false);
+  }
+  closeRotate();
+});
 
 /* ============================================================== SIGNATURE */
 const sigSheet = $('#sigSheet');
@@ -5692,8 +5649,7 @@ function openCrop() {
   p.draft = { ...cropOf(p) };
   $('#cropbar').hidden = false;
   $('#editor').classList.add('cropping');
-  setSkew(0, true);
-  requestAnimationFrame(drawRule);
+  skewInto($('#cropbar'), cropPi);
   showCrop(p);                            // show it whole again while you work
   pickCrop(cropSel);
   revealPage(cropPi);
@@ -6062,29 +6018,7 @@ function paperAnalyse(lum, W, H) {
               y0: clamp((PY0 + 1) / H, 0, 1), y1: clamp(PY1 / H, 0, 1) };
   if (c.x1 - c.x0 < 0.2 || c.y1 - c.y0 < 0.2) return null;     // that is not a page
 
-  /* The tilt. Both long margins vote, the middle 80% of rows only — corners
-     lie — and the votes must agree within a degree, because two edges of one
-     sheet cannot honestly disagree about how it is lying. */
-  const fit = (ys, xs) => {
-    const n = ys.length;
-    if (n < 12) return null;
-    let sy = 0, sx = 0, syy = 0, sxy = 0;
-    for (let i = 0; i < n; i++) { sy += ys[i]; sx += xs[i]; syy += ys[i] * ys[i]; sxy += ys[i] * xs[i]; }
-    const den = n * syy - sy * sy;
-    if (!den) return null;
-    return (n * sxy - sy * sx) / den;            // cells of x per cell of y
-  };
-  const lo2 = Math.floor(edgeYs.length * 0.1), hi2 = Math.ceil(edgeYs.length * 0.9);
-  const ys2 = edgeYs.slice(lo2, hi2);
-  const aL = fit(ys2, edgeL.slice(lo2, hi2));
-  const aR = fit(ys2, edgeR.slice(lo2, hi2));
-  let tilt = 0;
-  if (aL != null && aR != null) {
-    const dL = Math.atan(aL) * 180 / Math.PI, dR = Math.atan(aR) * 180 / Math.PI;
-    if (Math.abs(dL - dR) <= 1.2) tilt = (dL + dR) / 2;
-  }
-  if (Math.abs(tilt) < 0.25 || Math.abs(tilt) > 8) tilt = 0;
-  return { rect: c, tilt };
+  return { rect: c };
 }
 async function runSmartCrop() {
   let p = S.pageBox[cropPi];
@@ -6092,28 +6026,13 @@ async function runSmartCrop() {
   const b = $('#cropSmart');
   b.disabled = true;
   const was = $('#cropHint').textContent;
-  /* Square it up before looking for its edges. A crop is an upright
-     rectangle, so on a page lying at an angle the best one available still
-     keeps desk in two corners or loses paper in the other two — there is no
-     good answer until the page is straight. */
-  const label = b.querySelector('span') || null;
   const say = t => { const n = [...b.childNodes].find(n => n.nodeType === 3 && n.textContent.trim());
                      if (n) n.textContent = ' ' + t + ' '; };
-  skewBusy = true;
-  try {
-    say('Lining the page up…');
-    $('#cropHint').textContent = 'Lining the page up…';
-    clearSkewPreview();
-    const tilt = tiltOfCanvas(p.cv);
-    if (tilt) { await bakeSkew(-tilt); p = S.pageBox[cropPi]; }
-  } catch (e) { console.warn('straighten', e); }
-  skewBusy = false;
-  if (!p || cropPi < 0) { b.disabled = false; return; }
   say('Looking for the edges…');
   $('#cropHint').textContent = 'Looking for the edges…';
   let c = null;
   try { c = await paperEdges(p); } catch (e) { console.warn('smart crop', e); }
-  say('Straighten & crop');
+  say('Smart crop');
   b.disabled = false;
   if (cropPi < 0) return;                       // they left while it was thinking
   if (!c) { $('#cropHint').textContent = was; return toast('Could not tell where the page stops — drag the edges instead.', 3400); }
@@ -6122,7 +6041,7 @@ async function runSmartCrop() {
      pressing Crop after it is the no-op it looks like. */
   p.draft = tight ? { x0: 0, y0: 0, x1: 1, y1: 1 } : c;
   paintCrop();
-  $('#cropHint').textContent = tight ? 'Already down to the page' : 'Straightened, and found the page';
+  $('#cropHint').textContent = tight ? 'Already down to the page' : 'Found the page';
 }
 $('#cropSmart').addEventListener('click', runSmartCrop);
 
@@ -6132,7 +6051,7 @@ $('#cropSmart').addEventListener('click', runSmartCrop);
    rendered canvas turns — the crop frame stays square to the screen, which is
    what makes "line the writing up with this edge" possible — and the turn is
    written into the document when Crop is pressed. */
-let skewDeg = 0, skewBusy = false;
+let skewDeg = 0, skewBusy = false, skewPi = -1;
 const PPD = 9;                                   // pixels per degree on the rule
 function drawRule() {
   const cv = $('#skewRule');
@@ -6167,15 +6086,21 @@ function setSkew(v, quiet) {
   skewDeg = clamp(Math.round(v * 10) / 10, -15, 15);
   $('#skewVal').textContent = (skewDeg > 0 ? '+' : '') + skewDeg.toFixed(1) + '\u00b0';
   $('#skewRule').setAttribute('aria-valuenow', skewDeg);
-  const p = S.pageBox[cropPi];
+  const p = S.pageBox[skewPi];
   if (p?.cv) {
     p.cv.style.transform = skewDeg ? `rotate(${skewDeg}deg)` : '';
     p.cv.style.transformOrigin = '50% 50%';
   }
   drawRule();
-  if (!quiet && cropPi >= 0) {
-    $('#cropHint').textContent = skewDeg ? 'Crop keeps the turn' : 'Drag an edge or a corner';
-  }
+}
+/* one dial, moved to whichever bar is asking — the same control in both
+   places rather than two that drift apart */
+function skewInto(bar, pi) {
+  skewPi = pi;
+  const row = $('#skewRow');
+  bar.prepend(row);
+  setSkew(0, true);
+  requestAnimationFrame(drawRule);
 }
 function clearSkewPreview() {
   S.pageBox.forEach(p => { if (p.cv) p.cv.style.transform = ''; });
@@ -6234,7 +6159,7 @@ async function straightenBytes(pi, deg) {
   return out.save();
 }
 async function bakeSkew(deg) {
-  const pi = cropPi, p = S.pageBox[pi];
+  const pi = skewPi, p = S.pageBox[pi];
   if (!p || !deg) return false;
   const draft = p.draft ? { ...p.draft } : null;
   const rots = S.pageBox.map(b => b.userRot);
@@ -6253,8 +6178,12 @@ async function bakeSkew(deg) {
   await loadDoc(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
                 S.name, S.items, rots, S.fields, crops);
   showPage();
-  openCrop();
-  if (draft && S.pageBox[cropPi]) { S.pageBox[cropPi].draft = draft; paintCrop(); }
+  if (draft !== null || cropPi >= 0) {
+    openCrop();
+    if (draft && S.pageBox[cropPi]) { S.pageBox[cropPi].draft = draft; paintCrop(); }
+  } else {
+    openRotate();
+  }
   return true;
 }
 
@@ -7024,6 +6953,6 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 scanPanels, scanCanvas, shotsToPdf, SCANof: () => SCAN, select, finalName, renderVisible,
                 MARKS: { path: MARK_PATH, width: MARK_W }, markCanvas,
                 zoomFloor, zoomTo, paperEdges, setDocName, paintItems,
-                openQr, closeLink, LINKof: () => LINK, tiltOfCanvas, skewOf, setSkew, bakeSkew, runSmartCrop, skewNow: () => skewDeg, unskew, paperAnalyse, renderRecents, dixGet,
+                openQr, closeLink, LINKof: () => LINK, setSkew, bakeSkew, runSmartCrop, skewNow: () => skewDeg, paperAnalyse, renderRecents, dixGet,
                 copySel, pasteClip, setMarq, clearMarq, MARQof: () => MARQ,
                 openCrop, closeCrop, nudgeCrop, pickCrop, syncRail, turn, openRotate, cropOf };

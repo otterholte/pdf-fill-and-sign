@@ -977,8 +977,6 @@ select.fld{padding-right:0;}
 }
 .smartcrop svg{width:20px;height:20px;flex:none;}
 .smartcrop[disabled]{opacity:.55;}
-/* the rotate bar is one row, not two */
-.rotbar{flex-direction:row;align-items:center;}
 
 .cropmask{position:absolute;inset:0;pointer-events:none;z-index:6;}
 .cropmask .shade{position:absolute;background:rgba(15,18,22,.45);}
@@ -1231,3 +1229,9 @@ select.fld{padding-right:0;}
 }
 .skew-rule{width:100%;height:34px;display:block;touch-action:none;cursor:ew-resize;}
 .skew-rule:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px;}
+
+/* The rotate tool gets the same dial as the crop tool — one control, moved
+   to whichever bar is open, so "turn this a little" is the same gesture
+   wherever you reach for it. */
+.rotbar{flex-direction:column;align-items:stretch;gap:8px;}
+.rot-line{display:flex;align-items:center;gap:8px;}

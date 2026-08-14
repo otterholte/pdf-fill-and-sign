@@ -454,6 +454,7 @@
   <!-- Rotate is a verb you repeat, not a value you pick: press until it looks
        right. Two icons say which way without a word between them. -->
   <div class="cropbar rotbar" id="rotbar" hidden>
+    <div class="rot-line">
     <button class="rot-btn" id="rotCCW" aria-label="Turn left" title="Turn left">
       <svg viewBox="0 0 24 24"><path d="M4 11.5a8 8 0 1 0 2.4-5.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M3.5 3.5v4.2h4.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
@@ -463,6 +464,7 @@
     <span class="crop-hint" id="rotHint">Page 1</span>
     <label class="chk rot-all"><input type="checkbox" id="rotAll"> All pages</label>
     <button class="btn-save" id="rotDone">Done</button>
+    </div>
   </div>
 
   <div class="placing" id="placing" hidden><span id="placingText">Tap the page</span><button id="placingCancel">Cancel</button></div>
