@@ -3068,11 +3068,16 @@ function placeInBox(pi, B, type, sel = true) {
   const p = S.pageBox[pi];
   const rot = totalRot(p);
   const [Wl, Hl] = localDims(p.lw, p.lh, rot);
-  /* Fill the box. At 86% inside a glyph that only uses two thirds of its own
-     viewBox, the mark came out under half the width of the square it was in —
-     you could scan a page and not see that it had been ticked at all. The
-     corners of the cross should land on the corners of the box. */
-  const side = Math.min(B.w * Wl, B.h * Hl) * 1.02;
+  /* Fill the box — the corners of the cross should land on the corners of a
+     real tick box, because two thin diagonals lost in a square read as
+     unticked on a printed page. But only a *tick box* deserves filling: some
+     of the rectangles the scan finds are whole answer boxes, and a cross
+     scaled to one of those comes out the size of a thumb, which nobody meant.
+     So the mark grows with its box up to the size of a generous hand-drawn
+     tick — about 22px on a normal page — and past that it stops and sits
+     centred, the size you would have drawn it. */
+  const cap = (22 * PX / pageHpt(p)) * Hl;
+  const side = Math.min(Math.min(B.w * Wl, B.h * Hl) * 1.02, cap);
   const size = side / Hl;
   const it = {
     id: uid(), page: pi, rot, type,
