@@ -74,6 +74,20 @@ const DB = (() => {
 const COLORS = ['#0b0f14', '#1b4fd8', '#c8202a'];
 const DEF = { fs: 0.0165, stampFs: 0.0105, mark: 0.034, sigW: 0.26, redW: 0.34, redH: 0.032 };
 
+/* What a tick or a cross is, in one place.
+
+   It was in two, and they disagreed: the editor drew the cross corner to
+   corner of its 24-unit box and the export drew it two thirds that size, so
+   the mark you placed was not the mark you got. They also disagreed about
+   weight, and the cross lost either way — two thin diagonals across a small
+   square are the first thing to disappear on a printed page, which is the
+   opposite of what a cross is for. */
+const MARK_PATH = {
+  check: 'M 2.6 12.8 L 9.2 19.6 L 21.4 4.6',
+  x: 'M 2.6 2.6 L 21.4 21.4 M 21.4 2.6 L 2.6 21.4',
+};
+const MARK_W = { check: 3, x: 3.4 };
+
 /* ------------------------------------------------------- how big to write
 
    Sizes are stored as a fraction of the page's height, because that is what
@@ -221,7 +235,13 @@ function saveSoon() {
 }
 
 /* ================================================================= OPENING */
-$('#btnOpen').addEventListener('click', () => $('#fileInput').click());
+/* One box, then one question. Two buttons side by side made you classify
+   what you had before you had decided to start at all; this way the decision
+   to begin and the decision about what kind of file you have are separate. */
+$('#btnOpen').addEventListener('click', () => { $('#openPick').hidden = false; });
+$('#wayPdf').addEventListener('click', () => { $('#openPick').hidden = true; $('#fileInput').click(); });
+$('#wayPic').addEventListener('click', () => { $('#openPick').hidden = true; SCAN.shots = []; $('#picInput').click(); });
+$('#wayCam').addEventListener('click', () => { $('#openPick').hidden = true; SCAN.shots = []; $('#camInput').click(); });
 $('#fileInput').addEventListener('change', e => {
   const f = e.target.files[0]; if (f) openFile(f);
   e.target.value = '';
@@ -420,7 +440,7 @@ async function shotsToPdf() {
   return doc.save();
 }
 
-$('#btnScan').addEventListener('click', () => { SCAN.shots = []; $('#scanPick').hidden = false; });
+
 $('#btnCam').addEventListener('click', () => $('#camInput').click());
 $('#btnPics').addEventListener('click', () => $('#picInput').click());
 ['#camInput', '#picInput'].forEach(sel => $(sel).addEventListener('change', e => {
@@ -2325,8 +2345,8 @@ function itemEl(it) {
   } else {
     d.classList.add('it-mark');
     d.innerHTML = it.type === 'check'
-      ? `<svg viewBox="0 0 24 24"><path d="M2.6 12.8 9.2 19.6 21.4 4.6" fill="none" stroke="${it.color}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-      : `<svg viewBox="0 0 24 24"><path d="M2.6 2.6 21.4 21.4 M21.4 2.6 2.6 21.4" fill="none" stroke="${it.color}" stroke-width="2.6" stroke-linecap="round"/></svg>`;
+      ? `<svg viewBox="0 0 24 24"><path d="${MARK_PATH.check}" fill="none" stroke="${it.color}" stroke-width="${MARK_W.check}" stroke-linecap="round" stroke-linejoin="round"/></svg>`
+      : `<svg viewBox="0 0 24 24"><path d="${MARK_PATH.x}" fill="none" stroke="${it.color}" stroke-width="${MARK_W.x}" stroke-linecap="round"/></svg>`;
   }
 
   /* A handle on every corner. One handle in the bottom right can only ever
@@ -4590,13 +4610,15 @@ async function refreshSaved() {
 const outName = () => S.name.replace(/\.pdf$/i, '') + '-Signed.pdf';
 
 function markCanvas(ctx, type, x, y, size, color) {
+  /* The same path and the same weight the editor draws and the vector export
+     writes — a page that has to be rasterised (a blackout, or a glyph the
+     built-in font cannot encode) must not quietly draw a different tick. */
   const s = size / 24;
   ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
-  ctx.strokeStyle = color; ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-  ctx.beginPath();
-  if (type === 'check') { ctx.moveTo(4.5, 12.5); ctx.lineTo(9.5, 17.5); ctx.lineTo(20, 6); }
-  else { ctx.moveTo(5.5, 5.5); ctx.lineTo(18.5, 18.5); ctx.moveTo(18.5, 5.5); ctx.lineTo(5.5, 18.5); }
-  ctx.stroke(); ctx.restore();
+  ctx.strokeStyle = color; ctx.lineWidth = MARK_W[type] || MARK_W.check;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  ctx.stroke(new Path2D(MARK_PATH[type] || MARK_PATH.check));
+  ctx.restore();
 }
 
 const imgCache = new Map();
@@ -4783,9 +4805,13 @@ async function buildPdf() {
       } else {
         const s = it.size * Hl, k = s / 24;
         const a = anchor(it, it.x, it.y);
-        p.drawSvgPath(it.type === 'check' ? 'M 4.5 12.5 L 9.5 17.5 L 20 6' : 'M 5.5 5.5 L 18.5 18.5 M 18.5 5.5 L 5.5 18.5', {
+        p.drawSvgPath(MARK_PATH[it.type], {
           x: a.x, y: a.y, scale: k, rotate: spin,
-          borderColor: hex2rgb(it.color), borderWidth: 2.2 * k, borderLineCap: LineCapStyle.Round,
+          /* pdf-lib writes the line width *after* the scale, so the width is
+             already in the path's own 24-unit space — the same number the
+             editor's SVG uses. Multiplying by k here would apply it twice. */
+          borderColor: hex2rgb(it.color), borderWidth: MARK_W[it.type],
+          borderLineCap: LineCapStyle.Round,
         });
       }
     }
@@ -5393,7 +5419,7 @@ function qCard(q, i) {
       const v = q.kind === 'box' ? simGet(q) : (on() ? 'check' : null);
       d.classList.toggle('is-on', !!v);
       mark.innerHTML = v === 'x'
-        ? `<svg viewBox="0 0 24 24"><path d="M5.5 5.5 18.5 18.5 M18.5 5.5 5.5 18.5" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>`
+        ? `<svg viewBox="0 0 24 24"><path d="M5.5 5.5 18.5 18.5 M18.5 5.5 5.5 18.5" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/></svg>`
         : `<svg viewBox="0 0 24 24"><path d="M4.5 12.5 9.5 17.5 20 6" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
       if (alt) {
         alt.hidden = !v;
@@ -5752,4 +5778,5 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 buildSimple, showSimple, showPage, askView, SIMof: () => SIM,
                 scanLines, findCells, totalRot, scanBoxes, layoutPages, revealFocused,
                 scanPanels, scanCanvas, shotsToPdf, SCANof: () => SCAN, select, finalName, renderVisible,
+                MARKS: { path: MARK_PATH, width: MARK_W }, markCanvas,
                 openCrop, closeCrop, nudgeCrop, pickCrop, syncRail, turn, openRotate, cropOf };

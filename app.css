@@ -120,10 +120,10 @@ a:hover{text-decoration:underline;}
 .brand-mark{width:26px;height:26px;border-radius:7px;}
 .brand-name{font-size:15px;font-weight:650;letter-spacing:-.02em;}
 .hero-title{font-size:clamp(30px,8.5vw,40px);line-height:1.08;letter-spacing:-.035em;margin:34px 0 12px;font-weight:700;}
-.hero-sub{font-size:16px;line-height:1.55;color:var(--fg-2);margin:0 0 22px;max-width:34ch;}
+.hero-title{margin-bottom:20px;}
 
 .free-line{
-  margin:0 0 14px;font-size:15.5px;line-height:1.5;color:var(--fg-2);max-width:32ch;
+  margin:26px 0 12px;font-size:15.5px;line-height:1.5;color:var(--fg-2);max-width:32ch;
 }
 .free-line strong{color:var(--accent);font-weight:700;}
 .free-chips{
@@ -134,12 +134,35 @@ a:hover{text-decoration:underline;}
   font-size:12.5px;font-weight:600;letter-spacing:-.005em;color:var(--accent);
   background:var(--accent-soft);padding:6px 11px;border-radius:999px;white-space:nowrap;
 }
-.drop{border-radius:20px;padding:6px;transition:background .15s ease, box-shadow .15s ease;}
-.drop.over{background:var(--accent-soft);box-shadow:0 0 0 1.5px var(--accent);}
-.drop-hint{margin:14px 0 0;font-size:13px;color:var(--fg-3);}
-@media (pointer:coarse){ .drop-hint{display:none;} }
-.privacy{margin:30px 0 0;font-size:13.5px;line-height:1.5;color:var(--fg-3);max-width:32ch;}
-.whylink{margin:6px 0 0;}
+.free-chips{margin-bottom:0;}
+/* ---- the one way in ----
+   A dashed box rather than a button, because the thing it wants is a file and
+   a dashed box is what a file goes into. Everything else on the page is
+   quieter than this. */
+.drop{width:100%;max-width:430px;margin:6px 0 4px;}
+.dropbox{
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  width:100%;padding:30px 22px 26px;border-radius:22px;text-align:center;
+  background:var(--accent-soft);
+  border:2px dashed color-mix(in srgb, var(--accent) 42%, transparent);
+  transition:background .15s ease, border-color .15s ease, transform .12s ease;
+}
+.dropbox:active{transform:scale(.99);}
+.dropbox-ico{
+  display:grid;place-items:center;width:52px;height:52px;margin-bottom:9px;
+  border-radius:16px;background:var(--accent);color:#fff;
+}
+@media (prefers-color-scheme: dark){ .dropbox-ico{color:#0b1020;} }
+.dropbox-ico svg{width:27px;height:27px;}
+.dropbox strong{font-size:19px;letter-spacing:-.02em;color:var(--fg);}
+.dropbox-sub{font-size:13px;line-height:1.45;color:var(--fg-2);max-width:30ch;}
+.dropbox-drag{margin-top:8px;font-size:12.5px;color:var(--accent);font-weight:600;}
+@media (pointer:coarse){ .dropbox-drag{display:none;} }
+.drop.over .dropbox{
+  background:var(--bg-2);
+  border-color:var(--accent);border-style:solid;
+}
+.whylink{margin:16px 0 0;}
 .brand + .hero-title{margin-top:0;}
 
 .resume{
@@ -151,6 +174,42 @@ a:hover{text-decoration:underline;}
 .resume-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
 .resume-text strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .resume-text span{font-size:12px;color:var(--fg-3);}
+
+/* ---- three ways in, asked once, after you have already decided to start ---- */
+.pickway{display:flex;flex-direction:column;gap:9px;margin:4px 0 2px;}
+.way{
+  --tint:var(--accent);
+  display:flex;align-items:center;gap:14px;width:100%;text-align:left;
+  padding:14px 14px 14px 13px;border-radius:var(--radius);
+  background:var(--bg-2);border:1px solid var(--line);
+  transition:border-color .13s ease, background .13s ease, transform .1s ease;
+}
+.way:active{transform:scale(.99);background:var(--bg-3);}
+@media (hover:hover){ .way:hover{border-color:var(--tint);} }
+.way-art{
+  display:grid;place-items:center;width:46px;height:46px;flex:none;
+  border-radius:13px;color:var(--tint);
+  background:color-mix(in srgb, var(--tint) 12%, transparent);
+}
+.way-art svg{width:26px;height:26px;}
+.way-img{--tint:var(--tools);}
+.way-cam{--tint:#8a5cf6;}
+@media (prefers-color-scheme: dark){ .way-cam{--tint:#b39bff;} }
+.way-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+.way-text strong{font-size:15.5px;letter-spacing:-.01em;}
+.way-text small{font-size:12.5px;line-height:1.4;color:var(--fg-3);}
+.way-go{width:17px;height:17px;flex:none;color:var(--fg-3);}
+
+/* ---- why it is free: five short answers, not five paragraphs ----
+   The gap belongs between the pairs, not inside them: a heading floating
+   equidistant from its own answer and the next question belongs to neither. */
+.why{margin:0;}
+.why dt{
+  margin:20px 0 4px;font-size:14.5px;font-weight:650;
+  letter-spacing:-.01em;color:var(--fg);
+}
+.why dt:first-child{margin-top:2px;}
+.why dd{margin:0;font-size:14px;line-height:1.55;color:var(--fg-2);}
 
 /* ---------- the two "how to be quick about it" cards ----------
    Side by side where there is room, stacked where there is not. Each card
