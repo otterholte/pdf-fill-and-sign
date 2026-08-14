@@ -3729,14 +3729,73 @@ function pasteClip() {
   else setMarq(fresh.map(i => i.id));
   saveSoon();
 }
+/* Duplicate learns where the copy should go, in two ways.
+
+   A mark sitting in a box the scan found hops to the *next* box — along the
+   row first, then down the column — carrying its own size and its own seat
+   within the box, because if you shrank an X and parked it in the corner of
+   an oversized box, that is precisely the arrangement you want six more of.
+   Boxes the page never declared cannot be hopped to, so the second way is a
+   step you teach: duplicate once, move the copy where it belongs, and press
+   duplicate again — the new one repeats the same distance and direction, and
+   so does every one after it. Place, teach, and then it is one press per X. */
+const DUPE_KIN = new Map();                 // child id -> the id it was copied from
+function nextBoxFor(it) {
+  const p = S.pageBox[it.page];
+  if (!p || norm4(it.rot) !== norm4(totalRot(p))) return null;
+  const s = p.scanned;
+  if (!s) return null;
+  const rects = [...(s.boxes || []), ...(s.cells || [])];
+  if (!rects.length) return null;
+  const [Wl, Hl] = itemFrame(it);
+  const w = it.size * Hl / Wl, h = it.size;
+  const cx = it.x + w / 2, cy = it.y + h / 2;
+  const B0 = rects.find(B => cx > B.x0 && cx < B.x1 && cy > B.y0 && cy < B.y1);
+  if (!B0) return null;
+  const taken = B => markInBox(it.page, B) && markInBox(it.page, B).id !== it.id;
+  const free = rects.filter(B => B !== B0 && !taken(B));
+  const rowTol = (B0.y1 - B0.y0) * 0.7, colTol = (B0.x1 - B0.x0) * 0.7;
+  /* reading order: the next box to the right in this row; failing that, the
+     one directly below (a column of boxes); failing that, the start of the
+     next row down — but only a *nearby* row, so a lone box at the bottom of
+     the page is never mistaken for the continuation of a grid */
+  const inRow = free.filter(B => Math.abs(B.cy - B0.cy) < rowTol && B.cx > B0.cx)
+                    .sort((a, b) => a.cx - b.cx)[0];
+  const inCol = free.filter(B => Math.abs(B.cx - B0.cx) < colTol && B.cy > B0.cy)
+                    .sort((a, b) => a.cy - b.cy)[0];
+  const nextRow = free.filter(B => B.cy > B0.cy + rowTol && B.cy < B0.cy + (B0.y1 - B0.y0) * 4)
+                      .sort((a, b) => (a.cy - b.cy) || (a.cx - b.cx))[0];
+  /* At the end of a *grid* row, reading order wraps to the next row's first
+     box, the way a person fills a grid. A box standing alone on its row is a
+     column being walked, and there the next one is straight down. */
+  const inGrid = rects.some(B => B !== B0 && Math.abs(B.cy - B0.cy) < rowTol);
+  const nb = inRow || (inGrid ? (nextRow || inCol) : (inCol || nextRow));
+  if (!nb) return null;
+  // the same seat in the new box that it held in the old one
+  return { x: it.x + (nb.cx - B0.cx), y: it.y + (nb.cy - B0.cy) };
+}
+function dupeSpot(it) {
+  if (isMark(it)) {
+    const hop = nextBoxFor(it);
+    if (hop) return hop;
+  }
+  const par = S.items.find(i => i.id === DUPE_KIN.get(it.id));
+  if (par && par.page === it.page && norm4(par.rot) === norm4(it.rot)) {
+    const dx = it.x - par.x, dy = it.y - par.y;
+    if (Math.hypot(dx, dy) > 0.004) return { x: it.x + dx, y: it.y + dy };
+  }
+  return { x: it.x + 0.015, y: it.y + 0.015 };
+}
 $('#btnDupe').addEventListener('click', () => {
   const it = getSel(); if (!it) return;
   push();
+  const at = dupeSpot(it);
   const c = cloneItem(it);
   c.id = uid();
-  c.x = clamp(c.x + 0.015, -0.02, 1.02);
-  c.y = clamp(c.y + 0.015, -0.02, 1.0);
+  c.x = clamp(at.x, -0.02, 1.02);
+  c.y = clamp(at.y, -0.02, 1.0);
   S.items.push(c);
+  DUPE_KIN.set(c.id, it.id);
   paintItems();
   select(c.id);
   saveSoon();
