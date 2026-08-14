@@ -483,6 +483,19 @@
   </div>
 </div>
 
+<div class="sheet-wrap" id="wipeSheet" hidden>
+  <div class="sheet-backdrop" data-close></div>
+  <div class="sheet" role="dialog" aria-label="Delete saved work">
+    <div class="sheet-grab"></div>
+    <div class="sheet-head"><h2 id="wipeTitle">Delete this draft?</h2>
+      <button class="btn-icon" data-close aria-label="Close"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </div>
+    <p class="sheet-note" id="wipeWhat">The document and everything you added to it will be removed from this device. This cannot be undone.</p>
+    <button class="btn-primary wide danger-fill" id="wipeGo">Delete</button>
+    <button class="btn-ghost wide" data-close>Keep it</button>
+  </div>
+</div>
+
 <div class="sheet-wrap" id="renameSheet" hidden>
   <div class="sheet-backdrop" data-close></div>
   <div class="sheet" role="dialog" aria-label="Rename this document">

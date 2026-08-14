@@ -6099,11 +6099,35 @@ $('#btnResume').addEventListener('click', async () => {
   } catch (_) { toast('That draft could not be restored.'); }
   finally { busy(false); }
 });
-$('#btnDiscard').addEventListener('click', async () => { await DB.del('doc'); checkResume(); toast('Draft deleted.'); });
-$('#btnWipe').addEventListener('click', async () => {
-  await DB.del('doc'); await DB.del('sigs');
-  checkResume();
-  toast('All local document data and saved signatures deleted.');
+/* Deleting saved work is the one thing here that cannot be undone — the
+   draft is the only copy of what was typed, and a mis-tap on a small ✕ next
+   to a Continue button is an easy mis-tap to make. So both destroyers ask
+   first, through one sheet that says exactly what is about to go. */
+function askWipe(title, what, go) {
+  $('#wipeTitle').textContent = title;
+  $('#wipeWhat').textContent = what;
+  wipeAction = go;
+  $('#wipeSheet').hidden = false;
+}
+let wipeAction = null;
+$('#wipeGo').addEventListener('click', async () => {
+  $('#wipeSheet').hidden = true;
+  if (wipeAction) await wipeAction();
+  wipeAction = null;
+});
+$('#btnDiscard').addEventListener('click', () => {
+  askWipe(`Delete “${$('#resumeName').textContent}”?`,
+          'Everything you typed and placed on it will be removed from this device. This cannot be undone.',
+          async () => { await DB.del('doc'); checkResume(); toast('Draft deleted.'); });
+});
+$('#btnWipe').addEventListener('click', () => {
+  askWipe('Delete all local data?',
+          'Your saved draft and your saved signatures will be removed from this device. This cannot be undone.',
+          async () => {
+            await DB.del('doc'); await DB.del('sigs');
+            checkResume();
+            toast('All local document data and saved signatures deleted.');
+          });
 });
 $('#btnWhy').addEventListener('click', () => { $('#whySheet').hidden = false; });
 
