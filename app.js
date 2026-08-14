@@ -5228,67 +5228,109 @@ async function paperEdges(p) {
       if (Math.abs(lum[m] - lum[m + 1]) > 14 || Math.abs(lum[m] - lum[m + W]) > 14) cellEdge[c]++;
     }
   }
-  /* Bright is judged by Otsu over the cell means — the picture says where its
-     own two groups sit — with a floor so a photograph that is dark all over
-     does not get half of its darkness called paper. */
   const hist = new Uint32Array(256);
   const mean = new Uint8Array(GW * GH);
   for (let c = 0; c < GW * GH; c++) {
     mean[c] = cellN[c] ? Math.round(cellSum[c] / cellN[c]) : 0;
     hist[mean[c]]++;
   }
-  const cut = Math.max(otsu(hist, GW * GH), 140);
+
   /* Texture is judged over a cell *and its neighbours*: grain comes in lines
      with flat wood between them, and a cell that happens to fall between two
      grain lines is still desk. Paper margins are smooth for whole regions at
      a time, so widening the test costs them nothing. */
   const busy = new Uint8Array(GW * GH);
   for (let c = 0; c < GW * GH; c++) busy[c] = (cellN[c] && cellEdge[c] / cellN[c] > 0.20) ? 1 : 0;
-  const paper = new Uint8Array(GW * GH);
-  for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
-    const c = y * GW + x;
-    if (mean[c] < cut || !cellN[c]) continue;
-    let b = 0;
-    for (let dy = -1; dy <= 1 && !b; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const nx = x + dx, ny = y + dy;
-      if (nx >= 0 && ny >= 0 && nx < GW && ny < GH && busy[ny * GW + nx]) { b = 1; break; }
-    }
-    paper[c] = b ? 0 : 1;
-  }
 
-  /* The page is the largest connected patch of paper cells. */
-  const seen = new Uint8Array(GW * GH);
-  let best = null;
-  const qx = new Int32Array(GW * GH), qy = new Int32Array(GW * GH);
-  for (let sy = 0; sy < GH; sy++) for (let sx = 0; sx < GW; sx++) {
-    const s = sy * GW + sx;
-    if (!paper[s] || seen[s]) continue;
-    let head = 0, tail = 0, n = 0;
-    qx[tail] = sx; qy[tail++] = sy; seen[s] = 2;
-    const cells = [];
-    while (head < tail) {
-      const x = qx[head], y = qy[head++]; n++;
-      cells.push(y * GW + x);
-      if (x > 0 && paper[y * GW + x - 1] && seen[y * GW + x - 1] < 2) { seen[y * GW + x - 1] = 2; qx[tail] = x - 1; qy[tail++] = y; }
-      if (x < GW - 1 && paper[y * GW + x + 1] && seen[y * GW + x + 1] < 2) { seen[y * GW + x + 1] = 2; qx[tail] = x + 1; qy[tail++] = y; }
-      if (y > 0 && paper[(y - 1) * GW + x] && seen[(y - 1) * GW + x] < 2) { seen[(y - 1) * GW + x] = 2; qx[tail] = x; qy[tail++] = y - 1; }
-      if (y < GH - 1 && paper[(y + 1) * GW + x] && seen[(y + 1) * GW + x] < 2) { seen[(y + 1) * GW + x] = 2; qx[tail] = x; qy[tail++] = y + 1; }
+  /** everything from "which cells are paper" to "the patch", for one cut */
+  const patchFor = (cut) => {
+    const paper = new Uint8Array(GW * GH);
+    for (let y = 0; y < GH; y++) for (let x = 0; x < GW; x++) {
+      const c = y * GW + x;
+      if (mean[c] < cut || !cellN[c]) continue;
+      let b = 0;
+      for (let dy = -1; dy <= 1 && !b; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && ny >= 0 && nx < GW && ny < GH && busy[ny * GW + nx]) { b = 1; break; }
+      }
+      paper[c] = b ? 0 : 1;
     }
-    if (!best || n > best.n) best = { n, cells };
-  }
+    const seen = new Uint8Array(GW * GH);
+    let best = null;
+    const qx = new Int32Array(GW * GH), qy = new Int32Array(GW * GH);
+    for (let sy = 0; sy < GH; sy++) for (let sx = 0; sx < GW; sx++) {
+      const s = sy * GW + sx;
+      if (!paper[s] || seen[s]) continue;
+      let head = 0, tail = 0, n = 0;
+      qx[tail] = sx; qy[tail++] = sy; seen[s] = 2;
+      const cells = [];
+      while (head < tail) {
+        const x = qx[head], y = qy[head++]; n++;
+        cells.push(y * GW + x);
+        if (x > 0 && paper[y * GW + x - 1] && seen[y * GW + x - 1] < 2) { seen[y * GW + x - 1] = 2; qx[tail] = x - 1; qy[tail++] = y; }
+        if (x < GW - 1 && paper[y * GW + x + 1] && seen[y * GW + x + 1] < 2) { seen[y * GW + x + 1] = 2; qx[tail] = x + 1; qy[tail++] = y; }
+        if (y > 0 && paper[(y - 1) * GW + x] && seen[(y - 1) * GW + x] < 2) { seen[(y - 1) * GW + x] = 2; qx[tail] = x; qy[tail++] = y - 1; }
+        if (y < GH - 1 && paper[(y + 1) * GW + x] && seen[(y + 1) * GW + x] < 2) { seen[(y + 1) * GW + x] = 2; qx[tail] = x; qy[tail++] = y + 1; }
+      }
+      if (!best || n > best.n) best = { n, cells };
+    }
+    if (!best) return null;
+    /* how much of each canvas border the patch reaches */
+    let tN = 0, bN = 0, lN = 0, rN = 0;
+    for (const c of best.cells) {
+      const x = c % GW, y = (c / GW) | 0;
+      if (y <= 1) tN++;
+      if (y >= GH - 2) bN++;
+      if (x <= 1) lN++;
+      if (x >= GW - 2) rN++;
+    }
+    best.borders = [tN / GW, bN / GW, lN / GH, rN / GH].filter(v => v > 0.3).length;
+    best.paper = paper;
+    return best;
+  };
+
+  /* Otsu over the cell means says where dark stops and bright begins. On a
+     desk nearly as pale as the paper that is the wrong question — the split
+     it finds is ink-against-everything, and "everything" swallows the desk.
+     The tell is a patch that reaches all four borders of the photograph,
+     which a real page on a real desk never does. When that happens, ask the
+     bright side of the split to divide again: if its cells fall into two
+     genuinely separate camps, the lower camp is the desk. A clean full-page
+     document also touches all four borders, but its brightness has no second
+     camp to find, so it sails through unsplit. */
+  const cut1 = Math.max(otsu(hist, GW * GH), 140);
+  let best = patchFor(cut1);
   if (!best || best.n < GW * GH * 0.12) return null;
+  if (best.borders === 4) {
+    const sub = new Uint32Array(256);
+    let subN = 0;
+    for (let c = 0; c < GW * GH; c++) if (mean[c] >= cut1) { sub[mean[c]]++; subN++; }
+    const cut2 = otsu(sub, subN);
+    if (cut2 > cut1) {
+      let lo = 0, loN = 0, hi = 0, hiN = 0;
+      for (let v = cut1; v < 256; v++) {
+        if (v < cut2) { lo += v * sub[v]; loN += sub[v]; } else { hi += v * sub[v]; hiN += sub[v]; }
+      }
+      const twoCamps = loN >= subN * 0.15 && hiN >= subN * 0.15 &&
+                       (hi / Math.max(hiN, 1)) - (lo / Math.max(loN, 1)) >= 18;
+      if (twoCamps) {
+        const redo = patchFor(cut2);
+        if (redo && redo.n >= GW * GH * 0.12) best = redo;
+      }
+    }
+    if (best.borders === 4) return { x0: 0, y0: 0, x1: 1, y1: 1 };   // truly nothing to trim
+  }
 
   /* A solid band of ink across the page — a section header, a heavy rule —
      cuts the margin above it off from the rest of the sheet, and the patch
      walk cannot cross it. Ink is not desk: let the patch absorb any paper
-     within a couple of cells of it, a few times over, so everything on the
-     sheet rejoins it. The desk cannot ride back in this way, because desk
-     cells were disqualified before connectivity was ever asked about. */
-  /* The reach has to clear a heavy band and the veto margin either side of it
-     in a single hop, because the cells inside the gap are ink, not paper, and
-     will never join to serve as stepping stones. Twelve cells is ~48px in the
-     scan — a fat section header with its shadows, but not the desk on the far
-     side of a page edge, which is disqualified regardless of distance. */
+     within a hop of it, a few times over, so everything on the sheet rejoins
+     it. The desk cannot ride back in this way, because desk cells were
+     disqualified before connectivity was ever asked about. The reach has to
+     clear the band and the veto margin either side of it in a single hop —
+     the cells inside the gap are ink, and will never join to serve as
+     stepping stones. */
+  const { paper } = best;
   const inPatch = new Uint8Array(GW * GH);
   for (const c of best.cells) inPatch[c] = 1;
   const R = 12;
@@ -5308,53 +5350,82 @@ async function paperEdges(p) {
     for (const c of grew) { inPatch[c] = 1; best.cells.push(c); }
   }
 
-  /* Per-row and per-column shape of the patch. Text is holes in the middle;
-     the extremes are the paper's own margins, which is what an edge is. The
-     cell *count* travels alongside, because a row is only believed to cross
-     the page if it actually holds a page-row's worth of paper — a couple of
-     strays out on the desk make a wide span but not a wide row. */
+  /* Per-row shape of the patch. Text is holes in the middle; the extremes are
+     the paper's own margins, which is what an edge is. The cell *count*
+     travels alongside, because a row is only believed to cross the page if it
+     actually holds a page-row's worth of paper — a couple of strays out on
+     the desk make a wide span but not a wide row. */
   const left = new Int32Array(GH).fill(-1), right = new Int32Array(GH).fill(-1);
-  const top = new Int32Array(GW).fill(-1), bot = new Int32Array(GW).fill(-1);
-  const rowCnt = new Int32Array(GH), colCnt = new Int32Array(GW);
+  const rowCnt = new Int32Array(GH);
   for (const c of best.cells) {
     const x = c % GW, y = (c / GW) | 0;
     if (left[y] < 0 || x < left[y]) left[y] = x;
     if (x > right[y]) right[y] = x;
-    if (top[x] < 0 || y < top[x]) top[x] = y;
-    if (y > bot[x]) bot[x] = y;
-    rowCnt[y]++; colCnt[x]++;
+    rowCnt[y]++;
   }
-  /* Fit the crop inside the patch. A photographed page sits a few degrees off
-     square, and the pointed tips of the tilt are rows far thinner than the
-     page's usual measure — set those aside, then land each edge on a high
-     percentile of what the remaining rows agree on, which is the inscribed
-     rectangle with a shrug at a few odd rows either way. */
   const med = a => { const s = a.filter(v => v > 0).sort((q, w) => q - w); return s.length ? s[s.length >> 1] : 0; };
   const pick = (a, f) => a.slice().sort((q, w) => q - w)[Math.min(a.length - 1, Math.floor(a.length * f))];
   const medRow = med([...rowCnt]);
   if (!medRow) return null;
   const lefts = [], rights = [];
-  let y0 = -1, y1 = -1;
+  let ry0 = -1, ry1 = -1;
   for (let y = 0; y < GH; y++) {
     if (rowCnt[y] < medRow * 0.6) continue;
     lefts.push(left[y]); rights.push(right[y]);
-    if (y0 < 0) y0 = y;
-    y1 = y;
+    /* The x-extremes may come from any row that plausibly crosses the page,
+       but the top and bottom must come from rows holding nearly a full row of
+       paper: on a tilted page a 60%-row sits well past the corner, out where
+       the crop would already be showing desk — and the pixel walk below can
+       only ever push outward, so the rectangle it starts from must be inside
+       the paper everywhere. */
+    if (rowCnt[y] < medRow * 0.95) continue;
+    if (ry0 < 0) ry0 = y;
+    ry1 = y;
   }
-  if (lefts.length < 4) return null;
-  const x0 = pick(lefts, 0.92), x1 = pick(rights, 0.08);
+  if (lefts.length < 4 || ry0 < 0 || ry1 <= ry0) return null;
+  const cx0 = pick(lefts, 0.92), cx1 = pick(rights, 0.08);
 
-  /* A patch that reaches every edge of the canvas is a page that was never on
-     a desk at all — say "nothing to trim" rather than shaving the insets off
-     a document that arrived clean. */
-  if (x0 <= 1 && y0 <= 1 && x1 >= GW - 2 && y1 >= GH - 2) return { x0: 0, y0: 0, x1: 1, y1: 1 };
+  /* The cells found the paper; they are too coarse to say where it stops.
+     Between the patch and the desk sit two cells of veto margin and a cell of
+     rounding — real paper, thrown away. So take the cell answer as a safe
+     inner rectangle and walk each edge back out a pixel at a time.
 
-  /* One cell in from every side plus a hair of margin: the cost is a sliver
-     of the page's own border, the return is that no splinter of desk survives
-     along any edge. */
-  const IN = 0.004;
-  const c = { x0: clamp(((x0 + 1) * C) / W + IN, 0, 1), x1: clamp((x1 * C) / W - IN, 0, 1),
-              y0: clamp(((y0 + 1) * C) / H + IN, 0, 1), y1: clamp((y1 * C) / H - IN, 0, 1) };
+     Whether a step is safe is judged against the strip three pixels inside
+     it, not against any global number: paper next to paper looks the same,
+     whatever the lighting is doing, while the first sliver of desk — darker,
+     brighter, textured, or the blur of the edge itself — breaks the likeness
+     and stops the walk. Ink that continues outward, a section band or a rule
+     running under the edge, is dark on both strips at the same spots and so
+     never breaks it. The edges advance a pixel each in turns, so that no one
+     edge runs away on the strength of the others being unfinished; a page
+     lying square is reached to within a couple of pixels, and a tilted one is
+     entered exactly where its corner cut begins. */
+  let PX0 = Math.min((cx0 + 1) * C, W - 1), PX1 = Math.min(cx1 * C + C - 1, W - 1);
+  let PY0 = Math.min((ry0 + 1) * C, H - 1), PY1 = Math.min(ry1 * C + C - 1, H - 1);
+  const stripOK = (cand, inner, lo, hi, vertical) => {
+    const n = hi - lo + 1;
+    if (n < 8 || cand < 0 || inner < 0) return false;
+    let dim = 0, sumC = 0, sumI = 0;
+    const maxDim = Math.max(2, n * 0.004);
+    for (let t = lo; t <= hi; t++) {
+      const mc = vertical ? t * W + cand : cand * W + t;
+      const mi = vertical ? t * W + inner : inner * W + t;
+      sumC += lum[mc]; sumI += lum[mi];
+      if (lum[mi] - lum[mc] > 25 && ++dim > maxDim) return false;
+    }
+    return sumC / n >= sumI / n - 6;
+  };
+  for (let step = 0, moved = true; moved && step < W + H; step++) {
+    moved = false;
+    if (PX0 > 0 && stripOK(PX0 - 1, PX0 + 2, PY0, PY1, true)) { PX0--; moved = true; }
+    if (PX1 < W - 1 && stripOK(PX1 + 1, PX1 - 2, PY0, PY1, true)) { PX1++; moved = true; }
+    if (PY0 > 0 && stripOK(PY0 - 1, PY0 + 2, PX0, PX1, false)) { PY0--; moved = true; }
+    if (PY1 < H - 1 && stripOK(PY1 + 1, PY1 - 2, PX0, PX1, false)) { PY1++; moved = true; }
+  }
+  /* one pixel back in from each side, so the stopping pixel itself — the
+     first doubtful one — is never shown */
+  const c = { x0: clamp((PX0 + 1) / W, 0, 1), x1: clamp(PX1 / W, 0, 1),
+              y0: clamp((PY0 + 1) / H, 0, 1), y1: clamp(PY1 / H, 0, 1) };
   if (c.x1 - c.x0 < 0.2 || c.y1 - c.y0 < 0.2) return null;     // that is not a page
   return c;
 }
