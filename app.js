@@ -476,6 +476,7 @@ async function loadDoc(buf, name, items, rots, fields, crops) {
   S.name = name;
   S.items = items || [];
   S.sel = null; S.tool = null; S.past = []; S.future = []; S.zoom = 1;
+  snugged = false; centreWanted = false;
   S.fields = fields ? { ...fields } : {};
   S.fields0 = {};
   syncHistory();
@@ -533,7 +534,11 @@ $('#btnBack').addEventListener('click', () => {
 });
 
 /* ================================================================ RENDERING */
-const fitWidth = () => Math.min(stageEl.clientWidth - 20, 980);
+/* A gutter wide enough to see the edge of the paper against the grey, and
+   not a pixel more. Twenty was two thirds of a character's width thrown away
+   on both sides of a phone, which on a form is the difference between reading
+   a caption and squinting at it. */
+const fitWidth = () => Math.min(stageEl.clientWidth - 8, 980);
 const totalRot = p => (((p.baseRot + p.userRot) % 360) + 360) % 360;
 
 async function buildPages(rots) {
@@ -962,7 +967,7 @@ async function renderVisible() {
     const y = p.el.offsetTop;
     if (y + p.dh < top || y > bot) continue;
     await renderOne(p, dpr);
-    ensureScan(p).then(hintsSoon);   // the blanks can be drawn once the scan lands
+    ensureScan(p).then(() => { snugFit(p); hintsSoon(); });   // once the scan lands
   }
 }
 stageEl.addEventListener('scroll', renderSoon, { passive: true });
@@ -1963,6 +1968,68 @@ async function secondLook(p, have) {
   finally { SCAN_W = was; K = wasK; cv.width = cv.height = 0; }
 }
 
+/** How much of the page's width the printed matter actually uses, 0–1.
+
+    A form is not the same thing as the paper it is on: leave an inch of
+    white down each side and fitting the *paper* to a phone leaves the
+    writing smaller than it needs to be. Specks and the dark edge of a scan
+    are ignored by requiring a column to be inked down a fraction of the
+    page before it counts as content. */
+function inkSpan(scan) {
+  const { W, H, mask } = scan;
+  if (!mask || !W || !H) return null;
+  const floor = Math.max(2, Math.round(H * 0.0025));
+  const inked = x => {
+    let n = 0;
+    for (let y = 0; y < H; y++) if (mask[y * W + x] && ++n >= floor) return true;
+    return false;
+  };
+  let a = 0, b = W - 1;
+  while (a < W && !inked(a)) a++;
+  while (b > a && !inked(b)) b--;
+  if (b - a < W * 0.2) return null;                  // nothing, or a stray mark
+  return { x0: a / W, x1: (b + 1) / W };
+}
+
+/* Open at the size the *content* wants, not the size the paper wants.
+
+   Only on the way in, only on the first page, only if there is a real margin
+   to reclaim on both sides, and never by much: the page edges going off
+   screen is a surprise, so a sliver of paper is deliberately left showing and
+   the whole thing is capped. Touch anything first — zoom, place something —
+   and it does not fire at all. */
+let snugged = false;
+function snugFit(p) {
+  if (snugged || S.zoom !== 1 || S.items.length || S.pageBox[0] !== p) return;
+  const s = p.ink;
+  if (!s) return;
+  if (s.x0 < 0.06 || 1 - s.x1 < 0.06) return;        // margins already tight
+  const z = clamp(0.96 / (s.x1 - s.x0), 1, 1.18);
+  if (z < 1.05) return;                              // not worth the movement
+  snugged = true;
+  S.zoom = z;
+  layoutPages(); renderVisible();
+  centreWanted = !centrePage();
+}
+
+/* Put the printed matter in the middle, not the paper: on a form whose
+   content sits left of centre those are different places, and it is the
+   content we went to the trouble of measuring.
+
+   Returns false when there is nothing to centre *yet* — the scan usually
+   lands while the page chooser is still up and the editor is display:none,
+   where the stage has no width, no scroll extent and no opinion. showPage
+   asks again once it is on screen. */
+let centreWanted = false;
+function centrePage() {
+  const room = stageEl.scrollWidth - stageEl.clientWidth;
+  const p = S.pageBox[0];
+  if (room <= 2 || !p) return false;
+  const mid = p.ink ? (p.ink.x0 + p.ink.x1) / 2 : 0.5;
+  stageEl.scrollLeft = clamp(mid * p.dw - stageEl.clientWidth / 2, 0, room);
+  return true;
+}
+
 function ensureScan(p) {
   const key = scanKeyOf(p);
   if (p.scanKey === key) return Promise.resolve(p.scanned);
@@ -2175,6 +2242,7 @@ function ensureScan(p) {
         // is somebody's answer, and this is not a blank after all
         return mine.length > 0 || tick.length > 0 || c.body;
       };
+      p.ink = inkSpan(scan);
       p.scanned = {
         cells: cells.filter(c => !c.filled && !split(c)).concat(panels),
         cellsAll: cells, vrules: vs.length, bands: scan.bands.length,
@@ -5530,7 +5598,14 @@ function showPage() {
   $('#home').hidden = true;
   $('#editor').hidden = false;
   fitViewport();
+  /* Re-measure. The pages were built while this was behind the chooser, and a
+     width taken then is a width that never gets corrected — the document
+     would sit at the wrong size for the whole session with nothing but a
+     device rotation to shake it loose. */
+  const w = fitWidth();
+  if (w > 0 && w !== lastFitW) { lastFitW = w; S.baseW = w; }
   layoutPages(); renderVisible();
+  if (centreWanted) centreWanted = !centrePage();
 }
 
 $('#simBack').addEventListener('click', () => {
