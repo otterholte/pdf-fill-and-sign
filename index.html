@@ -328,19 +328,7 @@
        reserved that way vanishes the moment you swipe and the chip lands on
        top of a label. Real siblings keep their space. -->
   <div class="toolwrap" id="toolwrap">
-    <button class="toolnext toolprev" id="toolPrev" hidden aria-label="Simple view is this way">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </button>
   <nav class="toolbar" id="toolbar">
-    <!-- Its own section, at the near end: a way of *looking* at the document
-         rather than something you do to it, so it is set apart, tinted
-         differently and parked just off the left edge. One swipe right and it
-         is there; it costs no room in the five you see by default. -->
-    <button class="tool tool-alt" data-tool="simple" id="btnSimple">
-      <svg viewBox="0 0 24 24"><path d="M4 6h5M4 12h5M4 18h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><rect x="12" y="4.2" width="8" height="3.6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="12" y="10.2" width="8" height="3.6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/><rect x="12" y="16.2" width="8" height="3.6" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
-      <span>Simple view</span>
-    </button>
-    <span class="tool-div" aria-hidden="true"></span>
     <button class="tool" data-tool="text">
       <svg viewBox="0 0 24 24"><path d="M5 6.5V5h14v1.5M12 5v14M9.5 19h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
       <span>Text</span>
@@ -383,12 +371,6 @@
       <span>Clear</span>
     </button>
   </nav>
-    <button class="toolnext" id="toolNext" hidden aria-label="More tools">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    </button>
-    <!-- how far along the row you are: the track is the row, the bar is the
-         part you can see. Static on purpose — readable at a glance. -->
-    <div class="toolrail" id="toolRail" hidden><span class="toolthumb" id="toolThumb"></span></div>
   </div>
 
   <div class="cropbar" id="cropbar" hidden>
@@ -716,6 +698,11 @@
 
     <button class="btn-primary wide" id="btnSave">Save PDF</button>
     <button class="btn-ghost wide" id="btnShare" hidden>Share PDF</button>
+    <!-- Hard-won: handing a file straight to a mail app passes it a pointer to
+         a temporary copy, and if that copy is cleaned up before the message is
+         actually sent, the recipient gets an attachment that will not open. A
+         saved file has no such expiry. -->
+    <p class="mail-tip" id="mailTip" hidden>Emailing it? Save it first, then attach the saved file. Handing it straight to a mail app can attach a temporary copy that expires before the message is sent.</p>
     <button class="linkish center" id="btnContinue">Continue editing</button>
 
     <div class="next-up">

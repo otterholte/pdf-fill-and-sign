@@ -2981,62 +2981,15 @@ $('#toolwrap').addEventListener('mousedown', e => {
    moves on its own: the point is to be readable in the moment you glance at
    it, not to catch the eye later. */
 const toolbarEl = $('#toolbar');
-let parked = false, parking = false;
-function syncRail() {
-  const rail = $('#toolRail'), thumb = $('#toolThumb');
-  const next = $('#toolNext'), prev = $('#toolPrev');
-  if (!rail) return;
-  const room = toolbarEl.scrollWidth - toolbarEl.clientWidth;
-  /* Nothing to park or measure until the row has actually been laid out with
-     a width — which is not true while the editor is still hidden behind the
-     chooser, so this is the honest place to do it rather than a timer. */
-  if (room < 8) { rail.hidden = next.hidden = prev.hidden = true; return; }
-  rail.hidden = next.hidden = prev.hidden = false;
-  if (!parked && !parking) {
-    /* Next frame, and measured rather than derived. The chips have only just
-       stopped being hidden, so the row is about to lose their width — parking
-       against the width it has this instant lands a tool-and-a-bit too far
-       along. And offsetLeft answers a question about the layout tree, when
-       what is wanted is where the button is on the screen.
 
-       It counts as parked only once it has actually moved something: this
-       runs while the page chooser is still up, and a row that is laid out but
-       not on screen measures zero and would be quietly given up on. */
-    parking = true;
-    requestAnimationFrame(() => {
-      parking = false;
-      const first = toolbarEl.querySelector('.tool:not(.tool-alt)');
-      const r = toolbarEl.getBoundingClientRect();
-      if (!first || !r.width) return;
-      parked = true;
-      toolbarEl.scrollLeft += first.getBoundingClientRect().left - r.left;
-      syncRail();
-    });
-  }
-  const seen = toolbarEl.clientWidth / toolbarEl.scrollWidth;
-  const at = toolbarEl.scrollLeft / room;
-  thumb.style.width = (seen * 100) + '%';
-  thumb.style.left = (at * (1 - seen) * 100) + '%';
-  // an arrow with nothing that way still says which way the row runs
-  prev.classList.toggle('spent', at < 0.02);
-  next.classList.toggle('spent', at > 0.98);
-}
-toolbarEl.addEventListener('scroll', syncRail, { passive: true });
-addEventListener('resize', syncRail);
+/* The row used to carry Simple view parked off its left edge, with a chip at
+   each end and a scrollbar under it to explain where the row began and ended.
+   Simple view has gone, and with it the reason for all of that furniture: what
+   is left is nine tools that scroll if they must, and nothing that has to be
+   explained. */
+function syncRail() {}
+function parkTools() {}
 
-/* A press on either chip goes most of the way across rather than exactly one
-   screenful: landing dead on a boundary leaves half a button showing at each
-   edge and no sense of having arrived anywhere. */
-const slide = dir => toolbarEl.scrollBy({ left: dir * toolbarEl.clientWidth * 0.86, behavior: 'smooth' });
-$('#toolNext').addEventListener('click', () => slide(1));
-$('#toolPrev').addEventListener('click', () => slide(-1));
-
-/* Simple view sits at the near end of the row, parked just off the left edge:
-   the five you reach for are what you see, and one swipe right — or the green
-   chip — brings it in. Armed here, done by syncRail the first time the row is
-   wide enough to scroll, so it happens once per document and never yanks the
-   row back out from under a swipe. */
-function parkTools() { parked = false; syncRail(); }
 const PROMPT = {
   text: 'Tap a blank line to type on it',
   date: 'Tap the page to add the date',
@@ -6276,6 +6229,7 @@ $('#btnFinish').addEventListener('click', async () => {
       : 'Everything you added is now part of the document. Nothing was uploaded.';
   $('#saveName').value = outName();
   $('#btnShare').hidden = !canShareFiles();
+  $('#mailTip').hidden = !canShareFiles();
   $('#editor').hidden = true;
   $('#done').hidden = false;
   confetti();
@@ -6421,10 +6375,15 @@ $('#btnShare').addEventListener('click', async () => {
      which only shows up as a failed download for whoever opens the mail. */
   const buf = await lastBlob.arrayBuffer();
   if (!buf.byteLength) return toast('The PDF came out empty — press Finish again.', 5000);
-  const file = new File([buf], name, { type: 'application/pdf' });
+  const file = new File([buf], name, { type: 'application/pdf', lastModified: Date.now() });
   try {
     if (navigator.canShare && !navigator.canShare({ files: [file] })) throw new Error('unsupported');
     await navigator.share({ files: [file] });      // no title: some mail apps
+    /* What a share hands over is a pointer to a temporary copy, and the app
+       on the other end may not read it until the moment it sends. Leaving
+       this page can take that copy away underneath it — which is why a
+       perfectly good PDF arrives as an attachment that will not download. */
+    toast('Keep this page open until it has sent. If the attachment will not open, save it and attach the saved file.', 7000);
   } catch (e) {                                    // treat it as a text share
     if (e.name === 'AbortError') return;
     toast('That app would not take the file. Use Save PDF, then attach it from your files.', 6000);

@@ -1022,57 +1022,21 @@ select.fld{padding-right:0;}
    and hides the fact that there are more. Five fit comfortably; Blackout,
    Rotate, Crop and Clear live past the edge, with a fade at the right so it is
    obvious the row keeps going. */
+/* The row runs free. The detents existed to give a parked Simple view a floor
+   to come to rest against; with it gone they only fought short swipes. */
 @media (hover:none){
   .tool{flex:0 0 20%;min-width:0;}
   .toolbar{overscroll-behavior-x:contain;}
-  /* Two detents, not fifteen. Snapping every tool fought every short swipe —
-     the row crept back to where it started and reaching Crop took three goes.
-     Snapping only the two places worth stopping at gives the row a floor:
-     one flick left from the far end comes to rest on the standard five, and
-     getting past them to Simple view takes a second, deliberate pull. Nothing
-     is placed to the right, so the way out stays free. */
-  .toolbar{scroll-snap-type:x proximity;}
-  #btnSimple,.tool[data-tool="text"]{scroll-snap-align:start;}
 }
-/* Simple view is a different kind of thing from the tools beside it — a way
-   of looking at the document rather than something you add to it — so it gets
-   a divider, its own colour, and an end of the row to itself. */
+/* Everything past the rule is something you do to the page rather than
+   something you put on it. */
 .tool-div{flex:0 0 1px;align-self:center;height:30px;background:var(--line);margin:0 7px;}
-.tool-alt{color:var(--tools);}
-.tool-alt.is-on,.tool-alt:active{color:var(--tools);background:var(--tools-soft);}
-@media (hover:none){ .tool-div{flex:0 0 1px;} }
 
-/* ---- where you are in the row of tools ----
-   A track the width of the toolbar with a bar showing the part you can see,
-   and a chip at the right edge that says there is more and takes you there.
-   Both are static: the point is to be readable at a glance, not to move. */
-.toolrail{
-  position:absolute;left:14px;right:14px;height:3px;z-index:5;pointer-events:none;
-  bottom:calc(var(--safe-b) + 3px);
-  border-radius:2px;background:var(--line);
-}
-.toolrail[hidden]{display:none;}
-.toolthumb{
-  position:absolute;top:0;height:100%;border-radius:2px;background:var(--fg-3);
-  opacity:.45;
-  transition:left .12s linear, width .12s linear;
-}
 /* Quiet on purpose: these say which way the row runs, they are not something
    to be drawn to. Colour alone carries the meaning — blue for the tools,
    green for Simple view — with no chip behind it competing with the buttons. */
-.toolnext{
-  flex:0 0 22px;align-self:center;z-index:6;
-  height:36px;display:grid;place-items:center;border-radius:8px;
-  color:var(--accent);background:transparent;opacity:.55;
-}
-.toolnext:active{background:var(--bg-3);opacity:1;}
-.toolnext[hidden]{display:none;}
-.toolnext svg{width:13px;height:13px;}
 /* the left-hand chip leads to Simple view, so it wears Simple view's colour */
-.toolprev{color:var(--tools);}
 /* nothing further that way: fade it rather than leaving a live-looking arrow */
-.toolnext.spent{opacity:.2;}
-.editor.kb .toolrail,.editor.kb .toolnext{display:none;}
 
 /* the prompt sits at the top: at the bottom it covered the very controls it
    was telling you about */
@@ -1235,3 +1199,6 @@ select.fld{padding-right:0;}
    wherever you reach for it. */
 .rotbar{flex-direction:column;align-items:stretch;gap:8px;}
 .rot-line{display:flex;align-items:center;gap:8px;}
+
+.mail-tip{margin:10px 2px 0;font-size:12.5px;line-height:1.45;color:var(--fg-3);text-align:left;}
+.mail-tip[hidden]{display:none;}
