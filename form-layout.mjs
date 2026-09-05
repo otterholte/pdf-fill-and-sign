@@ -515,6 +515,7 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
   boxes.push(
     ...(base.boxes || []).filter(
       (b) =>
+        !b.guessed &&
         !boxes.some(
           (r) =>
             Math.hypot(

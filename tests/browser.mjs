@@ -307,7 +307,10 @@ try {
     { timeout: 90000 },
   );
   const nativeQs = await page.evaluate(() => window.__fs.SIMof().qs);
-  await writeFile(path.join(out,"native-fields.json"),JSON.stringify(nativeQs,null,2));
+  await writeFile(
+    path.join(out, "native-fields.json"),
+    JSON.stringify(nativeQs, null, 2),
+  );
   assert.equal(
     nativeQs.filter((q) => q.kind === "field").length,
     2,
@@ -414,13 +417,11 @@ try {
   );
   // Reopen the exact saved document: a newly generated scan is a new document.
   await page.evaluate(() => window.__fs.showPage());
-  await page
-    .locator("#fileInput")
-    .setInputFiles({
-      name: "reopened-employment.pdf",
-      mimeType: "application/pdf",
-      buffer: Buffer.from(originalPdfBytes),
-    });
+  await page.locator("#fileInput").setInputFiles({
+    name: "reopened-employment.pdf",
+    mimeType: "application/pdf",
+    buffer: Buffer.from(originalPdfBytes),
+  });
   await page.locator('[data-tool="simple"]').click();
   await page.waitForFunction(
     () => window.__fs.SIMof().built,

@@ -99,3 +99,25 @@ test("a standalone line with a signature label survives structural refinement", 
   assert.equal(scan.lines.length, 1);
   assert.equal(scan.lines[0].inputType, "signature");
 });
+
+test("extrapolated control positions need outline evidence", () => {
+  const real = {
+    x0: 0.2,
+    x1: 0.22,
+    y0: 0.3,
+    y1: 0.32,
+    cx: 0.21,
+    cy: 0.31,
+    w: 0.02,
+    h: 0.02,
+  };
+  const guessed = { ...real, x0: 0.5, x1: 0.52, cx: 0.51, guessed: 1 };
+  const result = analyzeForm(
+    [],
+    { horizontal: [], vertical: [], width: 1000, height: 1000 },
+    { cells: [], boxes: [real, guessed] },
+    [],
+  );
+  assert.equal(result.boxes.length, 1);
+  assert.equal(result.boxes[0], real);
+});
