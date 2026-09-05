@@ -1,0 +1,759 @@
+{
+  "version": 1,
+  "page": 1,
+  "source_image": "blank-form.jpg",
+  "source_sha256": "11f52aafb37737a4200c815a93c9d886237d7db2b1e2db0648f94ac4a5df226c",
+  "width": 795,
+  "height": 1000,
+  "coordinate_system": "top-left origin, source-image pixels; box=[left,top,right,bottom]",
+  "mapping_method": "Manually mapped from supplied image and visually reviewed; no automatic field detection",
+  "fields": [
+    {
+      "id": "name_last_first",
+      "type": "text",
+      "box": [
+        238,
+        151,
+        447,
+        168
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "social_security_number",
+      "type": "text",
+      "box": [
+        566,
+        151,
+        748,
+        168
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "present_street",
+      "type": "text",
+      "box": [
+        201,
+        180,
+        389,
+        196
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "present_city",
+      "type": "text",
+      "box": [
+        420,
+        180,
+        507,
+        196
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "present_state",
+      "type": "text",
+      "box": [
+        551,
+        180,
+        615,
+        196
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "present_zip",
+      "type": "text",
+      "box": [
+        670,
+        180,
+        748,
+        196
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "permanent_street",
+      "type": "text",
+      "box": [
+        216,
+        211,
+        389,
+        226
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "permanent_city",
+      "type": "text",
+      "box": [
+        420,
+        211,
+        507,
+        226
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "permanent_state",
+      "type": "text",
+      "box": [
+        551,
+        211,
+        615,
+        226
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "permanent_zip",
+      "type": "text",
+      "box": [
+        670,
+        211,
+        748,
+        226
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "phone",
+      "type": "text",
+      "box": [
+        165,
+        240,
+        351,
+        255
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "secondary_phone",
+      "type": "text",
+      "box": [
+        476,
+        240,
+        553,
+        255
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "referred_by",
+      "type": "text",
+      "box": [
+        637,
+        240,
+        749,
+        255
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "position_desired",
+      "type": "text",
+      "box": [
+        160,
+        316,
+        455,
+        332
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "available_start_date",
+      "type": "text",
+      "box": [
+        574,
+        316,
+        751,
+        332
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "currently_employed",
+      "type": "radio",
+      "options": {
+        "yes": [
+          253.5,
+          360.5
+        ],
+        "no": [
+          305.2,
+          360.5
+        ]
+      },
+      "radius": 3.1
+    },
+    {
+      "id": "may_contact_present_employer",
+      "type": "radio",
+      "options": {
+        "yes": [
+          620.8,
+          360.5
+        ],
+        "no": [
+          672.8,
+          360.5
+        ]
+      },
+      "radius": 3.1
+    },
+    {
+      "id": "previously_applied",
+      "type": "radio",
+      "options": {
+        "yes": [
+          323.9,
+          386.7
+        ],
+        "no": [
+          375.8,
+          386.7
+        ]
+      },
+      "radius": 3.1
+    },
+    {
+      "id": "previous_application_where",
+      "type": "text",
+      "box": [
+        151,
+        399,
+        392,
+        416
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "previous_application_when",
+      "type": "text",
+      "box": [
+        443,
+        399,
+        745,
+        416
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "high_school_school_location",
+      "type": "text",
+      "box": [
+        218,
+        481,
+        403,
+        510
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "high_school_years",
+      "type": "text",
+      "box": [
+        409,
+        481,
+        486,
+        510
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "center"
+    },
+    {
+      "id": "high_school_graduated",
+      "type": "text",
+      "box": [
+        492,
+        481,
+        571,
+        510
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "center"
+    },
+    {
+      "id": "high_school_subjects",
+      "type": "text",
+      "box": [
+        577,
+        481,
+        758,
+        510
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "college_school_location",
+      "type": "text",
+      "box": [
+        218,
+        516,
+        403,
+        546
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "college_years",
+      "type": "text",
+      "box": [
+        409,
+        516,
+        486,
+        546
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "center"
+    },
+    {
+      "id": "college_graduated",
+      "type": "text",
+      "box": [
+        492,
+        516,
+        571,
+        546
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "center"
+    },
+    {
+      "id": "college_subjects",
+      "type": "text",
+      "box": [
+        577,
+        516,
+        758,
+        546
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "trade_school_school_location",
+      "type": "text",
+      "box": [
+        218,
+        552,
+        403,
+        581
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "trade_school_years",
+      "type": "text",
+      "box": [
+        409,
+        552,
+        486,
+        581
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "center"
+    },
+    {
+      "id": "trade_school_graduated",
+      "type": "text",
+      "box": [
+        492,
+        552,
+        571,
+        581
+      ],
+      "font_size": 11,
+      "min_font_size": 8,
+      "align": "center"
+    },
+    {
+      "id": "trade_school_subjects",
+      "type": "text",
+      "box": [
+        577,
+        552,
+        758,
+        581
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "special_study_research",
+      "type": "text",
+      "box": [
+        337,
+        623,
+        754,
+        640
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "special_training",
+      "type": "text",
+      "box": [
+        206,
+        648,
+        754,
+        664
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "special_skills",
+      "type": "text",
+      "box": [
+        190,
+        674,
+        754,
+        689
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "military_service",
+      "type": "text",
+      "box": [
+        280,
+        698,
+        510,
+        715
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "military_rank",
+      "type": "text",
+      "box": [
+        552,
+        698,
+        754,
+        715
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_1_from",
+      "type": "text",
+      "box": [
+        151,
+        773,
+        246,
+        788
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_1_to",
+      "type": "text",
+      "box": [
+        151,
+        790,
+        246,
+        805
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_1_name_address",
+      "type": "text",
+      "box": [
+        253,
+        775,
+        469,
+        803
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_1_position",
+      "type": "text",
+      "box": [
+        476,
+        775,
+        592,
+        803
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_1_reason_leaving",
+      "type": "text",
+      "box": [
+        599,
+        775,
+        758,
+        803
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_2_from",
+      "type": "text",
+      "box": [
+        151,
+        807,
+        246,
+        822
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_2_to",
+      "type": "text",
+      "box": [
+        151,
+        824,
+        246,
+        840
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_2_name_address",
+      "type": "text",
+      "box": [
+        253,
+        809,
+        469,
+        838
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_2_position",
+      "type": "text",
+      "box": [
+        476,
+        809,
+        592,
+        838
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_2_reason_leaving",
+      "type": "text",
+      "box": [
+        599,
+        809,
+        758,
+        838
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_3_from",
+      "type": "text",
+      "box": [
+        151,
+        842,
+        246,
+        857
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_3_to",
+      "type": "text",
+      "box": [
+        151,
+        859,
+        246,
+        875
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_3_name_address",
+      "type": "text",
+      "box": [
+        253,
+        844,
+        469,
+        873
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_3_position",
+      "type": "text",
+      "box": [
+        476,
+        844,
+        592,
+        873
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_3_reason_leaving",
+      "type": "text",
+      "box": [
+        599,
+        844,
+        758,
+        873
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_4_from",
+      "type": "text",
+      "box": [
+        151,
+        877,
+        246,
+        892
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_4_to",
+      "type": "text",
+      "box": [
+        151,
+        894,
+        246,
+        910
+      ],
+      "font_size": 10,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_4_name_address",
+      "type": "text",
+      "box": [
+        253,
+        879,
+        469,
+        908
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_4_position",
+      "type": "text",
+      "box": [
+        476,
+        879,
+        592,
+        908
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "left"
+    },
+    {
+      "id": "employer_4_reason_leaving",
+      "type": "text",
+      "box": [
+        599,
+        879,
+        758,
+        908
+      ],
+      "font_size": 9,
+      "min_font_size": 8,
+      "align": "left"
+    }
+  ]
+}

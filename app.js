@@ -2,6 +2,7 @@
    Built by Eli Otterholt. There is no server: every byte stays in this browser. */
 
 import * as pdfjsLib from './vendor/pdf.min.mjs';
+import { detectRules, phraseWords, detectRings, analyzeForm, fieldType, readingOrder, fitFieldText } from './form-layout.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdf.worker.min.mjs', import.meta.url).href;
 
 const { PDFDocument, StandardFonts, rgb, LineCapStyle, degrees } = PDFLib;
@@ -254,7 +255,7 @@ function saveSoon() {
       const dix = (await dixGet()).filter(d => d.id !== S.docId);
       dix.unshift({ id: S.docId, name: S.name, ts: Date.now(),
                     pages: S.pdf?.numPages || 1, kb: Math.round(S.bytes.byteLength / 1024) });
-      for (const old of dix.slice(MAX_DOCS)) { try { await DB.del('d:' + old.id); } catch (_) {} }
+      for (const old of dix.slice(MAX_DOCS)) { try { await DB.del('d:' + old.id); await DB.del('maps:' + old.id); } catch (_) {} }
       await dixPut(dix.slice(0, MAX_DOCS));
     } catch (_) {}
   }, 700);
@@ -738,6 +739,8 @@ async function loadDoc(buf, name, items, rots, fields, crops) {
   S.bytes = buf.slice(0);
   S.name = name;
   S.docId = keepDocId || await docId(S.bytes);
+  try { S.fieldEdits = await DB.get('maps:' + S.docId) || {}; }
+  catch (_) { S.fieldEdits = {}; }
   keepDocId = null;
   /* Opening a file this device has seen before finds the work already on it —
      unless this call is itself carrying state (a restore, or a fresh scan). */
@@ -2195,6 +2198,7 @@ const SCAN_W_BASE = 1000;
 const SCAN_W_MAX = 1700;
 let SCAN_W = SCAN_W_BASE;
 let K = 1;
+let scanQueue = Promise.resolve();
 const scanKeyOf = p => 'r' + totalRot(p);
 
 function pageScan(p) {
@@ -2397,7 +2401,8 @@ function ensureScan(p) {
   if (p.scanKey === key) return Promise.resolve(p.scanned);
   if (p.scanPending === key) return p.scanJob;
   p.scanPending = key;
-  p.scanJob = (async () => {
+  p.scanJob = scanQueue = scanQueue.catch(()=>{}).then(async () => {
+    delete p.formRules;delete p.formRings;delete p.rawWords;
     const cv = document.createElement('canvas');
     try {
       try { await p.task?.promise; } catch (_) {}      // don't render a page twice at once
@@ -2610,6 +2615,14 @@ function ensureScan(p) {
         cellsAll: cells, vrules: vs.length, bands: scan.bands.length,
         lines, boxes,
       };
+      const words = await wordsOrOcr(p);
+      if (words.length) {
+        if (!p.formRules) {
+          const pixels = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height);
+          p.formRules = detectRules(pixels); p.formRings = detectRings(pixels);
+        }
+        p.scanned = analyzeForm(p.rawWords || words, p.formRules, p.scanned, p.formRings);
+      }
     } catch (err) {
       console.warn('page scan failed', err);
       p.scanned = EMPTY_SCAN;
@@ -2618,7 +2631,7 @@ function ensureScan(p) {
     p.scanKey = key;
     p.scanPending = null;
     return p.scanned;
-  })();
+  });
   return p.scanJob;
 }
 
@@ -2714,7 +2727,39 @@ const itemFrame = it => {
   return localDims(p.lw, p.lh, it.rot);
 };
 
+let answerFont=null;
+const answerFontReady=PDFDocument.create().then(d=>d.embedFont(StandardFonts.Helvetica)).then(f=>(answerFont=f));
+const lineAnswer=L=>({x0:L.x0+.002,x1:L.x1-.002,y0:L.y-Math.min(L.clr || .022,.022),y1:L.y-.0015,align:L.align||'left',multiline:false,vertical:'bottom'});
+function answerLayout(it,font=answerFont) {
+  if(!it.answer||!font)return null;
+  const p=S.pageBox[it.page], [W,H]=localDims(p.uw,p.uh,it.rot),r=it.answer;
+  const padding=1.2,width=(r.x1-r.x0)*W-padding*2,height=(r.y1-r.y0)*H;
+  const measure=(t,fs)=>{try{return font.widthOfTextAtSize(t,fs);}catch{const ctx=document.createElement('canvas').getContext('2d');ctx.font=`${fs}px Arial`;return ctx.measureText(t).width;}};
+  const fit=fitFieldText(textOf(it),{width,height,fontSize:(it.maxFs||it.fs)*H,minFontSize:6.75,multiline:r.multiline},measure);
+  const y=r.vertical==='bottom'?r.y1-fit.height/H:r.y0+((r.y1-r.y0)-fit.height/H)/2;
+  return {...fit,x:r.x0+padding/W,y,width:width/W,fs:fit.size/H,
+    runs:fit.lines.map((text,k)=>({text,x:r.x0+padding/W+(r.align==='center'?(width-measure(text,fit.size))/2/W:r.align==='right'?(width-measure(text,fit.size))/W:0),y:y+(BASELINE+k*LINEH)*fit.size/H}))};
+}
+function fitAnswer(it,d) {
+  if(!it.answer)return;
+  if(it.fieldAnchor && (Math.abs(it.x-it.fieldAnchor.x)>.00001||Math.abs(it.y-it.fieldAnchor.y)>.00001)) {
+    delete it.answer;delete it.cell;delete it.fieldAnchor;delete it.overflow;delete it.maxFs;
+    if(d){d.classList.remove('field-overflow');d.title=it.label||'';d.firstChild.style.textAlign='left';}
+    return;
+  }
+  it.maxFs ||= it.fs;
+  const fit=answerLayout(it);if(!fit)return;
+  it.x=fit.x;it.y=fit.y;it.fs=fit.fs;it.fieldAnchor={x:it.x,y:it.y};
+  it.overflow=fit.overflow;
+  if(d) {
+    d.classList.toggle('field-overflow',fit.overflow);d.title=fit.overflow?'This answer does not fit. Shorten it or adjust its box.':it.label || '';
+    d.firstChild.style.textAlign=it.answer.align;
+    if(!d.firstChild.isContentEditable)d.firstChild.textContent=fit.lines.join('\n');
+  }
+}
+
 function sizeItem(it, d) {
+  if(isText(it))fitAnswer(it,d);
   const p = S.pageBox[it.page];
   const [Wl, Hl] = localDims(p.lw, p.lh, it.rot);
   const [ux, uy] = unrotXY(it.rot, it.x, it.y);
@@ -2723,7 +2768,11 @@ function sizeItem(it, d) {
   d.style.transform = it.rot ? `rotate(${-norm4(it.rot)}deg)` : '';
   if (isText(it)) {
     d.firstChild.style.fontSize = (it.fs * Hl) + 'px';
-    if (it.cell) {
+    if (it.answer) {
+      d.style.width = (answerLayout(it)?.width * Wl) + 'px';
+      d.style.height = '';
+      d.firstChild.style.minWidth='0';
+    } else if (it.cell) {
       d.style.width = ((it.cell.x1 - it.cell.x0) * Wl) + 'px';
       d.style.height = '';
     } else { d.style.width = ''; d.style.height = ''; }
@@ -3135,6 +3184,12 @@ function markInBox(pi, B) {
 }
 
 function placeInBox(pi, B, type, sel = true) {
+  push();
+  if (B.groupId) {
+    for (const other of pageBoxes(S.pageBox[pi]).filter(b=>b.groupId === B.groupId)) {
+      const old=markInBox(pi,other);if(old)removeItem(old.id);
+    }
+  }
   const p = S.pageBox[pi];
   const rot = totalRot(p);
   const [Wl, Hl] = localDims(p.lw, p.lh, rot);
@@ -3147,7 +3202,7 @@ function placeInBox(pi, B, type, sel = true) {
      tick — about 22px on a normal page — and past that it stops and sits
      centred, the size you would have drawn it. */
   const cap = (22 * PX / pageHpt(p)) * Hl;
-  const side = Math.min(Math.min(B.w * Wl, B.h * Hl) * 1.02, cap);
+  const side = Math.min(Math.min(B.w * Wl, B.h * Hl) * (B.shape === 'circle' ? .64 : 1.02), cap);
   const size = side / Hl;
   const it = {
     id: uid(), page: pi, rot, type,
@@ -3155,7 +3210,6 @@ function placeInBox(pi, B, type, sel = true) {
     y: clamp(B.cy - size / 2, 0, 1),
     size, color: COLORS[0], boxed: 1,
   };
-  push();
   S.items.push(it);
   itemEl(it);
   if (sel) select(it.id);
@@ -3169,6 +3223,7 @@ function placeInBox(pi, B, type, sel = true) {
 function cycleBox(pi, B, first, sel = true) {
   const cur = markInBox(pi, B);
   if (!cur) return placeInBox(pi, B, first, sel);
+  if (B.groupId) { push();removeItem(cur.id);return null; }
   if (cur.type === first) {
     push();
     cur.type = first === 'x' ? 'check' : 'x';
@@ -3366,6 +3421,8 @@ function startRubber(e, pi, x0, y0) {
 /* text editing */
 function edit(d) {
   const t = d.firstChild;
+  const current=S.items.find(i=>i.id===d.dataset.id);
+  if(current?.answer)t.textContent=textOf(current);
   t.contentEditable = 'plaintext-only';
   if (t.contentEditable !== 'plaintext-only') t.contentEditable = 'true';
   t.focus();
@@ -3377,6 +3434,7 @@ function edit(d) {
     if (!it) return;
     const v = t.innerText.replace(/ /g, ' ').replace(/\n+$/, '');
     if (v !== it.text) { push(); it.text = v; }
+    sizeItem(it,d);
     // an empty box is kept so it can still be dragged into place; it is
     // discarded when you select something else, and never exported.
     saveSoon();
@@ -3606,7 +3664,7 @@ function startResize(e, d) {
   const [Wl, Hl] = itemFrame(it);
   const sx = e.clientX, sy = e.clientY;
   const st = it.type === 'sig' ? stampOf(it) : null;
-  const o = { fs: it.fs, w: it.w, h: it.h, size: it.size, x: it.x, y: it.y,
+  const o = { fs: it.fs, maxFs: it.maxFs, w: it.w, h: it.h, size: it.size, x: it.x, y: it.y,
               w0: d.offsetWidth, h0: d.offsetHeight };
   const pid = e.pointerId;
   let started = false;
@@ -3619,7 +3677,7 @@ function startResize(e, d) {
     // a second finger means a pinch: give back the size it had and get out
     if (pinching(ev)) {
       if (started) {
-        it.fs = o.fs; it.w = o.w; it.h = o.h; it.size = o.size;
+        it.fs = o.fs; it.maxFs = o.maxFs; it.w = o.w; it.h = o.h; it.size = o.size;
         it.x = o.x; it.y = o.y;              // a mark moves as it grows now
         if (st) st.fs = stampFsFor(it.w);
         sizeItem(it, d);
@@ -3632,7 +3690,7 @@ function startResize(e, d) {
     if (!started) { started = true; push(); }
     const [ppx, ppy] = unspin(spin, ev.clientX - sx, ev.clientY - sy);
     const dx = (ppx / Wl) * gx, dy = (ppy / Hl) * gy;
-    if (isText(it)) it.fs = clamp(o.fs + dy * 0.6 + dx * 0.15, 0.005, 0.14);
+    if (isText(it)) { it.fs = clamp(o.fs + dy * 0.6 + dx * 0.15, 0.005, 0.14); if(it.answer)it.maxFs=it.fs; }
     else if (it.type === 'sig') {
       it.w = clamp(o.w + dx, 0.04, 1.2);                                    // aspect locked
       if (st) st.fs = stampFsFor(it.w);          // the date follows, down to a readable floor
@@ -3691,7 +3749,7 @@ const bump = (f, held) => {
      and grows upward. Centring that would lift it off its rule. */
   const keep = (isText(it) && it.lineKey) ? 'sw' : 'c';
   resized(it, d, keep, () => {
-    if (isText(it)) it.fs = clamp(it.fs * f, 0.005, 0.14);
+    if (isText(it)) { it.fs = clamp(it.fs * f, 0.005, 0.14); if(it.answer)it.maxFs=it.fs; }
     else if (it.type === 'sig') {
       it.w = clamp(it.w * f, 0.04, 1.2);
       const st = stampOf(it);
@@ -4055,17 +4113,7 @@ function spotsForPage(pi) {
                cy: C.cy, h: C.h, key: cellKey(pi, C) });
   });
 
-  /* Reading order: build rows top to bottom, joining anything whose middle is
-     within about a line of the row's, then read each row left to right. */
-  out.sort((a, b) => a.cy - b.cy || a.x - b.x);
-  const rows = [];
-  for (const s of out) {
-    const r = rows[rows.length - 1];
-    const tol = Math.max(0.009, Math.max(r ? r.h : 0, s.h) * 0.8);
-    if (r && s.cy - r.cy <= tol) { r.items.push(s); r.h = Math.max(r.h, s.h); }
-    else rows.push({ cy: s.cy, h: s.h, items: [s] });
-  }
-  return rows.flatMap(r => r.items.sort((a, b) => a.x - b.x));
+  return readingOrder(out);
 }
 
 /* ================================================ READING THE QUESTIONS
@@ -4092,7 +4140,7 @@ const LABEL_MAX = 78;
    lookup, the reading order and the cards never learn where the words came
    from. */
 const OCR_DIR = 'vendor/ocr/';
-const OCR_W = 1700;                    // ~200dpi on Letter; Tesseract wants the pixels
+const OCR_W = 2200;                    // ~200dpi on Letter; Tesseract wants the pixels
 let ocrWorker = null, ocrBooting = null;
 
 async function ocrReady(onNote) {
@@ -4127,48 +4175,96 @@ async function ocrPage(p, onNote) {
   const cv = document.createElement('canvas');
   try {
     const v0 = p.page.getViewport({ scale: 1, rotation: totalRot(p) });
-    const vp = p.page.getViewport({ scale: OCR_W / v0.width, rotation: totalRot(p) });
+    const vp = p.page.getViewport({ scale: Math.min(OCR_W / v0.width, Math.sqrt(6500000 / (v0.width * v0.height))), rotation: totalRot(p) });
     cv.width = Math.round(vp.width);
     cv.height = Math.round(vp.height);
     const ctx = cv.getContext('2d', { alpha: false });
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, cv.width, cv.height);
     await p.page.render({ canvasContext: ctx, viewport: vp }).promise;
+    const image = ctx.getImageData(0, 0, cv.width, cv.height);
+    p.formRules = detectRules(image);
+    p.formRings = detectRings(image);
+    await w.setParameters({ tessedit_pageseg_mode: '11' });
     const res = await w.recognize(cv, {}, { blocks: true });
-    const out = [];
-    const eat = ln => (ln.words || []).forEach(word => {
-      const t = (word.text || '').trim();
-      if (!t || (word.confidence ?? 100) < 45) return;
-      const b = word.bbox || {};
-      out.push({
-        s: t,
-        x0: b.x0 / cv.width, x1: b.x1 / cv.width,
-        cy: ((b.y0 + b.y1) / 2) / cv.height,
-        h: Math.max(1, b.y1 - b.y0) / cv.height,
+    let out = [];
+    const collect = (result, offsetY = 0, target = out) => {
+      const eat = ln => (ln.words || []).forEach(word => {
+        const t = (word.text || '').trim(), b = word.bbox || {};
+        if (!t || (word.confidence ?? 100) < 20) return;
+        target.push({s:t,confidence:word.confidence,x0:b.x0/cv.width,x1:b.x1/cv.width,
+          cy:(offsetY+(b.y0+b.y1)/2)/cv.height,h:Math.max(1,b.y1-b.y0)/cv.height});
       });
-    });
-    (res.data.blocks || []).forEach(bl =>
-      (bl.paragraphs || []).forEach(pa => (pa.lines || []).forEach(eat)));
-    if (!out.length) (res.data.lines || []).forEach(eat);
+      (result.data.blocks || []).forEach(bl => (bl.paragraphs || []).forEach(pa => (pa.lines || []).forEach(eat)));
+      if (!(result.data.blocks || []).length) (result.data.lines || []).forEach(eat);
+    };
+    collect(res);
+    // Refine individual printed phrases, not a full row containing several
+    // unrelated columns. Small sequential tiles bound the OCR working set.
+    const tile = document.createElement('canvas');
+    await w.setParameters({tessedit_pageseg_mode:'7'});
+    const initial=out;
+    const regions=phraseWords(initial,p.formRules);
+    try {
+      for (const region of regions.slice(0,120)) {
+        const original=initial.filter(x=>Math.abs(x.cy-region.cy)<Math.max(region.h,x.h)*.65&&x.x0>=region.x0-.001&&x.x1<=region.x1+.001);
+        if(!original.length||original.every(x=>(x.confidence||0)>92))continue;
+        const left=Math.max(0,Math.floor(region.x0*cv.width)-5),right=Math.min(cv.width,Math.ceil(region.x1*cv.width)+5);
+        const top=Math.max(0,Math.floor((region.cy-region.h*.6)*cv.height)-2),bot=Math.min(cv.height,Math.ceil((region.cy+region.h*.6)*cv.height)+2);
+        tile.width=right-left;tile.height=bot-top;
+        tile.getContext('2d').drawImage(cv,left,top,right-left,bot-top,0,0,right-left,bot-top);
+        const refined=[];collect(await w.recognize(tile,{}, {blocks:true}),top,refined);
+        refined.forEach(x=>{x.x0+=left/cv.width;x.x1+=left/cv.width;});
+        const score=a=>a.reduce((n,x)=>n+(x.confidence||0)*x.s.length,0)/Math.max(1,a.reduce((n,x)=>n+x.s.length,0));
+        if(refined.some(x=>/[a-z]{2}/i.test(x.s))&&refined.reduce((n,x)=>n+x.s.length,0)>=original.reduce((n,x)=>n+x.s.length,0)*.85&&score(refined)>score(original)+2) {
+          out=out.filter(x=>!original.includes(x));out.push(...refined);
+        }
+      }
+      // Circular choices sometimes vanish into OCR punctuation. Read the
+      // adjacent option crop using the circle's measured geometry.
+      for (const ring of (p.formRings||[]).filter(r=>r.cy>.12)) {
+        const left=Math.round(ring.x1*cv.width)+2,right=Math.min(cv.width,left+Math.round(ring.w*cv.width*2.6));
+        const top=Math.max(0,Math.round(ring.y0*cv.height)-2),bot=Math.min(cv.height,Math.round(ring.y1*cv.height)+2);
+        tile.width=right-left;tile.height=bot-top;
+        tile.getContext('2d').drawImage(cv,left,top,right-left,bot-top,0,0,right-left,bot-top);
+        const refined=[];collect(await w.recognize(tile,{}, {blocks:true}),top,refined);
+        const option=refined.find(x=>/^(yes|no)$/i.test(x.s));
+        if(option) {
+          option.x0+=left/cv.width;option.x1+=left/cv.width;
+          out=out.filter(x=>!(Math.abs(x.cy-option.cy)<.006&&x.x0>=ring.x0&&x.x0<option.x1));out.push(option);
+        }
+      }
+      // Read occupied grid cells and column headings in their own rectangle.
+      // Layout segmentation often swallows a column of tiny FROM/TO captions.
+      const all=(p.scanned?.cellsAll||[]).map(c=>({...c,...(c.box||{})}));
+      const captionRegions=all.filter(c=>(c.filled||c.cap)&&c.x1-c.x0<.5&&c.y1-c.y0<.06);
+      const blank=all.filter(c=>!c.filled&&!c.cap&&c.x1-c.x0<.5);
+      for(const c of blank) {
+        if(blank.some(b=>Math.abs(b.x0-c.x0)<.008&&Math.abs(b.x1-c.x1)<.008&&b.y0<c.y0&&c.y0-b.y0<.08))continue;
+        captionRegions.push({x0:c.x0,x1:c.x1,y0:c.y0-.021,y1:c.y0});
+      }
+      await w.setParameters({tessedit_pageseg_mode:'6'});
+      for(const r of captionRegions.slice(0,80)) {
+        const left=Math.max(0,Math.ceil(r.x0*cv.width)+3),right=Math.min(cv.width,Math.floor(r.x1*cv.width)-3);
+        const top=Math.max(0,Math.ceil(r.y0*cv.height)+3),bot=Math.min(cv.height,Math.floor(r.y1*cv.height)-3);
+        if(right<=left||bot<=top)continue;
+        tile.width=right-left;tile.height=bot-top;
+        tile.getContext('2d').drawImage(cv,left,top,right-left,bot-top,0,0,right-left,bot-top);
+        const refined=[];collect(await w.recognize(tile,{}, {blocks:true}),top,refined);
+        refined.forEach(x=>{x.x0+=left/cv.width;x.x1+=left/cv.width;});
+        if(refined.some(x=>/[a-z]{2}/i.test(x.s)&&(x.confidence||0)>60)) {
+          out=out.filter(x=>!(x.x0>=r.x0-.003&&x.x1<=r.x1+.003&&x.cy>r.y0&&x.cy<r.y1));out.push(...refined);
+        }
+      }
+    } finally {tile.width=tile.height=0;}
+    p.rawWords = out;
     return out;
   } finally { cv.width = cv.height = 0; }
 }
 
 /** every word on a page, in the same 0–1 display frame as everything else */
 /** glue neighbouring words back into the phrase a person would read */
-function joinWords(out) {
-  out.sort((a, b) => a.cy - b.cy || a.x0 - b.x0);
-  const runs = [];
-  for (const w of out) {
-    const r = runs[runs.length - 1];
-    if (r && Math.abs(r.cy - w.cy) < Math.max(r.h, w.h) * 0.6 &&
-        w.x0 - r.x1 < Math.max(r.h, w.h) * 1.2 && w.x0 >= r.x0) {
-      r.s += (w.x0 - r.x1 > r.h * 0.18 ? ' ' : '') + w.s;
-      r.x1 = Math.max(r.x1, w.x1);
-    } else runs.push({ ...w });
-  }
-  return runs;
-}
+function joinWords(out) { return phraseWords(out); }
 
 /** the page's words, read with OCR if the document carries none */
 async function wordsOrOcr(p, onNote) {
@@ -4176,7 +4272,7 @@ async function wordsOrOcr(p, onNote) {
   if (w.length) return w;
   if (p.ocrKey === 'w' + totalRot(p)) return p.words;
   try {
-    p.words = joinWords(await ocrPage(p, onNote));
+    p.words = phraseWords(await ocrPage(p, onNote), p.formRules);
     p.ocrKey = 'w' + totalRot(p);
   } catch (err) {
     console.warn('OCR unavailable', err);
@@ -4232,6 +4328,9 @@ function tidyLabel(s) {
 
 /** the words belonging to one spot, or null if the page has nothing to read */
 function labelFor(words, sp, skipRight) {
+  const mapped = sp.L || sp.C || sp.B;
+  if (skipRight && mapped?.askLabel) return mapped.askLabel;
+  if (mapped?.label) return mapped.label;
   if (!words.length) return null;
   const rowTol = Math.max(0.008, sp.h * 0.9);
 
@@ -4329,9 +4428,13 @@ async function readQuestions(opts = {}) {
       : await pageWords(p);
     seen += words.length;
     for (const sp of spotsForPage(pi)) {
+      const adjusted=S.fieldEdits?.[`${totalRot(p)}:${sp.key}`];
+      if(adjusted)Object.assign(sp.L||sp.C||sp.B||{},adjusted);
       out.push({
         ...sp,
         label: labelFor(words, sp),
+        section: (sp.L || sp.C || sp.B)?.section || '',
+        inputType: fieldType(labelFor(words, sp), sp.kind),
         // what a *group* of buttons is asking, as opposed to one button's own text
         askLabel: labelFor(words, sp, true),
       });
@@ -4490,7 +4593,8 @@ function textInCell(pi, C, key, focus = true) {
     it = { id: uid(), page: pi, rot: totalRot(p), type: 'text',
            x: C.x0, y: clamp(C.cy - fs * 0.62, 0, .99),
            fs, color: COLORS[0], text: '', lineKey: key,
-           cell: { x0: C.x0, x1: C.x1, y0: C.y0, y1: C.y1 } };
+           cell: { x0: C.x0, x1: C.x1, y0: C.y0, y1: C.y1 },
+           answer: {x0:C.x0,x1:C.x1,y0:C.y0,y1:C.y1,align:C.align || 'left',multiline:C.multiline !== false,vertical:'middle'},label:C.label };
     push(); S.items.push(it); itemEl(it); saveSoon();
   }
   select(it.id);
@@ -4509,7 +4613,7 @@ function textOnLine(pi, L, key, focus = true) {
     it = { id: uid(), page: pi, rot, type: 'text',
            x: clamp(L.x0 + 0.006, 0, .97),
            y: clamp(L.y - fs * (BASELINE + 0.06), 0, .99),
-           fs, color: COLORS[0], text: '', lineKey: key };
+           fs, color: COLORS[0], text: '', lineKey: key, answer:lineAnswer(L),label:L.label };
     push(); S.items.push(it); itemEl(it); flashLine(p, L); saveSoon();
   }
   select(it.id);
@@ -4633,8 +4737,9 @@ function syncJump() {
   const mid = $('#btnSpotAct'), lab = $('#spotLabel');
   const onBox = !!KB.box;
   mid.classList.toggle('is-act', onBox);
-  lab.textContent = onBox ? 'Tick this box'
-    : s ? `${SPOT_LABEL[s.kind]} · ${KB.at} of ${KB.of}`
+  const mapped=s && (s.L || s.C || s.B);
+  lab.textContent = onBox ? `${mapped?.askLabel || ''} ${mapped?.label || 'Tick this box'}`.trim()
+    : s ? `${mapped?.label || SPOT_LABEL[s.kind]} · ${KB.at} of ${KB.of}`
     : 'Jump to the next blank';
 }
 
@@ -5249,6 +5354,12 @@ async function rasterPage(pi, items, doc) {
       const w = it.w * Wl;
       ctx.drawImage(img, 0, 0, w, w * it.ar);
     } else if (isText(it)) {
+      const fit=answerLayout(it);
+      if(fit) {
+        ctx.fillStyle=it.color;ctx.font=`${fit.fs*Hl}px Helvetica, Arial, sans-serif`;ctx.textBaseline='alphabetic';
+        for(const run of fit.runs)ctx.fillText(run.text,(run.x-it.x)*Wl,(run.y-it.y)*Hl);
+        ctx.restore();continue;
+      }
       const fs = it.fs * Hl;
       ctx.fillStyle = it.color;
       ctx.font = `${fs}px "Helvetica Neue", Helvetica, Arial, sans-serif`;
@@ -5285,6 +5396,15 @@ async function flattenForm(bytes) {
   }
   try { form.updateFieldAppearances(await doc.embedFont(StandardFonts.Helvetica)); } catch (_) {}
   form.flatten();
+  // Some widget hierarchies leave references to deleted objects after flattening.
+  // Remove only unresolved references; preserve links and other live annotations.
+  for (const page of doc.getPages()) {
+    const annots = page.node.Annots();
+    if (!annots) continue;
+    const live = annots.asArray().filter(ref => doc.context.lookup(ref));
+    if (live.length) page.node.set(PDFLib.PDFName.of('Annots'), doc.context.obj(live));
+    else page.node.delete(PDFLib.PDFName.of('Annots'));
+  }
   return doc.save({ useObjectStreams: false });
 }
 
@@ -5316,6 +5436,9 @@ function fieldFallbackItems() {
 }
 
 async function buildPdf() {
+  await answerFontReady;
+  blurActive();
+  for(const it of S.items.filter(isText)) {fitAnswer(it,elOf(it.id));if(it.overflow)throw new Error(`Answer does not fit: ${it.label || 'text field'}. Shorten it or adjust its box.`);}
   let bytes = S.bytes.slice(0);
   let rasterDoc = null;
   let extra = [];
@@ -5380,6 +5503,12 @@ async function buildPdf() {
       const [Wl, Hl] = localDims(W, H, it.rot);
       const spin = degrees(norm4(it.rot));
       if (isText(it)) {
+        const fit=answerLayout(it,font);
+        if(fit) {
+          if(fit.overflow)throw new Error(`Answer does not fit: ${it.label || 'text field'}`);
+          for(const run of fit.runs) {if(!run.text)continue;const a=anchor(it,run.x,run.y);p.drawText(run.text,{x:a.x,y:a.y,size:fit.size,font,color:hex2rgb(it.color),rotate:spin});}
+          continue;
+        }
         const fs = it.fs * Hl;
         textOf(it).split('\n').forEach((ln, k) => {
           if (!ln) return;
@@ -6217,7 +6346,7 @@ $('#btnFinish').addEventListener('click', async () => {
   } catch (e) {
     console.error(e);
     busy(false);
-    return toast('Something went wrong building the PDF. Try removing the last object you added.', 5000);
+    return toast(e.message?.startsWith('Answer does not fit:') ? e.message : 'Something went wrong building the PDF. Try removing the last object you added.', 6000);
   }
   busy(false);
   const reds = S.items.filter(i => i.type === 'redact').length;
@@ -6408,7 +6537,7 @@ const simLineItem = q => S.items.find(i => i.page === q.page && i.lineKey === q.
 
 function simGet(q) {
   if (q.kind === 'field') return S.fields[q.f.name];
-  if (q.kind === 'line') { const it = simLineItem(q); return it ? (it.text || '') : ''; }
+  if (q.kind === 'line' || q.kind === 'cell') { const it = simLineItem(q); return it ? (it.text || '') : ''; }
   return markInBox(q.page, q.B)?.type || null;
 }
 
@@ -6420,7 +6549,7 @@ function simSetLine(q, v) {
     it = { id: uid(), page: q.page, rot: totalRot(p), type: 'text',
            x: clamp(q.L.x0 + 0.006, 0, .97),
            y: clamp(q.L.y - fs * (BASELINE + 0.06), 0, .99),
-           fs, color: COLORS[0], text: '', lineKey: q.key };
+           fs, color: COLORS[0], text: '', lineKey: q.key,answer:lineAnswer(q.L),label:q.label };
     markFieldHistory();
     S.items.push(it);
     itemEl(it);
@@ -6428,7 +6557,7 @@ function simSetLine(q, v) {
   }
   it.text = v;
   const d = elOf(it.id);
-  if (d && d.firstChild) d.firstChild.textContent = v;
+  if (d && d.firstChild) {d.firstChild.textContent = v;sizeItem(it,d);}
   saveSoon();
 }
 
@@ -6441,7 +6570,7 @@ function simSetCell(q, v) {
   }
   it.text = v;
   const d = elOf(it.id);
-  if (d && d.firstChild) d.firstChild.textContent = v;
+  if (d && d.firstChild) {d.firstChild.textContent = v;sizeItem(it,d);}
   saveSoon();
 }
 
@@ -6492,6 +6621,17 @@ function qCard(q, i) {
     l.append(document.createTextNode(txt));
     return l;
   };
+
+  if(q.kind === 'box' && q.group) {
+    d.append(labelText(q.groupLabel));
+    const wrap=document.createElement('div');wrap.className='q-radio';wrap.setAttribute('role','group');wrap.setAttribute('aria-label',q.groupLabel);
+    const paint=()=>[...wrap.children].forEach((b,k)=>{const on=!!simGet(q.group[k]);b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on));});
+    for(const g of q.group) {
+      const btn=document.createElement('button');btn.type='button';btn.textContent=g.label;
+      btn.addEventListener('click',()=>{simSetBox(g,simGet(g)?null:'x');paint();});wrap.append(btn);
+    }
+    paint();d.append(wrap);return d;
+  }
 
   /* a tick box, declared or drawn — one tap, and a way to swap the mark */
   if (q.kind === 'box' || (q.kind === 'field' && q.f.type === 'check')) {
@@ -6603,12 +6743,36 @@ function qCard(q, i) {
     return d;
   }
 
+  // A detected label is editable because OCR is evidence, not certainty.
+  const adjust=document.createElement('details');adjust.className='q-adjust';
+  const summary=document.createElement('summary');summary.textContent='Adjust field';adjust.append(summary);
+  const settings=q.L||q.C||q.B;
+  if(settings) {
+    const save=(name,value)=>{
+      settings[name]=value;
+      const editKey=`${totalRot(S.pageBox[q.page])}:${q.key}`;
+      S.fieldEdits[editKey]={...(S.fieldEdits[editKey]||{}),[name]:value};
+      DB.set('maps:'+S.docId,S.fieldEdits).catch(()=>toast('Field correction could not be saved on this device.'));
+      if(name==='label'){q.label=value;const label=d.querySelector('.q-label');if(label)label.lastChild.textContent=value;}
+      const it=simLineItem(q);if(it?.answer&&name==='align'){it.answer.align=value;sizeItem(it,elOf(it.id));saveSoon();}
+    };
+    const name=document.createElement('input');name.type='text';name.value=q.label;name.setAttribute('aria-label','Field label');
+    name.addEventListener('change',()=>save('label',name.value.trim()||q.label));adjust.append(name);
+    const alignment=document.createElement('select');alignment.setAttribute('aria-label','Text alignment');
+    for(const a of ['left','center','right']){const o=document.createElement('option');o.value=a;o.textContent=a[0].toUpperCase()+a.slice(1);alignment.append(o);}
+    alignment.value=settings.align||'left';alignment.addEventListener('change',()=>save('align',alignment.value));adjust.append(alignment);
+  }
+  const preview=document.createElement('button');preview.type='button';preview.className='linkish q-preview';preview.textContent='Show on page';
+  preview.addEventListener('click',()=>{showPage();enterSpot(q);});adjust.append(preview);
+  d.append(adjust);
+
   /* everything else is words on a line, or in a table cell */
   const id = 'qi' + i;
   d.append(labelText(q.label, id));
-  const multi = q.kind === 'field' && q.f.multiline;
+  const multi = (q.kind === 'field' && q.f.multiline) || (q.kind === 'cell' && q.C.multiline);
   const inp = document.createElement(multi ? 'textarea' : 'input');
-  if (!multi) inp.type = 'text';
+  if (!multi) inp.type = q.inputType === 'email' ? 'email' : q.inputType === 'tel' ? 'tel' : 'text';
+  if (q.inputType === 'tel') inp.inputMode = 'tel';
   inp.id = id;
   inp.spellcheck = false;
   if (q.kind === 'field' && q.f.maxLen) inp.maxLength = q.f.maxLen;
@@ -6628,12 +6792,13 @@ function qCard(q, i) {
     chip.className = 'q-chip';
     chip.textContent = 'Today';
     chip.addEventListener('click', () => {
-      inp.value = FMTS[0].f(new Date());
+      inp.value = FMTS[0].fn(new Date());
       inp.dispatchEvent(new Event('input'));
     });
     row.append(inp, chip);
     d.append(row);
   } else d.append(inp);
+  d.append(adjust);
   return d;
 }
 
@@ -6642,6 +6807,11 @@ function groupQuestions(qs) {
   const out = [];
   for (let i = 0; i < qs.length; i++) {
     const q = qs[i];
+    if(q.kind === 'box' && q.B.groupId) {
+      if(out.some(x=>x.kind === 'box' && x.B.groupId === q.B.groupId && x.page === q.page))continue;
+      const group=qs.filter(x=>x.kind === 'box' && x.B.groupId === q.B.groupId && x.page === q.page);
+      if(group.length>1){out.push({...q,group,groupLabel:q.askLabel || q.B.askLabel || q.label});continue;}
+    }
     if (q.kind === 'field' && q.f.type === 'radio') {
       const name = q.f.name;
       const group = [];
@@ -6690,6 +6860,9 @@ async function buildSimple() {
       h.className = 'q-page';
       h.textContent = `Page ${page + 1} of ${S.pageBox.length}`;
       list.append(h);
+    }
+    if (q.section && (i === 0 || SIM.qs[i-1].section !== q.section)) {
+      const heading=document.createElement('h2');heading.className='q-section';heading.textContent=q.section;list.append(heading);
     }
     list.append(qCard(q, i));
   });
@@ -6826,7 +6999,7 @@ async function renderRecents() {
       askWipe(`Delete \u201c${d.name}\u201d?`,
               'The document and everything you added to it will be removed from this device. This cannot be undone.',
               async () => {
-                await DB.del('d:' + d.id);
+                await DB.del('d:' + d.id); await DB.del('maps:' + d.id);
                 await dixPut((await dixGet()).filter(x => x.id !== d.id));
                 renderRecents();
                 toast('Deleted.');
@@ -6858,7 +7031,7 @@ $('#btnWipe').addEventListener('click', () => {
   askWipe('Delete all local data?',
           'Every saved document and every saved signature will be removed from this device. This cannot be undone.',
           async () => {
-            for (const d of await dixGet()) { try { await DB.del('d:' + d.id); } catch (_) {} }
+            for (const d of await dixGet()) { try { await DB.del('d:' + d.id); await DB.del('maps:' + d.id); } catch (_) {} }
             await DB.del('dix'); await DB.del('doc'); await DB.del('sigs');
             recentsOpen = false;
             renderRecents();
@@ -6913,5 +7086,6 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 MARKS: { path: MARK_PATH, width: MARK_W }, markCanvas,
                 zoomFloor, zoomTo, paperEdges, setDocName, paintItems,
                 openQr, closeLink, LINKof: () => LINK, setSkew, bakeSkew, runSmartCrop, skewNow: () => skewDeg, paperAnalyse, renderRecents, dixGet,
+                answerLayout, groupQuestions, simSetLine, simSetCell, simSetBox, enterSpot,
                 copySel, pasteClip, setMarq, clearMarq, MARQof: () => MARQ,
                 openCrop, closeCrop, nudgeCrop, pickCrop, syncRail, turn, openRotate, cropOf };

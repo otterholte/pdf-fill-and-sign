@@ -897,6 +897,13 @@ select.fld{padding-right:0;}
 
 /* text written in a table cell sits in the middle of the box */
 .it.in-cell .it-text{text-align:center;}
+.it.field-overflow{outline:2px solid #b42318;background:rgba(180,35,24,.08);}
+.q-section{font-size:1rem;margin:1.8rem 0 .4rem;color:var(--accent);}
+.q-adjust{margin-top:.6rem;font-size:.82rem;color:#526070;}
+.q-adjust summary{cursor:pointer;}
+.q-adjust label{display:block;margin:.6rem 0 .2rem;}
+.q-adjust input,.q-adjust select{width:100%;padding:.5rem;border:1px solid #cbd2da;border-radius:6px;background:white;color:#192331;}
+.q-preview{margin-top:.5rem;}
 /* and the blank itself is the whole box, not a line to rest on */
 .linehint.is-cell{
   border-radius:2px;

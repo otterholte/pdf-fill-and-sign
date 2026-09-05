@@ -9,6 +9,59 @@ No account. No upload. No trial. No watermark. No surprise paywall.
 
 ---
 
+
+## Local field analysis and regression tests
+
+The app now reads scanned forms with the bundled Tesseract worker in both Page
+view and **Fill fields** (the question view). Nothing leaves the device. No API
+key, cloud model, or form-specific coordinate template is used by the detector.
+
+The structural pass in `form-layout.mjs` combines printed words with underlines,
+section borders, table rows/columns, inline captions, and circular options. Table
+questions include their row and column context. Short cells default to centered
+text; descriptive cells default to left alignment. **Adjust field** lets you
+correct a label or alignment, and **Show on page** opens its actual position.
+Those corrections stay with the local document. OCR labels are estimates, so
+review them against the original, particularly on low-resolution scans.
+
+Tab and Shift+Tab in Page view follow measured reading order, including separate
+FROM/TO subrows. Detected circular groups allow only one selected option. Cell
+answers can contain multiple lines and survive switching views. The screen and
+PDF use one font-measured layout routine; an answer that cannot fit is highlighted
+and blocks export with an actionable message. Manually moving an answer releases
+its automatic bounds so the existing drag/resize workflow remains available.
+
+Analysis is queued one page at a time, reuses one OCR worker, and caps the OCR
+raster at 6.5 million pixels. The offline shell caches the OCR worker, WebAssembly,
+and language data. Installation/cache warming needs a connection; after that the
+included regression verifies a fresh scan with browser networking disabled.
+
+Development and tests (Node 20+):
+
+```sh
+npm ci
+npx playwright install chromium
+npm test
+npm run test:browser
+npm run dev
+```
+
+`npm run dev` serves the static app at http://127.0.0.1:8766 with correct module and
+WASM MIME types. Test dependencies are development-only; deployment remains static.
+For an installed browser on Windows, set `BROWSER_CHANNEL=msedge` before running
+browser tests. The tests write PDFs, screenshots, detected fields, text layouts,
+and a JSON report under `tests/results/` (ignored by Git). GitHub Actions runs the
+same tests and uploads those results.
+
+The employment regression uploads the original JPG, checks 57 questions (54 text
+areas and three groups containing six controls), five sections, all expected field
+locations, actual UI filling, exclusive choices, keyboard navigation, Today,
+multiline persistence, export, and offline rescanning. A separate generated PDF
+tests native widgets and signature placement. The manually labeled truth fixture
+is used only to evaluate detection; its coordinates never enter the application.
+This single regression is not a universal accuracy claim. Unusual layouts, revised
+forms, severe perspective, faint controls, or OCR errors may still require review.
+
 ## What it does
 
 - **Scan a paper form** — photograph one with the phone, or pick a photo already on
@@ -175,8 +228,8 @@ the line scan ignores; with both sets, a cell is the gap between two neighbourin
 uprights, closed off by two of the horizontals that span it. Cells that already have
 something in them are the headings, so only the empty ones are offered.
 
-Text typed into a cell is centred in the box on screen and centred again on export,
-where pdf-lib measures the string and places it. Tab walks a grid the way you would
+Text typed into a cell uses its inferred or user-selected alignment on screen and
+on export, where pdf-lib measures the string and places it. Tab walks a grid the way you would
 read it — across the row, then down — because grid order and reading order are the same
 thing, and the ordering code already did that.
 
@@ -651,7 +704,7 @@ represent.
 
 ## Not included, deliberately
 
-Accounts, subscriptions, watermarks, ads, AI, OCR, editing the original PDF text,
+Accounts, subscriptions, watermarks, ads, cloud AI, editing the original PDF text,
 converting Word files, merging, splitting, page reordering, cloud storage, collaboration,
 digital certificates. Each one left out is what keeps this fast, private, and free.
 

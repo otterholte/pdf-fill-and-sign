@@ -1,13 +1,16 @@
 /* Fill & Sign service worker — offline shell + Android share-target intake. */
-const V = 'fillandsign-v4';
+const V = 'fillandsign-v5-local-layout';
 const SHARE = 'fillandsign-share';
 const SHELL = [
-  './', 'index.html', 'app.css', 'app.js', 'manifest.webmanifest',
+  './', 'index.html', 'app.css', 'app.js', 'form-layout.mjs', 'manifest.webmanifest',
   'tools.html', 'site.css', 'shrink.html', 'shrink.css', 'shrink.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/shrink.svg',
   'vendor/pdf.min.mjs', 'vendor/pdf.worker.min.mjs', 'vendor/pdf-lib.min.js',
   'vendor/caveat.woff2', 'vendor/dancing.woff2',
   'vendor/peerjs.min.js', 'vendor/qrcode.js',
+  'vendor/ocr/tesseract.esm.min.js', 'vendor/ocr/worker.min.js',
+  'vendor/ocr/tesseract-core-simd-lstm.js', 'vendor/ocr/tesseract-core-simd-lstm.wasm',
+  'vendor/ocr/eng.traineddata',
 ];
 
 self.addEventListener('install', e => {

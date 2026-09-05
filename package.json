@@ -1,0 +1,13 @@
+{
+  "name": "pdf-fill-and-sign",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node tests/server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:browser": "node tests/browser.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.58.2"
+  }
+}

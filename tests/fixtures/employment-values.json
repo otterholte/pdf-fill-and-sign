@@ -1,0 +1,287 @@
+{
+  "name_last_first": {
+    "value": "Example, Alex Jordan",
+    "source": "sample",
+    "verified": false
+  },
+  "social_security_number": {
+    "value": "000-00-0000 (sample only)",
+    "source": "sample",
+    "verified": false
+  },
+  "present_street": {
+    "value": "123 Example Lane, Apt 4",
+    "source": "sample",
+    "verified": false
+  },
+  "present_city": {
+    "value": "Sample City",
+    "source": "sample",
+    "verified": false
+  },
+  "present_state": {
+    "value": "CO",
+    "source": "sample",
+    "verified": false
+  },
+  "present_zip": {
+    "value": "00000",
+    "source": "sample",
+    "verified": false
+  },
+  "permanent_street": {
+    "value": "456 Demo Avenue",
+    "source": "sample",
+    "verified": false
+  },
+  "permanent_city": {
+    "value": "Sample City",
+    "source": "sample",
+    "verified": false
+  },
+  "permanent_state": {
+    "value": "CO",
+    "source": "sample",
+    "verified": false
+  },
+  "permanent_zip": {
+    "value": "00000",
+    "source": "sample",
+    "verified": false
+  },
+  "phone": {
+    "value": "(202) 555-0147",
+    "source": "sample",
+    "verified": false
+  },
+  "secondary_phone": {
+    "value": "202-555-0186",
+    "source": "sample",
+    "verified": false
+  },
+  "referred_by": {
+    "value": "Jordan Example",
+    "source": "sample",
+    "verified": false
+  },
+  "position_desired": {
+    "value": "Administrative Assistant",
+    "source": "sample",
+    "verified": false
+  },
+  "available_start_date": {
+    "value": "September 21, 2026",
+    "source": "sample",
+    "verified": false
+  },
+  "currently_employed": {
+    "value": "yes",
+    "source": "sample",
+    "verified": false
+  },
+  "may_contact_present_employer": {
+    "value": "no",
+    "source": "sample",
+    "verified": false
+  },
+  "previously_applied": {
+    "value": "yes",
+    "source": "sample",
+    "verified": false
+  },
+  "previous_application_where": {
+    "value": "Sample City branch",
+    "source": "sample",
+    "verified": false
+  },
+  "previous_application_when": {
+    "value": "March 2024",
+    "source": "sample",
+    "verified": false
+  },
+  "high_school_school_location": {
+    "value": "Example High School\nSample City, CO",
+    "source": "sample",
+    "verified": false
+  },
+  "high_school_years": {
+    "value": "2008-2012",
+    "source": "sample",
+    "verified": false
+  },
+  "high_school_graduated": {
+    "value": "Yes",
+    "source": "sample",
+    "verified": false
+  },
+  "high_school_subjects": {
+    "value": "General studies",
+    "source": "sample",
+    "verified": false
+  },
+  "college_school_location": {
+    "value": "Demo State University\nSample City, CO",
+    "source": "sample",
+    "verified": false
+  },
+  "college_years": {
+    "value": "2012-2016",
+    "source": "sample",
+    "verified": false
+  },
+  "college_graduated": {
+    "value": "Yes",
+    "source": "sample",
+    "verified": false
+  },
+  "college_subjects": {
+    "value": "Business administration",
+    "source": "sample",
+    "verified": false
+  },
+  "trade_school_school_location": {
+    "value": "Sample Career Institute\nSample City, CO",
+    "source": "sample",
+    "verified": false
+  },
+  "trade_school_years": {
+    "value": "2016-2017",
+    "source": "sample",
+    "verified": false
+  },
+  "trade_school_graduated": {
+    "value": "Yes",
+    "source": "sample",
+    "verified": false
+  },
+  "trade_school_subjects": {
+    "value": "Office administration",
+    "source": "sample",
+    "verified": false
+  },
+  "special_study_research": {
+    "value": "Office workflow and records-management projects",
+    "source": "sample",
+    "verified": false
+  },
+  "special_training": {
+    "value": "Bookkeeping, workplace safety, and customer service",
+    "source": "sample",
+    "verified": false
+  },
+  "special_skills": {
+    "value": "Spreadsheets, scheduling, data entry, and typing: 65 wpm",
+    "source": "sample",
+    "verified": false
+  },
+  "military_service": {
+    "value": "None (sample)",
+    "source": "sample",
+    "verified": false
+  },
+  "military_rank": {
+    "value": "N/A - no service",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_1_from": {
+    "value": "06/2023",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_1_to": {
+    "value": "Present",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_1_name_address": {
+    "value": "Example Office Services\n100 Sample St., Sample City, CO 00000",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_1_position": {
+    "value": "Office Coordinator",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_1_reason_leaving": {
+    "value": "Seeking advancement",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_2_from": {
+    "value": "08/2020",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_2_to": {
+    "value": "05/2023",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_2_name_address": {
+    "value": "Demo Supply Company\n200 Demo Rd., Sample City, CO 00000",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_2_position": {
+    "value": "Administrative Assistant",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_2_reason_leaving": {
+    "value": "Career growth",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_3_from": {
+    "value": "06/2018",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_3_to": {
+    "value": "07/2020",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_3_name_address": {
+    "value": "Sample Community Center\n300 Example Ave., Sample City, CO 00000",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_3_position": {
+    "value": "Receptionist",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_3_reason_leaving": {
+    "value": "Full-time opportunity",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_4_from": {
+    "value": "07/2017",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_4_to": {
+    "value": "05/2018",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_4_name_address": {
+    "value": "Illustrative Retail Group\n400 Test Dr., Sample City, CO 00000",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_4_position": {
+    "value": "Customer Service Clerk",
+    "source": "sample",
+    "verified": false
+  },
+  "employer_4_reason_leaving": {
+    "value": "Office career transition",
+    "source": "sample",
+    "verified": false
+  }
+}
