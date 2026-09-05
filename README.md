@@ -31,6 +31,14 @@ PDF use one font-measured layout routine; an answer that cannot fit is highlight
 and blocks export with an actionable message. Manually moving an answer releases
 its automatic bounds so the existing drag/resize workflow remains available.
 
+Detected answers share a 10 pt default, independent of printed label size or cell
+height. Text wraps first and shrinks only when its own width/height requires it.
+Font ascent and descent determine the actual ink bounds, so small rows do not
+shrink just to accommodate empty line spacing. Explicit manual resizing remains
+available. The regression checks uniformity, glyph bounds, and the font sizes
+read back from the exported PDF.
+
+
 Analysis is queued one page at a time, reuses one OCR worker, and caps the OCR
 raster at 6.5 million pixels. The offline shell caches the OCR worker, WebAssembly,
 and language data. Installation/cache warming needs a connection; after that the
@@ -52,6 +60,14 @@ For an installed browser on Windows, set `BROWSER_CHANNEL=msedge` before running
 browser tests. The tests write PDFs, screenshots, detected fields, text layouts,
 and a JSON report under `tests/results/` (ignored by Git). GitHub Actions runs the
 same tests and uploads those results.
+
+After a push and successful Pages deployment, set `TEST_BASE_URL` to
+`https://otterholte.github.io/pdf-fill-and-sign/` and run `npm run test:browser`
+again. This runs the entire upload/fill/export/offline regression against the live
+site. It first verifies that the deployed app, detector, and service worker match
+the local checkout, so a stale deployment cannot produce a misleading pass.
+Use `TEST_OUTPUT` to keep live-run artifacts in a separate directory.
+
 
 The employment regression uploads the original JPG, checks 57 questions (54 text
 areas and three groups containing six controls), five sections, all expected field

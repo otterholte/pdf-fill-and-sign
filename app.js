@@ -2,7 +2,7 @@
    Built by Eli Otterholt. There is no server: every byte stays in this browser. */
 
 import * as pdfjsLib from './vendor/pdf.min.mjs';
-import { detectRules, phraseWords, detectRings, analyzeForm, fieldType, readingOrder, fitFieldText } from './form-layout.mjs';
+import { detectRules, phraseWords, detectRings, analyzeForm, fieldType, readingOrder, fitFieldText, ANSWER_FONT_SIZE } from './form-layout.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdf.worker.min.mjs', import.meta.url).href;
 
 const { PDFDocument, StandardFonts, rgb, LineCapStyle, degrees } = PDFLib;
@@ -2730,15 +2730,48 @@ const itemFrame = it => {
 let answerFont=null;
 const answerFontReady=PDFDocument.create().then(d=>d.embedFont(StandardFonts.Helvetica)).then(f=>(answerFont=f));
 const lineAnswer=L=>({x0:L.x0+.002,x1:L.x1-.002,y0:L.y-Math.min(L.clr || .022,.022),y1:L.y-.0015,align:L.align||'left',multiline:false,vertical:'bottom'});
-function answerLayout(it,font=answerFont) {
-  if(!it.answer||!font)return null;
-  const p=S.pageBox[it.page], [W,H]=localDims(p.uw,p.uh,it.rot),r=it.answer;
-  const padding=1.2,width=(r.x1-r.x0)*W-padding*2,height=(r.y1-r.y0)*H;
-  const measure=(t,fs)=>{try{return font.widthOfTextAtSize(t,fs);}catch{const ctx=document.createElement('canvas').getContext('2d');ctx.font=`${fs}px Arial`;return ctx.measureText(t).width;}};
-  const fit=fitFieldText(textOf(it),{width,height,fontSize:(it.maxFs||it.fs)*H,minFontSize:6.75,multiline:r.multiline},measure);
-  const y=r.vertical==='bottom'?r.y1-fit.height/H:r.y0+((r.y1-r.y0)-fit.height/H)/2;
-  return {...fit,x:r.x0+padding/W,y,width:width/W,fs:fit.size/H,
-    runs:fit.lines.map((text,k)=>({text,x:r.x0+padding/W+(r.align==='center'?(width-measure(text,fit.size))/2/W:r.align==='right'?(width-measure(text,fit.size))/W:0),y:y+(BASELINE+k*LINEH)*fit.size/H}))};
+function answerLayout(it, font = answerFont) {
+  if (!it.answer || !font) return null;
+  const p = S.pageBox[it.page], [W, H] = localDims(p.uw, p.uh, it.rot), r = it.answer;
+  const padding = 1.2, verticalPadding = 0.6;
+  const width = (r.x1 - r.x0) * W - padding * 2;
+  const height = (r.y1 - r.y0) * H - verticalPadding * 2;
+  const measure = (text, size) => {
+    try { return font.widthOfTextAtSize(text, size); }
+    catch {
+      const ctx = document.createElement('canvas').getContext('2d');
+      ctx.font = `${size}px Arial`;
+      return ctx.measureText(text).width;
+    }
+  };
+  const glyphHeight = font.heightAtSize(1);
+  const ascent = font.heightAtSize(1, { descender: false });
+  const fit = fitFieldText(textOf(it), {
+    width, height, fontSize: r.fontSize || ANSWER_FONT_SIZE, minFontSize: 6.75,
+    multiline: r.multiline, glyphHeight, lineHeight: LINEH,
+  }, measure);
+  // Fit actual glyphs, not the empty leading above/below the CSS line box.
+  // This keeps short date rows readable while preserving space for descenders.
+  const inkTop = r.vertical === 'bottom'
+    ? r.y1 - (verticalPadding + fit.height) / H
+    : r.y0 + (verticalPadding + (height - fit.height) / 2) / H;
+  const y = inkTop - (BASELINE - ascent) * fit.size / H;
+  return {
+    ...fit, x: r.x0 + padding / W, y, width: width / W, fs: fit.size / H,
+    inkTop, ascent: ascent * fit.size, descent: (glyphHeight - ascent) * fit.size,
+    runs: fit.lines.map((text, k) => ({
+      text,
+      x: r.x0 + padding / W + (r.align === 'center'
+        ? (width - measure(text, fit.size)) / 2 / W
+        : r.align === 'right' ? (width - measure(text, fit.size)) / W : 0),
+      y: y + (BASELINE + k * LINEH) * fit.size / H,
+    })),
+  };
+}
+function setAnswerFontSize(it) {
+  if (!it.answer) return;
+  const p = S.pageBox[it.page];
+  it.answer.fontSize = it.fs * localDims(p.uw, p.uh, it.rot)[1];
 }
 function fitAnswer(it,d) {
   if(!it.answer)return;
@@ -2747,7 +2780,6 @@ function fitAnswer(it,d) {
     if(d){d.classList.remove('field-overflow');d.title=it.label||'';d.firstChild.style.textAlign='left';}
     return;
   }
-  it.maxFs ||= it.fs;
   const fit=answerLayout(it);if(!fit)return;
   it.x=fit.x;it.y=fit.y;it.fs=fit.fs;it.fieldAnchor={x:it.x,y:it.y};
   it.overflow=fit.overflow;
@@ -3664,7 +3696,7 @@ function startResize(e, d) {
   const [Wl, Hl] = itemFrame(it);
   const sx = e.clientX, sy = e.clientY;
   const st = it.type === 'sig' ? stampOf(it) : null;
-  const o = { fs: it.fs, maxFs: it.maxFs, w: it.w, h: it.h, size: it.size, x: it.x, y: it.y,
+  const o = { fs: it.fs, answerFontSize: it.answer?.fontSize, w: it.w, h: it.h, size: it.size, x: it.x, y: it.y,
               w0: d.offsetWidth, h0: d.offsetHeight };
   const pid = e.pointerId;
   let started = false;
@@ -3677,7 +3709,7 @@ function startResize(e, d) {
     // a second finger means a pinch: give back the size it had and get out
     if (pinching(ev)) {
       if (started) {
-        it.fs = o.fs; it.maxFs = o.maxFs; it.w = o.w; it.h = o.h; it.size = o.size;
+        it.fs = o.fs; if(it.answer)it.answer.fontSize=o.answerFontSize; it.w = o.w; it.h = o.h; it.size = o.size;
         it.x = o.x; it.y = o.y;              // a mark moves as it grows now
         if (st) st.fs = stampFsFor(it.w);
         sizeItem(it, d);
@@ -3690,7 +3722,7 @@ function startResize(e, d) {
     if (!started) { started = true; push(); }
     const [ppx, ppy] = unspin(spin, ev.clientX - sx, ev.clientY - sy);
     const dx = (ppx / Wl) * gx, dy = (ppy / Hl) * gy;
-    if (isText(it)) { it.fs = clamp(o.fs + dy * 0.6 + dx * 0.15, 0.005, 0.14); if(it.answer)it.maxFs=it.fs; }
+    if (isText(it)) { it.fs = clamp(o.fs + dy * 0.6 + dx * 0.15, 0.005, 0.14); setAnswerFontSize(it); }
     else if (it.type === 'sig') {
       it.w = clamp(o.w + dx, 0.04, 1.2);                                    // aspect locked
       if (st) st.fs = stampFsFor(it.w);          // the date follows, down to a readable floor
@@ -3749,7 +3781,7 @@ const bump = (f, held) => {
      and grows upward. Centring that would lift it off its rule. */
   const keep = (isText(it) && it.lineKey) ? 'sw' : 'c';
   resized(it, d, keep, () => {
-    if (isText(it)) { it.fs = clamp(it.fs * f, 0.005, 0.14); if(it.answer)it.maxFs=it.fs; }
+    if (isText(it)) { it.fs = clamp(it.fs * f, 0.005, 0.14); setAnswerFontSize(it); }
     else if (it.type === 'sig') {
       it.w = clamp(it.w * f, 0.04, 1.2);
       const st = stampOf(it);

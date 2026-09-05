@@ -121,3 +121,32 @@ test("extrapolated control positions need outline evidence", () => {
   assert.equal(result.boxes.length, 1);
   assert.equal(result.boxes[0], real);
 });
+
+test("short answers keep one readable size across small and large fields", () => {
+  const measure = (text, size) => text.length * size * 0.5;
+  const small = fitFieldText(
+    "July",
+    { width: 50, height: 10, glyphHeight: 0.925 },
+    measure,
+  );
+  const large = fitFieldText(
+    "July",
+    { width: 250, height: 80, glyphHeight: 0.925 },
+    measure,
+  );
+  assert.equal(small.size, 10);
+  assert.equal(large.size, small.size);
+  assert.equal(small.overflow, false);
+});
+
+test("two lines fit using glyph bounds without unnecessary trailing leading", () => {
+  const fit = fitFieldText(
+    "Example School\nSample City",
+    { width: 130, height: 22, glyphHeight: 0.925 },
+    (text, size) => text.length * size * 0.5,
+  );
+  assert.equal(fit.size, 10);
+  assert.equal(fit.overflow, false);
+  assert.equal(fit.lines.length, 2);
+  assert.ok(fit.height <= 22);
+});

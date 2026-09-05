@@ -556,14 +556,20 @@ export function readingOrder(spots) {
   );
 }
 
+// A shared document text size avoids enlarging short answers in tall cells or
+// inheriting inconsistent OCR label sizes. Bounds may shrink it; never grow it.
+export const ANSWER_FONT_SIZE = 10;
+
 /** One layout algorithm for screen and PDF. Never clips or silently discards
     content: callers must surface overflow and stop export when it cannot fit. */
 export function fitFieldText(text, options, measure) {
   const {
     width,
     height,
-    fontSize,
+    fontSize = ANSWER_FONT_SIZE,
     minFontSize = 6.75,
+    glyphHeight = 1.25,
+    lineHeight = 1.25,
     multiline = true,
   } = options;
   for (
@@ -587,7 +593,7 @@ export function fitFieldText(text, options, measure) {
       }
       lines.push(line);
     }
-    const used = lines.length * size * 1.25;
+    const used = (glyphHeight + (lines.length - 1) * lineHeight) * size;
     if (
       used <= height + 0.01 &&
       lines.every((line) => measure(line, size) <= width + 0.01)

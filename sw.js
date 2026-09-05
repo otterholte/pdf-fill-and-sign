@@ -1,5 +1,5 @@
 /* Fill & Sign service worker — offline shell + Android share-target intake. */
-const V = 'fillandsign-v5-local-layout';
+const V = 'fillandsign-v6-uniform-text';
 const SHARE = 'fillandsign-share';
 const SHELL = [
   './', 'index.html', 'app.css', 'app.js', 'form-layout.mjs', 'manifest.webmanifest',

@@ -8,9 +8,24 @@ import { serve } from "./server.mjs";
 const root = path.resolve("tests/fixtures"),
   out = path.resolve(process.env.TEST_OUTPUT || "tests/results");
 await mkdir(out, { recursive: true });
-const server = serve(0);
-await new Promise((r) => server.once("listening", r));
-const url = `http://127.0.0.1:${server.address().port}`;
+const deployedUrl = process.env.TEST_BASE_URL;
+const server = deployedUrl ? null : serve(0);
+if (server) await new Promise((r) => server.once("listening", r));
+const url = deployedUrl
+  ? new URL(deployedUrl.endsWith("/") ? deployedUrl : deployedUrl + "/").href
+  : `http://127.0.0.1:${server.address().port}`;
+if (deployedUrl) {
+  // Refuse a stale deployment: exercise exactly the code in this checkout.
+  for (const file of ["app.js", "form-layout.mjs", "sw.js"]) {
+    const response = await fetch(new URL(file, url));
+    assert.ok(response.ok, `deployed ${file} is available`);
+    assert.equal(
+      (await response.text()).replace(/\r\n/g, "\n"),
+      (await readFile(file, "utf8")).replace(/\r\n/g, "\n"),
+      `deployed ${file} matches the tested checkout`,
+    );
+  }
+}
 const truth = JSON.parse(
   await readFile(path.join(root, "employment-truth.json"), "utf8"),
 );
@@ -167,6 +182,32 @@ try {
     layouts.every((l) => !l.overflow),
     "all sample answers fit",
   );
+  const uniformAnswers = layouts.filter(
+    (l) => Math.abs(l.size - 10) < 0.01,
+  ).length;
+  assert.ok(
+    uniformAnswers >= 46,
+    `at least 85% of answers retain the shared 10 pt size (${uniformAnswers}/54)`,
+  );
+  assert.ok(
+    layouts.every((l) => l.size <= 10 && l.size >= 8.75),
+    "only constrained answers shrink, within a narrow readable range",
+  );
+  const pageHeight = await page.evaluate(() => window.__fs.S.pageBox[0].uh);
+  for (const layout of layouts) {
+    for (const run of layout.runs) {
+      assert.ok(
+        run.y * pageHeight - layout.ascent >=
+          layout.answer.y0 * pageHeight - 0.01,
+        `${layout.label}: glyph top stays inside field`,
+      );
+      assert.ok(
+        run.y * pageHeight + layout.descent <=
+          layout.answer.y1 * pageHeight + 0.01,
+        `${layout.label}: descenders stay inside field`,
+      );
+    }
+  }
   // Exercise actual keyboard navigation, including reverse Tab.
   await page.locator("#btnNextSpot").click();
   const before = await page.evaluate(() => window.__fs.KB.key);
@@ -174,6 +215,39 @@ try {
   assert.notEqual(await page.evaluate(() => window.__fs.KB.key), before);
   await page.keyboard.press("Shift+Tab");
   assert.equal(await page.evaluate(() => window.__fs.KB.key), before);
+  await page.locator("#stage").click({ position: { x: 3, y: 3 } });
+  // Existing automatically fitted answers migrate to the shared size, while
+  // an explicit user resize still works and can be undone.
+  const resizedId = await page.evaluate(() => {
+    const a = window.__fs,
+      it = a.S.items.find((i) => i.answer);
+    it.maxFs = 0.005;
+    a.paintItems();
+    if (Math.abs(a.answerLayout(it).size - 10) > 0.01)
+      throw new Error("Legacy OCR size overrode uniform typography");
+    a.select(it.id);
+    return it.id;
+  });
+  await page.locator("#btnSmaller").click();
+  assert.ok(
+    await page.evaluate((id) => {
+      const a = window.__fs,
+        it = a.S.items.find((i) => i.id === id);
+      return it.fs * a.S.pageBox[0].uh < 9;
+    }, resizedId),
+    "explicit resize is respected",
+  );
+  await page.locator("#btnUndo").click();
+  assert.equal(
+    await page.evaluate(
+      (id) =>
+        window.__fs.answerLayout(window.__fs.S.items.find((i) => i.id === id))
+          .size,
+      resizedId,
+    ),
+    10,
+    "undo restores uniform size",
+  );
   await page.locator("#stage").click({ position: { x: 3, y: 3 } });
   // Export with the application's own pdf-lib path. No external renderer fills it.
   await page.evaluate(() =>
@@ -185,6 +259,31 @@ try {
   await page.locator("#btnSave").click();
   const download = await downloadPromise;
   await download.saveAs(path.join(out, "local-only-filled-form.pdf"));
+  const exportedSizes = await page.evaluate(
+    async (bytes) => {
+      const pdfjs = await import(new URL("vendor/pdf.min.mjs", location.href));
+      const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes) })
+        .promise;
+      try {
+        const text = await (await doc.getPage(1)).getTextContent();
+        return text.items
+          .filter((i) => i.str?.trim())
+          .map((i) => Math.hypot(i.transform[2], i.transform[3]));
+      } finally {
+        await doc.destroy();
+      }
+    },
+    [...(await readFile(path.join(out, "local-only-filled-form.pdf")))],
+  );
+  assert.ok(
+    exportedSizes.length >= 54,
+    "exported PDF contains all text answers",
+  );
+  assert.ok(
+    exportedSizes.every((size) => size >= 8.75 - 0.01 && size <= 10 + 0.01),
+    "actual exported font sizes match the readable range",
+  );
+
   await page.locator("#btnContinue").click();
   await page.screenshot({
     path: path.join(out, "page-view.png"),
@@ -438,6 +537,8 @@ try {
   assert.deepEqual(external, []);
   const report = {
     passed: true,
+    runtimeSource: deployedUrl ? "deployed app" : "localhost",
+    testedUrl: url,
     questions: 57,
     textFields: 54,
     circularOptions: 6,
@@ -445,6 +546,12 @@ try {
     sections: 5,
     geometryChecks: 60,
     sampleAnswersFit: true,
+    uniformTenPointAnswers: uniformAnswers,
+    smallestAnswerPt: Math.min(...layouts.map((l) => l.size)),
+    largestAnswerPt: Math.max(...layouts.map((l) => l.size)),
+    glyphBoundsVerified: true,
+    exportedTypographyVerified: true,
+    manualResizeAndUndo: true,
     signaturePlacement: true,
     nativeWidgetsPreserved: true,
     flattenedPdfReferencesValid: true,
@@ -469,5 +576,5 @@ try {
   console.log(JSON.stringify({ ...report, coverage: undefined }, null, 2));
 } finally {
   await browser.close();
-  server.close();
+  server?.close();
 }
