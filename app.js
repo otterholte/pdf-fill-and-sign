@@ -1,3 +1,4 @@
+import { formatLayout, splitNumber, dateHintGeometry } from './field-formats.mjs';
 /* Fill & Sign — open it, fill it out, sign it, send it back.
    Built by Eli Otterholt. There is no server: every byte stays in this browser. */
 
@@ -352,9 +353,10 @@ function paperGrid(gray, w, h) {
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         const yy = y + dy, xx = x + dx;
         if (yy < 0 || yy >= gh || xx < 0 || xx >= gw) continue;
+        if(bg[yy * gw + xx]<100)continue; // Dark photo margins are not the paper brightness.
         s += bg[yy * gw + xx]; n++;
       }
-      out[y * gw + x] = s / n;
+      out[y * gw + x] = n ? s / n : bg[y * gw + x];
     }
     bg = out;
   }
@@ -2734,7 +2736,7 @@ const itemFrame = it => {
 
 let answerFont=null;
 const answerFontReady=PDFDocument.create().then(d=>d.embedFont(StandardFonts.Helvetica)).then(f=>(answerFont=f));
-const lineAnswer=L=>({x0:L.x0+.002,x1:L.x1-.002,y0:L.y-Math.min(L.clr || .022,.022),y1:L.y-.0015,align:L.align||'left',multiline:false,vertical:'bottom'});
+const lineAnswer=L=>({x0:L.x0+.002,x1:L.x1-.002,y0:L.y-Math.min(L.clr || .022,.022),y1:L.y-.0015,align:L.align||'left',multiline:false,vertical:'bottom',format:L.formatDisabled?undefined:L.format});
 function answerLayout(it, font = answerFont) {
   if (!it.answer || !font) return null;
   const p = S.pageBox[it.page], [W, H] = localDims(p.uw, p.uh, it.rot), r = it.answer;
@@ -2752,6 +2754,12 @@ function answerLayout(it, font = answerFont) {
   };
   const glyphHeight = font.heightAtSize(1);
   const ascent = font.heightAtSize(1, { descender: false });
+  if(r.format) {
+    const fit=formatLayout(textOf(it),r.format,{W,H,fontSize:r.fontSize||r.baseFontSize||ANSWER_FONT_SIZE,glyphHeight,measure});
+    const inkTop=Math.min(...fit.runs.map(run=>run.inkTop)),y=inkTop-(BASELINE-ascent)*fit.size/H;
+    return {...fit,x:r.x0,y,width:(r.x1-r.x0),fs:fit.size/H,inkTop,ascent:ascent*fit.size,descent:(glyphHeight-ascent)*fit.size,
+      runs:fit.runs.map(run=>({...run,y:run.inkTop+ascent*fit.size/H}))};
+  }
   const fit = fitFieldText(textOf(it), {
     width, height, fontSize: r.fontSize || r.baseFontSize || ANSWER_FONT_SIZE, minFontSize: 6.75,
     multiline: r.multiline, glyphHeight, lineHeight: LINEH,
@@ -2790,9 +2798,15 @@ function fitAnswer(it,d) {
   it.x=fit.x;it.y=fit.y;it.fs=fit.fs;it.fieldAnchor={x:it.x,y:it.y};
   it.overflow=fit.overflow;
   if(d) {
-    d.classList.toggle('field-overflow',fit.overflow);d.title=fit.overflow?'This answer does not fit. Shorten it or adjust its box.':it.label || '';
+    d.classList.toggle('field-overflow',fit.overflow);d.title=fit.overflow?(fit.message||'This answer does not fit. Shorten it or adjust its box.'):it.label || '';
     d.firstChild.style.textAlign=it.answer.align;
-    if(!d.firstChild.isContentEditable)d.firstChild.textContent=fit.lines.join('\n');
+    if(!d.firstChild.isContentEditable) {
+      if(fit.segmented) {
+        const [Wl,Hl]=itemFrame(it),t=d.firstChild;t.replaceChildren();t.style.position='relative';t.style.height=(fit.height*Hl/localDims(S.pageBox[it.page].uw,S.pageBox[it.page].uh,it.rot)[1])+'px';
+        for(const patch of fit.patches||[]) {const span=document.createElement('span');span.style.cssText=`position:absolute;left:${(patch.x0-it.x)*Wl}px;top:${(patch.y0-it.y)*Hl}px;width:${(patch.x1-patch.x0)*Wl}px;height:${(patch.y1-patch.y0)*Hl}px;background:rgb(${patch.bg.join(',')});`;t.append(span);}
+        for(const run of fit.runs) {const span=document.createElement('span');span.textContent=run.text;span.className='number-part';span.style.cssText=`position:absolute;left:${(run.x-it.x)*Wl}px;top:${(run.y-it.y-BASELINE*fit.fs)*Hl}px;`;t.append(span);}
+      } else {d.firstChild.style.height='';d.firstChild.textContent=fit.lines.join('\n');}
+    }
   }
 }
 
@@ -3460,6 +3474,13 @@ function startRubber(e, pi, x0, y0) {
 function edit(d) {
   const t = d.firstChild;
   const current=S.items.find(i=>i.id===d.dataset.id);
+  if(current?.answer?.format) {
+    const inp=document.createElement('input');inp.className='number-editor';inp.value=current.text;inp.placeholder=current.answer.format.hint;inp.setAttribute('aria-label',current.label||'Number');inp.inputMode='numeric';
+    d.append(inp);inp.focus();inp.select();
+    inp.oninput=()=>{markFieldHistory();current.text=inp.value;sizeItem(current,d);saveSoon();};
+    inp.onblur=()=>{inp.remove();sizeItem(current,d);saveSoon();};
+    inp.onkeydown=e=>{if(e.key==='Tab'){e.preventDefault();e.stopPropagation();inp.blur();moveSpot(e.shiftKey?-1:1);}else if(e.key==='Escape'||e.key==='Enter')inp.blur();};return;
+  }
   if(current?.answer)t.textContent=textOf(current);
   t.contentEditable = 'plaintext-only';
   if (t.contentEditable !== 'plaintext-only') t.contentEditable = 'true';
@@ -4291,6 +4312,7 @@ async function ocrPage(p, onNote) {
       const captionRegions=denseGrid
         ? ruleCells(p.formRules).filter(c=>c.x1-c.x0<.5&&c.y1-c.y0<.06&&out.some(x=>x.x0>=c.x0&&x.x1<=c.x1&&x.cy>c.y0&&x.cy<c.y1))
         : all.filter(c=>(c.filled||c.cap)&&c.x1-c.x0<.5&&c.y1-c.y0<.06);
+      for(const c of ruleCells(p.formRules).filter(c=>c.x1-c.x0>.5&&c.y1-c.y0>.025&&c.y1-c.y0<.12&&!out.some(x=>x.x0>c.x0&&x.x1<c.x1&&x.cy>c.y0&&x.cy<c.y1)))captionRegions.push({...c,y1:(c.y0+c.y1)/2});
       const blank=all.filter(c=>!c.filled&&!c.cap&&c.x1-c.x0<.5);
       for(const c of blank) {
         if(blank.some(b=>Math.abs(b.x0-c.x0)<.008&&Math.abs(b.x1-c.x1)<.008&&b.y0<c.y0&&c.y0-b.y0<.08))continue;
@@ -4310,6 +4332,53 @@ async function ocrPage(p, onNote) {
         }
       }
     } finally {tile.width=tile.height=0;}
+    // A single bounded contrast pass recovers faint printed format hints.
+    // Only explicit date tokens are retained; normal OCR labels are untouched.
+    const hintCanvas=document.createElement('canvas');hintCanvas.width=cv.width;hintCanvas.height=cv.height;
+    try {
+      const hc=hintCanvas.getContext('2d'),pixels=new ImageData(new Uint8ClampedArray(image.data),cv.width,cv.height),data=pixels.data;
+      for(let by=0;by<cv.height;by+=64)for(let bx=0;bx<cv.width;bx+=64) {
+        const hist=new Uint32Array(256);let total=0;
+        for(let y=by;y<Math.min(by+64,cv.height);y++)for(let x=bx;x<Math.min(bx+64,cv.width);x++){hist[data[(y*cv.width+x)*4]]++;total++;}
+        let count=0,bg=255;for(let i=0;i<256;i++){count+=hist[i];if(count>=total*.85){bg=i;break;}}
+        for(let y=by;y<Math.min(by+64,cv.height);y++)for(let x=bx;x<Math.min(bx+64,cv.width);x++){const i=(y*cv.width+x)*4,v=data[i]<bg-15?0:255;data[i]=data[i+1]=data[i+2]=v;}
+      }
+      hc.putImageData(pixels,0,0);await w.setParameters({tessedit_pageseg_mode:'11'});
+      const hints=[];collect(await w.recognize(hintCanvas,{}, {blocks:true}),0,hints);
+      const hintRows=[];
+      for(const x of [...out,...hints].filter(x=>/^(MM|DD|YY|YYYY|date|birth|DOB|\/)$/i.test(x.s)))if(!hintRows.some(y=>Math.abs(y-x.cy)<.008))hintRows.push(x.cy);
+      await w.setParameters({tessedit_pageseg_mode:'7'});
+      const strip=document.createElement('canvas');
+      try {for(const cy of hintRows.slice(0,16)) {
+        const top=Math.max(0,Math.floor((cy-.006)*cv.height)),height=Math.min(cv.height-top,Math.ceil(.012*cv.height));strip.width=cv.width;strip.height=height;
+        strip.getContext('2d').drawImage(hintCanvas,0,top,cv.width,height,0,0,cv.width,height);
+        const row=[];collect(await w.recognize(strip,{}, {blocks:true}),top,row);
+        if(row.some(x=>/^(MM|DD|YYYY)$/i.test(x.s))) {hints.push(...row);}
+      }}finally{strip.width=strip.height=0;}
+      // Reread candidate hint groups with a small alphabet, only after a
+      // date token was observed. Geometry bounds the crop before any label.
+      await w.setParameters({tessedit_pageseg_mode:'13',tessedit_char_whitelist:'MDY/ -'});
+      const hintTile=document.createElement('canvas');
+      try {for(const seed of [...hints].filter(x=>/^(MM|WM|MW|DD|YY|YYYY)$/i.test(x.s)).slice(0,12)) {
+        const rightLabel=out.filter(x=>x.x0>seed.x1+.002&&Math.abs(x.cy-seed.cy)<.006&&/^[a-z]{3,}$/i.test(x.s)&&!/^Y{2,4}$/i.test(x.s)).sort((a,b)=>a.x0-b.x0)[0];
+        const rightRule=p.formRules.horizontal.filter(h=>Math.abs(h.y0-seed.cy)<.025&&h.x0<seed.x0&&h.x1>seed.x1).sort((a,b)=>a.x1-b.x1)[0];
+        const leftLabel=out.filter(x=>x.x1<seed.x0&&Math.abs(x.cy-seed.cy)<.008&&/^[a-z]{3,}$/i.test(x.s)&&!/^Y{2,4}$/i.test(x.s)).sort((a,b)=>b.x1-a.x1)[0];
+        const left=Math.max(0,Math.floor(Math.max(seed.x0-.12,(leftLabel?.x1||0)+.002)*cv.width)),right=Math.min(cv.width,Math.ceil(Math.min(rightLabel?.x0-.003||1,rightRule?.x1||1,seed.x0+Math.max(.12,(seed.x1-seed.x0)*12))*cv.width));
+        const half=Math.max(.0055,Math.min(.011,seed.h*.8));let top=Math.max(0,Math.floor((seed.cy-half)*cv.height)),bottom=Math.min(cv.height,Math.ceil((seed.cy+half)*cv.height));for(const h of p.formRules.horizontal.filter(h=>h.x0<seed.x0&&h.x1>seed.x1)){if(h.y1<seed.cy&&h.y1>top/cv.height)top=Math.ceil(h.y1*cv.height)+2;if(h.y0>seed.cy&&h.y0<bottom/cv.height)bottom=Math.floor(h.y0*cv.height)-2;}
+        if(right-left<4||bottom-top<4)continue;
+        const scale=3,pad=24;hintTile.width=(right-left)*scale+pad*2;hintTile.height=(bottom-top)*scale+pad*2;const tc=hintTile.getContext('2d');tc.fillStyle='#fff';tc.fillRect(0,0,hintTile.width,hintTile.height);tc.drawImage(hintCanvas,left,top,right-left,bottom-top,pad,pad,(right-left)*scale,(bottom-top)*scale);
+        const rect={left,right,top,bottom};await w.setParameters({tessedit_pageseg_mode:'13'});let text=(await w.recognize(hintTile)).data.text;const initial=dateHintGeometry(pixels,rect,text),groups=initial.length?[]:dateHintGeometry(pixels,rect,'');if(!initial.length)text='';
+        await w.setParameters({tessedit_pageseg_mode:'7'});
+        for(const group of groups){const l=Math.floor(group.x0*cv.width),r=Math.ceil(group.x1*cv.width),t=Math.floor((group.cy-group.h/2)*cv.height),b=Math.ceil((group.cy+group.h/2)*cv.height);hintTile.width=(r-l)*3+48;hintTile.height=(b-t)*3+48;const gc=hintTile.getContext('2d');gc.fillStyle='#fff';gc.fillRect(0,0,hintTile.width,hintTile.height);gc.drawImage(hintCanvas,l,t,r-l,b-t,24,24,(r-l)*3,(b-t)*3);const read=(await w.recognize(hintTile)).data.text.trim();text+=(/[MDY]/.test(read)?read:(group.stems===2||group.stems===4?'Y'.repeat(group.stems):''))+' ';}
+        const row=dateHintGeometry(pixels,rect,text);
+        if(row.some(x=>x.s==='MM')&&row.some(x=>x.s==='DD')&&row.some(x=>/^YY/.test(x.s))) {for(let j=hints.length-1;j>=0;j--)if(hints[j].x0>left/cv.width&&hints[j].x1<right/cv.width&&Math.abs(hints[j].cy-seed.cy)<.006)hints.splice(j,1);hints.push(...row);}
+      }}finally {hintTile.width=hintTile.height=0;await w.setParameters({tessedit_char_whitelist:''});}
+      for(const hint of hints.filter(x=>/^(MM|DD|YY|YYYY)$/i.test(x.s))) {
+        const px=Math.max(0,Math.round(hint.x0*cv.width)-2),py=Math.max(0,Math.round((hint.cy-hint.h/2)*cv.height)-2);
+        const samples=[];const right=Math.min(cv.width-1,Math.ceil(hint.x1*cv.width)+2),bottom=Math.min(cv.height-1,Math.ceil((hint.cy+hint.h/2)*cv.height)+2);for(let y=py;y<=bottom;y+=2)for(let x=px;x<=right;x+=2){const at=(y*cv.width+x)*4;samples.push([...image.data.slice(at,at+3)]);}samples.sort((a,b)=>a[0]+a[1]+a[2]-b[0]-b[1]-b[2]);hint.bg=samples[Math.floor(samples.length*.85)]||[255,255,255];
+        if(!out.some(x=>x.s===hint.s&&Math.abs(x.x0-hint.x0)<.003&&Math.abs(x.cy-hint.cy)<.004))out.push(hint);
+      }
+    } finally {hintCanvas.width=hintCanvas.height=0;}
     p.rawWords = out;
     return out;
   } finally { cv.width = cv.height = 0; }
@@ -4647,7 +4716,7 @@ function textInCell(pi, C, key, focus = true) {
            x: C.x0, y: clamp(C.cy - fs * 0.62, 0, .99),
            fs, color: COLORS[0], text: '', lineKey: key,
            cell: { x0: C.x0, x1: C.x1, y0: C.y0, y1: C.y1 },
-           answer: {x0:C.x0,x1:C.x1,y0:C.y0,y1:C.y1,align:C.align || 'left',multiline:C.multiline !== false,vertical:'middle'},label:C.label };
+           answer: {x0:C.x0,x1:C.x1,y0:C.y0,y1:C.y1,align:C.align || 'left',multiline:C.multiline !== false,vertical:'middle',format:C.formatDisabled?undefined:C.format},label:C.label };
     push(); S.items.push(it); itemEl(it); saveSoon();
   }
   select(it.id);
@@ -5409,6 +5478,7 @@ async function rasterPage(pi, items, doc) {
     } else if (isText(it)) {
       const fit=answerLayout(it);
       if(fit) {
+        for(const patch of fit.patches||[]) {ctx.fillStyle=`rgb(${patch.bg.join(',')})`;ctx.fillRect((patch.x0-it.x)*Wl,(patch.y0-it.y)*Hl,(patch.x1-patch.x0)*Wl,(patch.y1-patch.y0)*Hl);}
         ctx.fillStyle=it.color;ctx.font=`${fit.fs*Hl}px Helvetica, Arial, sans-serif`;ctx.textBaseline='alphabetic';
         for(const run of fit.runs)ctx.fillText(run.text,(run.x-it.x)*Wl,(run.y-it.y)*Hl);
         ctx.restore();continue;
@@ -5559,6 +5629,7 @@ async function buildPdf() {
         const fit=answerLayout(it,font);
         if(fit) {
           if(fit.overflow)throw new Error(`Answer does not fit: ${it.label || 'text field'}`);
+          for(const patch of fit.patches||[]) {const a=anchor(it,patch.x0,patch.y1);p.drawRectangle({x:a.x,y:a.y,width:(patch.x1-patch.x0)*Wl,height:(patch.y1-patch.y0)*Hl,color:rgb(...patch.bg.map(v=>v/255)),rotate:spin});}
           for(const run of fit.runs) {if(!run.text)continue;const a=anchor(it,run.x,run.y);p.drawText(run.text,{x:a.x,y:a.y,size:fit.size,font,color:hex2rgb(it.color),rotate:spin});}
           continue;
         }
@@ -6814,6 +6885,9 @@ function qCard(q, i) {
     const alignment=document.createElement('select');alignment.setAttribute('aria-label','Text alignment');
     for(const a of ['left','center','right']){const o=document.createElement('option');o.value=a;o.textContent=a[0].toUpperCase()+a.slice(1);alignment.append(o);}
     alignment.value=settings.align||'left';alignment.addEventListener('change',()=>save('align',alignment.value));adjust.append(alignment);
+    if(settings.format) {const label=document.createElement('label'),toggle=document.createElement('input');toggle.type='checkbox';toggle.checked=!settings.formatDisabled;label.append(toggle,document.createTextNode(' Use printed number format'));adjust.append(label);
+      toggle.addEventListener('change',()=>{save('formatDisabled',!toggle.checked);const it=simLineItem(q);if(it?.answer){it.answer.format=toggle.checked?settings.format:undefined;sizeItem(it,elOf(it.id));saveSoon();}d.replaceWith(qCard(q,i));});}
+
   }
   const preview=document.createElement('button');preview.type='button';preview.className='linkish q-preview';preview.textContent='Show on page';
   preview.addEventListener('click',()=>{showPage();enterSpot(q);});adjust.append(preview);
@@ -6830,8 +6904,13 @@ function qCard(q, i) {
   inp.spellcheck = false;
   if (q.kind === 'field' && q.f.maxLen) inp.maxLength = q.f.maxLen;
   inp.value = simGet(q) ?? '';
+  const numberSettings=q.C||q.L;const numberFormat=numberSettings?.formatDisabled?null:numberSettings?.format;
+  let formatNote;
+  if(numberFormat) {inp.placeholder=numberFormat.hint;inp.inputMode='numeric';formatNote=document.createElement('small');formatNote.className='number-hint';formatNote.id='format-'+i;formatNote.textContent='Format: '+numberFormat.hint;inp.setAttribute('aria-describedby',formatNote.id);d.append(formatNote);}
+
   inp.addEventListener('input', () => {
     markFieldHistory();
+    if(numberFormat) {const check=splitNumber(inp.value,numberFormat);inp.setAttribute('aria-invalid',String(check.invalid));formatNote.textContent=check.message||'Format: '+numberFormat.hint;}
     if (q.kind === 'field') setField(q.f, inp.value);
     else if (q.kind === 'cell') simSetCell(q, inp.value);
     else simSetLine(q, inp.value);
@@ -6845,7 +6924,8 @@ function qCard(q, i) {
     chip.className = 'q-chip';
     chip.textContent = 'Today';
     chip.addEventListener('click', () => {
-      inp.value = FMTS[0].fn(new Date());
+      const today=new Date();
+      inp.value = numberFormat?.kind==='date' ? numberFormat.parts.map(p=>p.token==='MM'?String(today.getMonth()+1).padStart(2,'0'):p.token==='DD'?String(today.getDate()).padStart(2,'0'):p.token==='YY'?String(today.getFullYear()).slice(-2):String(today.getFullYear())).join('/') : FMTS[0].fn(today);
       inp.dispatchEvent(new Event('input'));
     });
     row.append(inp, chip);

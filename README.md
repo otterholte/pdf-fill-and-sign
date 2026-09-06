@@ -51,6 +51,8 @@ npm ci
 npx playwright install chromium
 npm test
 npm run test:browser
+npm run test:dense
+npm run test:formats
 npm run dev
 ```
 
@@ -77,6 +79,31 @@ tests native widgets and signature placement. The manually labeled truth fixture
 is used only to evaluate detection; its coordinates never enter the application.
 This single regression is not a universal accuracy claim. Unusual layouts, revised
 forms, severe perspective, faint controls, or OCR errors may still require review.
+
+## Printed number formats
+
+`field-formats.mjs` combines labels with measured vertical guides or separate
+underlines to recognize SSN, North American phone, EIN, and ZIP+4 groups. Explicit
+MM/DD/YYYY, DD/MM/YYYY, and YYYY/MM/DD placeholders establish date order; a generic
+Date label alone never forces a locale. A bounded local contrast/OCR pass and ink
+group measurement recover faint placeholders, including repeated year letters.
+Dark photo margins are excluded from paper-brightness estimates to preserve ink.
+
+Each logical answer has one input and one Tab stop. Screen and PDF share measured
+segment positions and one font size. Printed separators remain on the original;
+only placeholder letters are covered with the nearby paper color. Extra digits,
+invalid dates, and incomplete values are flagged rather than silently truncated.
+**Adjust field → Use printed number format** allows an override when detection is
+wrong. Unrecognized or ambiguous formats retain ordinary editable fields.
+
+`test:dense` checks all six SSNs and both faint date groups in the supplied image.
+`test:formats` uploads a generated unrelated form, checks different date orders,
+invalid-value feedback, inline Tab navigation, overrides, offline filling/export,
+and reads back the actual PDF text positions. Unit tests vary coordinates and
+check ZIP/EIN/phone/SSN boundaries and two/four-digit year geometry. These tests
+are evidence for these layouts, not a guarantee for every unfamiliar document.
+Run all three browser suites with `TEST_BASE_URL` after a Pages deployment to
+verify the exact deployed source and behavior.
 
 ## What it does
 

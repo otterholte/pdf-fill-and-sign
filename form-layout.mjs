@@ -1,3 +1,8 @@
+import {
+  numberFormat,
+  placeholderFields,
+  connectNumberLines,
+} from "./field-formats.mjs";
 /* Local form geometry. No model, network request, form-specific coordinates, or
    stored answers. All coordinates exposed to the editor are normalized. */
 const overlap = (a0, a1, b0, b1) =>
@@ -10,12 +15,12 @@ export function detectRules(image) {
   for (let i = 0; i < ink.length; i++)
     ink[i] =
       Math.min(data[i * 4], data[i * 4 + 1], data[i * 4 + 2]) < 215 ? 1 : 0;
-  function run(vertical) {
+  function run(vertical, guides = false) {
     const length = vertical ? H : W,
       count = vertical ? W : H;
     const minimum = Math.max(
       18,
-      Math.round(length * (vertical ? 0.011 : 0.025)),
+      Math.round(length * (vertical ? (guides ? 0.006 : 0.011) : 0.025)),
     );
     const segments = [];
     for (let row = 0; row < count; row++) {
@@ -33,7 +38,11 @@ export function detectRules(image) {
           if (
             last - start + 1 >= minimum &&
             hits / (last - start + 1) >
-              (vertical && last - start < H * 0.03 ? 0.97 : 0.88)
+              (guides
+                ? 0.45
+                : vertical && last - start < H * 0.03
+                  ? 0.97
+                  : 0.88)
           )
             segments.push({ row, start, end: last });
           start = -1;
@@ -80,7 +89,7 @@ export function detectRules(image) {
   const dashed = [];
   for (let y = 0; y < H; y++) {
     const runs = [];
-    for (let x = 0; x < W; ) {
+    for (let x = 0; x < W;) {
       if (!ink[y * W + x]) {
         x++;
         continue;
@@ -89,7 +98,7 @@ export function detectRules(image) {
       while (x < W && ink[y * W + x]) x++;
       runs.push({ start, end: x });
     }
-    for (let i = 0; i < runs.length; ) {
+    for (let i = 0; i < runs.length;) {
       let j = i + 1;
       while (
         j < runs.length &&
@@ -127,7 +136,14 @@ export function detectRules(image) {
       });
     }
   }
-  return { horizontal, vertical: run(true), dashed, width: W, height: H };
+  return {
+    horizontal,
+    vertical: run(true),
+    guides: run(true, true),
+    dashed,
+    width: W,
+    height: H,
+  };
 }
 
 /** Establish rows before joining words; sorting by tiny baseline differences
@@ -459,7 +475,7 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
         w.cy < h.y1 + 0.02 &&
         w.x1 < h.x0 + 0.38,
     );
-    const enclosed = vs.some(
+    const enclosed = vs.find(
       (v) =>
         Math.abs(v.x0 - h.x0) < 0.005 &&
         Math.abs(v.y0 - h.y0) < 0.006 &&
@@ -471,7 +487,7 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
         hs.filter(
           (b) =>
             b.y0 > h.y1 + 0.02 &&
-            b.y0 < h.y0 + 0.16 &&
+            b.y0 < Math.min(h.y0 + 0.16, enclosed.y1 - 0.001) &&
             b.x0 >= h.x0 - 0.004 &&
             b.x1 <= h.x1 + 0.004,
         ).length >= 2) ||
@@ -572,7 +588,8 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
       !label ||
       sections.some((s) => s.label === label) ||
       rings.some(
-        (r) => r.cx > c.x0 && r.cx < c.x1 && r.cy > c.y0 && r.cy < c.y1,
+        (r) =>
+          r.cx > c.x0 && r.cx < c.x1 && r.cy > bottom + 0.002 && r.cy < c.y1,
       )
     )
       continue;
@@ -1066,6 +1083,27 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
       b.columnLabel = column.columnLabel;
       b.label = `${column.columnLabel} — ${b.label || "Check box"}`;
     }
+  }
+  const connected = connectNumberLines(lines, rawWords);
+  cells.push(...connected.fields);
+  for (let i = lines.length - 1; i >= 0; i--)
+    if (connected.used.has(lines[i])) lines.splice(i, 1);
+  for (const f of [...cells, ...lines]) {
+    const format = numberFormat(f, rules);
+    if (format) {
+      f.format = format;
+      f.multiline = false;
+    }
+  }
+  for (const f of placeholderFields(rawWords)) {
+    if (
+      !cells.some(
+        (c) =>
+          overlap(c.x0, c.x1, f.x0, f.x1) > 0.8 * f.w &&
+          overlap(c.y0, c.y1, f.y0, f.y1) > 0.8 * f.h,
+      )
+    )
+      cells.push(f);
   }
   return {
     ...base,

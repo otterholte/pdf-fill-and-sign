@@ -1,8 +1,8 @@
 /* Fill & Sign service worker — offline shell + Android share-target intake. */
-const V = 'fillandsign-v7-general-layout';
+const V = 'fillandsign-v8-number-formats';
 const SHARE = 'fillandsign-share';
 const SHELL = [
-  './', 'index.html', 'app.css', 'app.js', 'form-layout.mjs', 'manifest.webmanifest',
+  './', 'index.html', 'app.css', 'app.js', 'form-layout.mjs', 'field-formats.mjs', 'manifest.webmanifest',
   'tools.html', 'site.css', 'shrink.html', 'shrink.css', 'shrink.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/shrink.svg',
   'vendor/pdf.min.mjs', 'vendor/pdf.worker.min.mjs', 'vendor/pdf-lib.min.js',

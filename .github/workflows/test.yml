@@ -17,6 +17,7 @@ jobs:
       - run: npm test
       - run: npm run test:browser
       - run: npm run test:dense
+      - run: npm run test:formats
       - uses: actions/upload-artifact@v4
         if: always()
         with:

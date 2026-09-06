@@ -12,7 +12,7 @@ const remote = process.env.TEST_BASE_URL,
 if (server) await new Promise((r) => server.once("listening", r));
 const url = remote || `http://127.0.0.1:${server.address().port}/`;
 if (remote)
-  for (const f of ["app.js", "form-layout.mjs", "sw.js"])
+  for (const f of ["app.js", "form-layout.mjs", "field-formats.mjs", "sw.js"])
     assert.equal(
       (await (await fetch(new URL(f, url))).text()).replace(/\r\n/g, "\n"),
       (await readFile(f, "utf8")).replace(/\r\n/g, "\n"),
@@ -72,6 +72,23 @@ try {
     };
   });
   await writeFile(`${out}/detection.json`, JSON.stringify(data, null, 2));
+  const formats = data.qs.map((q) => (q.C || q.L)?.format).filter(Boolean);
+  assert.equal(
+    formats.filter((f) => f.kind === "ssn").length,
+    6,
+    "all six SSNs are segmented",
+  );
+  assert.equal(
+    formats.filter((f) => f.kind === "date").length,
+    2,
+    "both faint printed dates are recognized",
+  );
+  assert.ok(
+    formats
+      .filter((f) => f.kind === "date")
+      .every((f) => f.hint === "MM/DD/YYYY"),
+  );
+  assert.ok(formats.filter(f=>f.kind==='date').every(f=>f.parts.every(p=>p.eraseBox.bg.every(v=>v>220))), 'date replacement background comes from paper, not a nearby rule');
   const found = [],
     missed = [],
     used = new Set();
@@ -134,21 +151,23 @@ try {
       const label = q.label || "",
         c = q.C || q.L;
       const value =
-        c.source === "amount"
-          ? "123.00"
-          : /social security|\bssn\b/i.test(label)
-            ? "000-00-0000"
-            : /zip|postal/i.test(label)
-              ? "00000"
-              : /state/i.test(label)
-                ? "CO"
-                : /first name/i.test(label)
-                  ? "Alex"
-                  : /last name/i.test(label)
-                    ? "Example"
-                    : /date|beginning|ending/i.test(label)
-                      ? "01/01"
-                      : "Sample";
+        c.format?.kind === "date"
+          ? "01/02/2025"
+          : c.source === "amount"
+            ? "123.00"
+            : /social security|\bssn\b/i.test(label)
+              ? "000-00-0000"
+              : /zip|postal/i.test(label)
+                ? "00000"
+                : /state/i.test(label)
+                  ? "CO"
+                  : /first name/i.test(label)
+                    ? "Alex"
+                    : /last name/i.test(label)
+                      ? "Example"
+                      : /date|beginning|ending/i.test(label)
+                        ? "01/01"
+                        : "Sample";
       await card.locator('input[id^="qi"],textarea[id^="qi"]').fill(value);
     }
   }
@@ -191,6 +210,8 @@ try {
   const report = {
     passed: false,
     coverage,
+    formattedSSNs: 6,
+    printedDates: 2,
     detectionMs: ms,
     textAnswers: layouts.length,
     sharedFontSizePt: sharedSize,

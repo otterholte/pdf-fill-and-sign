@@ -1209,3 +1209,6 @@ select.fld{padding-right:0;}
 
 .mail-tip{margin:10px 2px 0;font-size:12.5px;line-height:1.45;color:var(--fg-3);text-align:left;}
 .mail-tip[hidden]{display:none;}
+
+.number-editor{position:absolute;left:0;top:100%;min-width:14em;z-index:30;background:#fff;color:#17202a;border:1px solid #1b4fd8;padding:.3em;font-size:14px;}
+.number-hint{display:block;color:#526070;margin:.3em 0;}
