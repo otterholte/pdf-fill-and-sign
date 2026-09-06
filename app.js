@@ -4358,8 +4358,10 @@ async function ocrPage(p, onNote) {
       // Reread candidate hint groups with a small alphabet, only after a
       // date token was observed. Geometry bounds the crop before any label.
       await w.setParameters({tessedit_pageseg_mode:'13',tessedit_char_whitelist:'MDY/ -'});
-      const hintTile=document.createElement('canvas');
-      try {for(const seed of [...hints].filter(x=>/^(MM|WM|MW|DD|YY|YYYY)$/i.test(x.s)).slice(0,12)) {
+      const hintTile=document.createElement('canvas'),resolved=[];
+      const seeds=[...hints,...out].filter(x=>/^(MM|WM|MW|DD|YY|YYYY|\/)$/i.test(x.s)).filter((x,i,a)=>!a.slice(0,i).some(y=>Math.abs(y.x0-x.x0)<.003&&Math.abs(y.cy-x.cy)<.004));
+      try {for(const seed of seeds.slice(0,24)) {
+        if(resolved.some(r=>seed.x0>=r.x0-.003&&seed.x1<=r.x1+.003&&Math.abs(seed.cy-r.cy)<.008))continue;
         const rightLabel=out.filter(x=>x.x0>seed.x1+.002&&Math.abs(x.cy-seed.cy)<.006&&/^[a-z]{3,}$/i.test(x.s)&&!/^Y{2,4}$/i.test(x.s)).sort((a,b)=>a.x0-b.x0)[0];
         const rightRule=p.formRules.horizontal.filter(h=>Math.abs(h.y0-seed.cy)<.025&&h.x0<seed.x0&&h.x1>seed.x1).sort((a,b)=>a.x1-b.x1)[0];
         const leftLabel=out.filter(x=>x.x1<seed.x0&&Math.abs(x.cy-seed.cy)<.008&&/^[a-z]{3,}$/i.test(x.s)&&!/^Y{2,4}$/i.test(x.s)).sort((a,b)=>b.x1-a.x1)[0];
@@ -4370,8 +4372,11 @@ async function ocrPage(p, onNote) {
         const rect={left,right,top,bottom};await w.setParameters({tessedit_pageseg_mode:'13'});let text=(await w.recognize(hintTile)).data.text;const initial=dateHintGeometry(pixels,rect,text),groups=initial.length?[]:dateHintGeometry(pixels,rect,'');if(!initial.length)text='';
         await w.setParameters({tessedit_pageseg_mode:'7'});
         for(const group of groups){const l=Math.floor(group.x0*cv.width),r=Math.ceil(group.x1*cv.width),t=Math.floor((group.cy-group.h/2)*cv.height),b=Math.ceil((group.cy+group.h/2)*cv.height);hintTile.width=(r-l)*3+48;hintTile.height=(b-t)*3+48;const gc=hintTile.getContext('2d');gc.fillStyle='#fff';gc.fillRect(0,0,hintTile.width,hintTile.height);gc.drawImage(hintCanvas,l,t,r-l,b-t,24,24,(r-l)*3,(b-t)*3);const read=(await w.recognize(hintTile)).data.text.trim();text+=(/[MDY]/.test(read)?read:(group.stems===2||group.stems===4?'Y'.repeat(group.stems):''))+' ';}
-        const row=dateHintGeometry(pixels,rect,text);
-        if(row.some(x=>x.s==='MM')&&row.some(x=>x.s==='DD')&&row.some(x=>/^YY/.test(x.s))) {for(let j=hints.length-1;j>=0;j--)if(hints[j].x0>left/cv.width&&hints[j].x1<right/cv.width&&Math.abs(hints[j].cy-seed.cy)<.006)hints.splice(j,1);hints.push(...row);}
+        let row=dateHintGeometry(pixels,rect,text);
+        // A one-pixel fringe from the neighboring rule can change OCR grouping.
+        // Retry a slightly tighter crop while retaining the same horizontal ink bounds.
+        if(!row.length&&bottom-top>8){const retry={...rect,top:top+Math.max(1,Math.round(cv.height*.001))};hintTile.width=(right-left)*3+48;hintTile.height=(bottom-retry.top)*3+48;const gc=hintTile.getContext('2d');gc.fillStyle='#fff';gc.fillRect(0,0,hintTile.width,hintTile.height);gc.drawImage(hintCanvas,left,retry.top,right-left,bottom-retry.top,24,24,(right-left)*3,(bottom-retry.top)*3);await w.setParameters({tessedit_pageseg_mode:'13'});text=(await w.recognize(hintTile)).data.text;row=dateHintGeometry(pixels,retry,text);}
+        if(row.some(x=>x.s==='MM')&&row.some(x=>x.s==='DD')&&row.some(x=>/^YY/.test(x.s))) {resolved.push({x0:row[0].x0,x1:row.at(-1).x1,cy:row[0].cy});for(let j=hints.length-1;j>=0;j--)if(hints[j].x0>left/cv.width&&hints[j].x1<right/cv.width&&Math.abs(hints[j].cy-seed.cy)<.006)hints.splice(j,1);hints.push(...row);}
       }}finally {hintTile.width=hintTile.height=0;await w.setParameters({tessedit_char_whitelist:''});}
       for(const hint of hints.filter(x=>/^(MM|DD|YY|YYYY)$/i.test(x.s))) {
         const px=Math.max(0,Math.round(hint.x0*cv.width)-2),py=Math.max(0,Math.round((hint.cy-hint.h/2)*cv.height)-2);

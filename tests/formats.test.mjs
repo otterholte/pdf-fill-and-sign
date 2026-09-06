@@ -183,3 +183,13 @@ test("image evidence recovers repeated year letters without copying OCR bounding
     assert.ok(result.every((r) => r.h === 14 / height));
   }
 });
+
+test("a partial OCR reread cannot shorten a fully measured year", () => {
+  const words = [
+    { s: "YYYY", x0: 0.2, x1: 0.248, cy: 0.3, h: 0.01 },
+    { s: "YY", x0: 0.224, x1: 0.248, cy: 0.3, h: 0.01 },
+    { s: "MM", x0: 0.265, x1: 0.29, cy: 0.3, h: 0.01 },
+    { s: "DD", x0: 0.307, x1: 0.332, cy: 0.3, h: 0.01 },
+  ];
+  assert.equal(placeholderFields(words)[0].format.hint, "YYYY/MM/DD");
+});

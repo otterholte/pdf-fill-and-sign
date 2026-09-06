@@ -70,7 +70,19 @@ export function numberFormat(field, rules) {
   };
 }
 export function placeholderFields(words) {
-  const tokens = words.filter((w) => /^(MM|DD|YYYY|YY|HH|SS)$/i.test(w.s));
+  const candidates = words.filter((w) => /^(MM|DD|YYYY|YY|HH|SS)$/i.test(w.s));
+  const tokens = candidates.filter(
+    (w) =>
+      !candidates.some(
+        (v) =>
+          v !== w &&
+          v.s[0].toUpperCase() === w.s[0].toUpperCase() &&
+          Math.abs(v.cy - w.cy) < 0.004 &&
+          v.x0 <= w.x0 &&
+          v.x1 >= w.x1 &&
+          v.x1 - v.x0 > w.x1 - w.x0 + 0.003,
+      ),
+  );
   const result = [];
   for (const first of tokens) {
     if (!/^(MM|DD|YY|YYYY)$/i.test(first.s)) continue;
@@ -347,7 +359,45 @@ export function dateHintGeometry(image, rect, text) {
     return [];
   const { width: W, height: H, data } = image,
     { left, right, top, bottom } = rect;
-  const ink = (x, y) => data[(y * W + x) * 4] < 128;
+  const rw = right - left,
+    rh = bottom - top,
+    mask = new Uint8Array(rw * rh),
+    seen = new Uint8Array(rw * rh),
+    queue = new Int32Array(rw * rh);
+  for (let y = 0; y < rh; y++)
+    for (let x = 0; x < rw; x++)
+      mask[y * rw + x] = data[((y + top) * W + x + left) * 4] < 128 ? 1 : 0;
+  // JPEG/renderer fringes can bridge the gap between a slash and its token.
+  // Remove only isolated specks, retaining connected glyphs and separators.
+  for (let seed = 0; seed < mask.length; seed++) {
+    if (!mask[seed] || seen[seed]) continue;
+    let head = 0,
+      tail = 1,
+      t = rh,
+      b = 0;
+    queue[0] = seed;
+    seen[seed] = 1;
+    while (head < tail) {
+      const i = queue[head++],
+        x = i % rw,
+        y = Math.floor(i / rw);
+      t = Math.min(t, y);
+      b = Math.max(b, y);
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx,
+            yy = y + dy,
+            n = yy * rw + xx;
+          if (xx >= 0 && xx < rw && yy >= 0 && yy < rh && mask[n] && !seen[n]) {
+            seen[n] = 1;
+            queue[tail++] = n;
+          }
+        }
+    }
+    if (tail < Math.max(4, rh * 0.35) || b - t + 1 < rh * 0.15)
+      for (let i = 0; i < tail; i++) mask[queue[i]] = 0;
+  }
+  const ink = (x, y) => mask[(y - top) * rw + x - left];
   const cols = [];
   for (let x = left; x < right; x++) {
     let n = 0;
@@ -359,7 +409,7 @@ export function dateHintGeometry(image, rect, text) {
   let start = cols[0],
     last = start;
   for (const x of cols.slice(1)) {
-    if (x - last > Math.max(3, (bottom - top) * 0.2)) {
+    if (x - last > Math.max(3, (bottom - top) * 0.3)) {
       groups.push([start, last + 1]);
       start = x;
     }

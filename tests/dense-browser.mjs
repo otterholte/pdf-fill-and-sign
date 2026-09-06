@@ -88,7 +88,12 @@ try {
       .filter((f) => f.kind === "date")
       .every((f) => f.hint === "MM/DD/YYYY"),
   );
-  assert.ok(formats.filter(f=>f.kind==='date').every(f=>f.parts.every(p=>p.eraseBox.bg.every(v=>v>220))), 'date replacement background comes from paper, not a nearby rule');
+  assert.ok(
+    formats
+      .filter((f) => f.kind === "date")
+      .every((f) => f.parts.every((p) => p.eraseBox.bg.every((v) => v > 220))),
+    "date replacement background comes from paper, not a nearby rule",
+  );
   const found = [],
     missed = [],
     used = new Set();

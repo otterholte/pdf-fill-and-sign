@@ -66,6 +66,10 @@ try {
     5,
     "SSN, phone, EIN and two differently ordered dates",
   );
+  assert.deepEqual(
+    qs.filter((q) => q.C?.format.kind === "date").map((q) => q.C.format.hint),
+    ["YYYY/MM/DD", "DD/MM/YYYY"],
+  );
   for (const q of qs) {
     const f = (q.C || q.L).format,
       inp = page.locator(`.q-card[data-q="${q.key}"] input[id^="qi"]`);
