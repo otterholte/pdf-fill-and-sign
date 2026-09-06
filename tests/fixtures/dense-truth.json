@@ -1,0 +1,1111 @@
+{
+  "description": "Independent visual annotation of all visible answer targets. Scoring only: never sent to app. No tax validity is asserted.",
+  "width": 1280,
+  "height": 1280,
+  "fields": [
+    {
+      "id": "year_start",
+      "type": "text",
+      "rect": [
+        518,
+        93,
+        660,
+        109
+      ]
+    },
+    {
+      "id": "year_end",
+      "type": "text",
+      "rect": [
+        731,
+        93,
+        875,
+        109
+      ]
+    },
+    {
+      "id": "year_suffix",
+      "type": "text",
+      "rect": [
+        896,
+        93,
+        929,
+        109
+      ]
+    },
+    {
+      "id": "death_date",
+      "type": "text",
+      "rect": [
+        815,
+        112,
+        917,
+        129
+      ]
+    },
+    {
+      "id": "spouse_death_date",
+      "type": "text",
+      "rect": [
+        967,
+        112,
+        1066,
+        129
+      ]
+    },
+    {
+      "id": "other",
+      "type": "text",
+      "rect": [
+        260,
+        131,
+        1066,
+        148
+      ]
+    },
+    {
+      "id": "extension",
+      "type": "box",
+      "center": [
+        220,
+        119
+      ]
+    },
+    {
+      "id": "combat",
+      "type": "box",
+      "center": [
+        409,
+        119
+      ]
+    },
+    {
+      "id": "deceased",
+      "type": "box",
+      "center": [
+        755,
+        119
+      ]
+    },
+    {
+      "id": "other",
+      "type": "box",
+      "center": [
+        220,
+        138
+      ]
+    },
+    {
+      "id": "residence",
+      "type": "box",
+      "center": [
+        1060,
+        253
+      ]
+    },
+    {
+      "id": "campaign_you",
+      "type": "box",
+      "center": [
+        925,
+        329
+      ]
+    },
+    {
+      "id": "campaign_spouse",
+      "type": "box",
+      "center": [
+        993,
+        329
+      ]
+    },
+    {
+      "id": "you_first",
+      "type": "text",
+      "rect": [
+        214,
+        165,
+        555,
+        185
+      ]
+    },
+    {
+      "id": "you_last",
+      "type": "text",
+      "rect": [
+        555,
+        165,
+        896,
+        185
+      ]
+    },
+    {
+      "id": "you_ssn",
+      "type": "text",
+      "rect": [
+        896,
+        165,
+        1066,
+        185
+      ]
+    },
+    {
+      "id": "spouse_first",
+      "type": "text",
+      "rect": [
+        214,
+        203,
+        555,
+        223
+      ]
+    },
+    {
+      "id": "spouse_last",
+      "type": "text",
+      "rect": [
+        555,
+        203,
+        896,
+        223
+      ]
+    },
+    {
+      "id": "spouse_ssn",
+      "type": "text",
+      "rect": [
+        896,
+        203,
+        1066,
+        223
+      ]
+    },
+    {
+      "id": "address",
+      "type": "text",
+      "rect": [
+        214,
+        244,
+        816,
+        261
+      ]
+    },
+    {
+      "id": "apt",
+      "type": "text",
+      "rect": [
+        816,
+        241,
+        896,
+        261
+      ]
+    },
+    {
+      "id": "city",
+      "type": "text",
+      "rect": [
+        214,
+        279,
+        680,
+        299
+      ]
+    },
+    {
+      "id": "state",
+      "type": "text",
+      "rect": [
+        680,
+        278,
+        782,
+        299
+      ]
+    },
+    {
+      "id": "zip",
+      "type": "text",
+      "rect": [
+        782,
+        278,
+        896,
+        299
+      ]
+    },
+    {
+      "id": "country",
+      "type": "text",
+      "rect": [
+        214,
+        317,
+        510,
+        337
+      ]
+    },
+    {
+      "id": "province",
+      "type": "text",
+      "rect": [
+        510,
+        317,
+        782,
+        337
+      ]
+    },
+    {
+      "id": "foreign_zip",
+      "type": "text",
+      "rect": [
+        782,
+        317,
+        896,
+        337
+      ]
+    },
+    {
+      "id": "single",
+      "type": "box",
+      "center": [
+        318,
+        347
+      ]
+    },
+    {
+      "id": "joint",
+      "type": "box",
+      "center": [
+        318,
+        366
+      ]
+    },
+    {
+      "id": "separate",
+      "type": "box",
+      "center": [
+        318,
+        385
+      ]
+    },
+    {
+      "id": "head",
+      "type": "box",
+      "center": [
+        715,
+        347
+      ]
+    },
+    {
+      "id": "surviving",
+      "type": "box",
+      "center": [
+        715,
+        366
+      ]
+    },
+    {
+      "id": "nonresident",
+      "type": "box",
+      "center": [
+        318,
+        429
+      ]
+    },
+    {
+      "id": "digital_yes",
+      "type": "box",
+      "center": [
+        981,
+        475
+      ]
+    },
+    {
+      "id": "digital_no",
+      "type": "box",
+      "center": [
+        1038,
+        475
+      ]
+    },
+    {
+      "id": "more_dependents",
+      "type": "box",
+      "center": [
+        289,
+        603
+      ]
+    },
+    {
+      "id": "lived_apart",
+      "type": "box",
+      "center": [
+        315,
+        691
+      ]
+    },
+    {
+      "id": "separate_name",
+      "type": "text",
+      "rect": [
+        441,
+        400,
+        668,
+        414
+      ]
+    },
+    {
+      "id": "child_name",
+      "type": "text",
+      "rect": [
+        728,
+        408,
+        1066,
+        423
+      ]
+    },
+    {
+      "id": "nonresident_name",
+      "type": "text",
+      "rect": [
+        335,
+        443,
+        1066,
+        455
+      ]
+    },
+    {
+      "id": "dep1_first",
+      "type": "text",
+      "rect": [
+        385,
+        503,
+        555,
+        522
+      ]
+    },
+    {
+      "id": "dep1_last",
+      "type": "text",
+      "rect": [
+        385,
+        522,
+        555,
+        541
+      ]
+    },
+    {
+      "id": "dep1_ssn",
+      "type": "text",
+      "rect": [
+        385,
+        541,
+        555,
+        560
+      ]
+    },
+    {
+      "id": "dep1_relationship",
+      "type": "text",
+      "rect": [
+        385,
+        560,
+        555,
+        579
+      ]
+    },
+    {
+      "id": "dep1_lived",
+      "type": "box",
+      "center": [
+        431,
+        588
+      ]
+    },
+    {
+      "id": "dep1_us",
+      "type": "box",
+      "center": [
+        431,
+        607
+      ]
+    },
+    {
+      "id": "dep1_student",
+      "type": "box",
+      "center": [
+        397,
+        626
+      ]
+    },
+    {
+      "id": "dep1_disabled",
+      "type": "box",
+      "center": [
+        477,
+        626
+      ]
+    },
+    {
+      "id": "dep1_child_credit",
+      "type": "box",
+      "center": [
+        397,
+        659
+      ]
+    },
+    {
+      "id": "dep1_other_credit",
+      "type": "box",
+      "center": [
+        477,
+        659
+      ]
+    },
+    {
+      "id": "dep2_first",
+      "type": "text",
+      "rect": [
+        555,
+        503,
+        725,
+        522
+      ]
+    },
+    {
+      "id": "dep2_last",
+      "type": "text",
+      "rect": [
+        555,
+        522,
+        725,
+        541
+      ]
+    },
+    {
+      "id": "dep2_ssn",
+      "type": "text",
+      "rect": [
+        555,
+        541,
+        725,
+        560
+      ]
+    },
+    {
+      "id": "dep2_relationship",
+      "type": "text",
+      "rect": [
+        555,
+        560,
+        725,
+        579
+      ]
+    },
+    {
+      "id": "dep2_lived",
+      "type": "box",
+      "center": [
+        601,
+        588
+      ]
+    },
+    {
+      "id": "dep2_us",
+      "type": "box",
+      "center": [
+        601,
+        607
+      ]
+    },
+    {
+      "id": "dep2_student",
+      "type": "box",
+      "center": [
+        567,
+        626
+      ]
+    },
+    {
+      "id": "dep2_disabled",
+      "type": "box",
+      "center": [
+        647,
+        626
+      ]
+    },
+    {
+      "id": "dep2_child_credit",
+      "type": "box",
+      "center": [
+        567,
+        659
+      ]
+    },
+    {
+      "id": "dep2_other_credit",
+      "type": "box",
+      "center": [
+        647,
+        659
+      ]
+    },
+    {
+      "id": "dep3_first",
+      "type": "text",
+      "rect": [
+        725,
+        503,
+        896,
+        522
+      ]
+    },
+    {
+      "id": "dep3_last",
+      "type": "text",
+      "rect": [
+        725,
+        522,
+        896,
+        541
+      ]
+    },
+    {
+      "id": "dep3_ssn",
+      "type": "text",
+      "rect": [
+        725,
+        541,
+        896,
+        560
+      ]
+    },
+    {
+      "id": "dep3_relationship",
+      "type": "text",
+      "rect": [
+        725,
+        560,
+        896,
+        579
+      ]
+    },
+    {
+      "id": "dep3_lived",
+      "type": "box",
+      "center": [
+        771,
+        588
+      ]
+    },
+    {
+      "id": "dep3_us",
+      "type": "box",
+      "center": [
+        771,
+        607
+      ]
+    },
+    {
+      "id": "dep3_student",
+      "type": "box",
+      "center": [
+        737,
+        626
+      ]
+    },
+    {
+      "id": "dep3_disabled",
+      "type": "box",
+      "center": [
+        817,
+        626
+      ]
+    },
+    {
+      "id": "dep3_child_credit",
+      "type": "box",
+      "center": [
+        737,
+        659
+      ]
+    },
+    {
+      "id": "dep3_other_credit",
+      "type": "box",
+      "center": [
+        817,
+        659
+      ]
+    },
+    {
+      "id": "dep4_first",
+      "type": "text",
+      "rect": [
+        896,
+        503,
+        1066,
+        522
+      ]
+    },
+    {
+      "id": "dep4_last",
+      "type": "text",
+      "rect": [
+        896,
+        522,
+        1066,
+        541
+      ]
+    },
+    {
+      "id": "dep4_ssn",
+      "type": "text",
+      "rect": [
+        896,
+        541,
+        1066,
+        560
+      ]
+    },
+    {
+      "id": "dep4_relationship",
+      "type": "text",
+      "rect": [
+        896,
+        560,
+        1066,
+        579
+      ]
+    },
+    {
+      "id": "dep4_lived",
+      "type": "box",
+      "center": [
+        942,
+        588
+      ]
+    },
+    {
+      "id": "dep4_us",
+      "type": "box",
+      "center": [
+        942,
+        607
+      ]
+    },
+    {
+      "id": "dep4_student",
+      "type": "box",
+      "center": [
+        908,
+        626
+      ]
+    },
+    {
+      "id": "dep4_disabled",
+      "type": "box",
+      "center": [
+        988,
+        626
+      ]
+    },
+    {
+      "id": "dep4_child_credit",
+      "type": "box",
+      "center": [
+        908,
+        659
+      ]
+    },
+    {
+      "id": "dep4_other_credit",
+      "type": "box",
+      "center": [
+        988,
+        659
+      ]
+    },
+    {
+      "id": "amount_1a",
+      "type": "text",
+      "rect": [
+        953,
+        725,
+        1066,
+        744
+      ]
+    },
+    {
+      "id": "amount_1b",
+      "type": "text",
+      "rect": [
+        953,
+        744,
+        1066,
+        763
+      ]
+    },
+    {
+      "id": "amount_1c",
+      "type": "text",
+      "rect": [
+        953,
+        763,
+        1066,
+        782
+      ]
+    },
+    {
+      "id": "amount_1d",
+      "type": "text",
+      "rect": [
+        953,
+        782,
+        1066,
+        801
+      ]
+    },
+    {
+      "id": "amount_1e",
+      "type": "text",
+      "rect": [
+        953,
+        801,
+        1066,
+        820
+      ]
+    },
+    {
+      "id": "amount_1f",
+      "type": "text",
+      "rect": [
+        953,
+        820,
+        1066,
+        839
+      ]
+    },
+    {
+      "id": "amount_1g",
+      "type": "text",
+      "rect": [
+        953,
+        839,
+        1066,
+        858
+      ]
+    },
+    {
+      "id": "amount_1h",
+      "type": "text",
+      "rect": [
+        953,
+        858,
+        1066,
+        877
+      ]
+    },
+    {
+      "id": "amount_1z",
+      "type": "text",
+      "rect": [
+        953,
+        896,
+        1066,
+        915
+      ]
+    },
+    {
+      "id": "amount_2b",
+      "type": "text",
+      "rect": [
+        953,
+        915,
+        1066,
+        934
+      ]
+    },
+    {
+      "id": "amount_3b",
+      "type": "text",
+      "rect": [
+        953,
+        934,
+        1066,
+        953
+      ]
+    },
+    {
+      "id": "amount_4b",
+      "type": "text",
+      "rect": [
+        953,
+        971,
+        1066,
+        990
+      ]
+    },
+    {
+      "id": "amount_5b",
+      "type": "text",
+      "rect": [
+        953,
+        1009,
+        1066,
+        1028
+      ]
+    },
+    {
+      "id": "amount_6b",
+      "type": "text",
+      "rect": [
+        953,
+        1047,
+        1066,
+        1066
+      ]
+    },
+    {
+      "id": "amount_7a",
+      "type": "text",
+      "rect": [
+        953,
+        1104,
+        1066,
+        1123
+      ]
+    },
+    {
+      "id": "amount_8",
+      "type": "text",
+      "rect": [
+        953,
+        1142,
+        1066,
+        1161
+      ]
+    },
+    {
+      "id": "amount_9",
+      "type": "text",
+      "rect": [
+        953,
+        1161,
+        1066,
+        1180
+      ]
+    },
+    {
+      "id": "amount_10",
+      "type": "text",
+      "rect": [
+        953,
+        1180,
+        1066,
+        1199
+      ]
+    },
+    {
+      "id": "amount_11a",
+      "type": "text",
+      "rect": [
+        953,
+        1198,
+        1066,
+        1217
+      ]
+    },
+    {
+      "id": "amount_1i",
+      "type": "text",
+      "rect": [
+        805,
+        877,
+        919,
+        896
+      ]
+    },
+    {
+      "id": "amount_2a",
+      "type": "text",
+      "rect": [
+        555,
+        915,
+        669,
+        934
+      ]
+    },
+    {
+      "id": "amount_3a",
+      "type": "text",
+      "rect": [
+        555,
+        934,
+        669,
+        953
+      ]
+    },
+    {
+      "id": "amount_4a",
+      "type": "text",
+      "rect": [
+        555,
+        971,
+        669,
+        990
+      ]
+    },
+    {
+      "id": "amount_5a",
+      "type": "text",
+      "rect": [
+        555,
+        1009,
+        669,
+        1028
+      ]
+    },
+    {
+      "id": "amount_6a",
+      "type": "text",
+      "rect": [
+        555,
+        1047,
+        669,
+        1066
+      ]
+    },
+    {
+      "id": "line3a",
+      "type": "box",
+      "center": [
+        611,
+        963
+      ]
+    },
+    {
+      "id": "line3b",
+      "type": "box",
+      "center": [
+        736,
+        963
+      ]
+    },
+    {
+      "id": "rollover4",
+      "type": "box",
+      "center": [
+        611,
+        1001
+      ]
+    },
+    {
+      "id": "qcd",
+      "type": "box",
+      "center": [
+        736,
+        1001
+      ]
+    },
+    {
+      "id": "other4",
+      "type": "box",
+      "center": [
+        838,
+        1001
+      ]
+    },
+    {
+      "id": "rollover5",
+      "type": "box",
+      "center": [
+        611,
+        1038
+      ]
+    },
+    {
+      "id": "pso",
+      "type": "box",
+      "center": [
+        736,
+        1038
+      ]
+    },
+    {
+      "id": "other5",
+      "type": "box",
+      "center": [
+        838,
+        1038
+      ]
+    },
+    {
+      "id": "lump_sum",
+      "type": "box",
+      "center": [
+        901,
+        1076
+      ]
+    },
+    {
+      "id": "separate6",
+      "type": "box",
+      "center": [
+        901,
+        1095
+      ]
+    },
+    {
+      "id": "no_schedule_d",
+      "type": "box",
+      "center": [
+        405,
+        1133
+      ]
+    },
+    {
+      "id": "child_gains",
+      "type": "box",
+      "center": [
+        576,
+        1133
+      ]
+    },
+    {
+      "id": "income_description",
+      "type": "text",
+      "rect": [
+        700,
+        863,
+        907,
+        877
+      ]
+    },
+    {
+      "id": "other4_text",
+      "type": "text",
+      "rect": [
+        849,
+        996,
+        908,
+        1009
+      ]
+    },
+    {
+      "id": "other5_text",
+      "type": "text",
+      "rect": [
+        849,
+        1034,
+        908,
+        1047
+      ]
+    },
+    {
+      "id": "child_gain_text",
+      "type": "text",
+      "rect": [
+        794,
+        1128,
+        908,
+        1142
+      ]
+    }
+  ]
+}

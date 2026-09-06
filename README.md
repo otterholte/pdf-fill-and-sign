@@ -749,3 +749,7 @@ I build practical software that removes repetitive work, unnecessary steps, and 
 business headaches. If your business has a process that should be easier, get in touch.
 
 Licensed under the [MIT License](LICENSE).
+
+## Local form detection and regression tests
+
+See [local layout detection](docs/local-layout.md) for the general geometry/OCR rules, test commands, and known limitations. The dense-form fixtures are scoring data only and are never used by the browser detector.

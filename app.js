@@ -2,7 +2,7 @@
    Built by Eli Otterholt. There is no server: every byte stays in this browser. */
 
 import * as pdfjsLib from './vendor/pdf.min.mjs';
-import { detectRules, phraseWords, detectRings, analyzeForm, fieldType, readingOrder, fitFieldText, ANSWER_FONT_SIZE } from './form-layout.mjs';
+import { detectRules, ruleCells, verifyBoxes, phraseWords, detectRings, analyzeForm, fieldType, readingOrder, fitFieldText, ANSWER_FONT_SIZE } from './form-layout.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdf.worker.min.mjs', import.meta.url).href;
 
 const { PDFDocument, StandardFonts, rgb, LineCapStyle, degrees } = PDFLib;
@@ -2622,6 +2622,11 @@ function ensureScan(p) {
           p.formRules = detectRules(pixels); p.formRings = detectRings(pixels);
         }
         p.scanned = analyzeForm(p.rawWords || words, p.formRules, p.scanned, p.formRings);
+        // A compact page gets one shared size that fits its regular short rows.
+        // Explicit user sizing still wins; longer values may shrink further.
+        const heights=p.scanned.cells.map(c=>(c.y1-c.y0)*localDims(p.uw,p.uh,totalRot(p))[1]).filter(h=>h>7).sort((a,b)=>a-b);
+        const regular=heights[Math.floor(heights.length*.1)];
+        p.answerFontSize=regular?Math.min(ANSWER_FONT_SIZE,Math.max(6.75,Math.floor((regular-1.2)/.925*4)/4)):ANSWER_FONT_SIZE;
       }
     } catch (err) {
       console.warn('page scan failed', err);
@@ -2733,6 +2738,7 @@ const lineAnswer=L=>({x0:L.x0+.002,x1:L.x1-.002,y0:L.y-Math.min(L.clr || .022,.0
 function answerLayout(it, font = answerFont) {
   if (!it.answer || !font) return null;
   const p = S.pageBox[it.page], [W, H] = localDims(p.uw, p.uh, it.rot), r = it.answer;
+  r.baseFontSize ??= p.answerFontSize || ANSWER_FONT_SIZE;
   const padding = 1.2, verticalPadding = 0.6;
   const width = (r.x1 - r.x0) * W - padding * 2;
   const height = (r.y1 - r.y0) * H - verticalPadding * 2;
@@ -2747,7 +2753,7 @@ function answerLayout(it, font = answerFont) {
   const glyphHeight = font.heightAtSize(1);
   const ascent = font.heightAtSize(1, { descender: false });
   const fit = fitFieldText(textOf(it), {
-    width, height, fontSize: r.fontSize || ANSWER_FONT_SIZE, minFontSize: 6.75,
+    width, height, fontSize: r.fontSize || r.baseFontSize || ANSWER_FONT_SIZE, minFontSize: 6.75,
     multiline: r.multiline, glyphHeight, lineHeight: LINEH,
   }, measure);
   // Fit actual glyphs, not the empty leading above/below the CSS line box.
@@ -4217,6 +4223,19 @@ async function ocrPage(p, onNote) {
     const image = ctx.getImageData(0, 0, cv.width, cv.height);
     p.formRules = detectRules(image);
     p.formRings = detectRings(image);
+    if(p.scanned)p.scanned.boxes=verifyBoxes(image,p.scanned.boxes||[]);
+    // Remove measured rules from the OCR copy only. Thin grid lines touching
+    // small type otherwise join labels across cells and hide short row codes.
+    const denseGrid=p.formRules.vertical.some(v=>p.formRules.horizontal.filter(h=>h.x0<=v.x0+.002&&h.x1>=v.x0-.002&&h.y0>v.y0&&h.y0<v.y1).length>12);
+    ctx.fillStyle='#fff';
+    for(const h of (denseGrid?p.formRules.horizontal:[])) {
+      if(h.y1-h.y0<.004&&h.x1-h.x0>.04)
+        ctx.fillRect(h.x0*cv.width,h.y0*cv.height-1,(h.x1-h.x0)*cv.width+1,(h.y1-h.y0)*cv.height+3);
+    }
+    for(const v of (denseGrid?p.formRules.vertical:[])) {
+      if(v.x1-v.x0<.004 && (v.y1-v.y0>.04 || p.formRules.horizontal.filter(h=>h.x0<v.x0+.002&&h.x1>v.x0-.002&&h.y0>v.y0-.002&&h.y0<v.y1+.002).length>=2))
+        ctx.fillRect(v.x0*cv.width-1,v.y0*cv.height,(v.x1-v.x0)*cv.width+3,(v.y1-v.y0)*cv.height+1);
+    }
     await w.setParameters({ tessedit_pageseg_mode: '11' });
     const res = await w.recognize(cv, {}, { blocks: true });
     let out = [];
@@ -4238,7 +4257,7 @@ async function ocrPage(p, onNote) {
     const initial=out;
     const regions=phraseWords(initial,p.formRules);
     try {
-      for (const region of regions.slice(0,120)) {
+      for (const region of regions.slice(0,denseGrid?60:120)) {
         const original=initial.filter(x=>Math.abs(x.cy-region.cy)<Math.max(region.h,x.h)*.65&&x.x0>=region.x0-.001&&x.x1<=region.x1+.001);
         if(!original.length||original.every(x=>(x.confidence||0)>92))continue;
         const left=Math.max(0,Math.floor(region.x0*cv.width)-5),right=Math.min(cv.width,Math.ceil(region.x1*cv.width)+5);
@@ -4254,7 +4273,7 @@ async function ocrPage(p, onNote) {
       }
       // Circular choices sometimes vanish into OCR punctuation. Read the
       // adjacent option crop using the circle's measured geometry.
-      for (const ring of (p.formRings||[]).filter(r=>r.cy>.12)) {
+      for (const ring of (p.formRings||[]).filter(r=>r.cy>.12&&r.shape==='circle')) {
         const left=Math.round(ring.x1*cv.width)+2,right=Math.min(cv.width,left+Math.round(ring.w*cv.width*2.6));
         const top=Math.max(0,Math.round(ring.y0*cv.height)-2),bot=Math.min(cv.height,Math.round(ring.y1*cv.height)+2);
         tile.width=right-left;tile.height=bot-top;
@@ -4269,7 +4288,9 @@ async function ocrPage(p, onNote) {
       // Read occupied grid cells and column headings in their own rectangle.
       // Layout segmentation often swallows a column of tiny FROM/TO captions.
       const all=(p.scanned?.cellsAll||[]).map(c=>({...c,...(c.box||{})}));
-      const captionRegions=all.filter(c=>(c.filled||c.cap)&&c.x1-c.x0<.5&&c.y1-c.y0<.06);
+      const captionRegions=denseGrid
+        ? ruleCells(p.formRules).filter(c=>c.x1-c.x0<.5&&c.y1-c.y0<.06&&out.some(x=>x.x0>=c.x0&&x.x1<=c.x1&&x.cy>c.y0&&x.cy<c.y1))
+        : all.filter(c=>(c.filled||c.cap)&&c.x1-c.x0<.5&&c.y1-c.y0<.06);
       const blank=all.filter(c=>!c.filled&&!c.cap&&c.x1-c.x0<.5);
       for(const c of blank) {
         if(blank.some(b=>Math.abs(b.x0-c.x0)<.008&&Math.abs(b.x1-c.x1)<.008&&b.y0<c.y0&&c.y0-b.y0<.08))continue;
@@ -4284,7 +4305,7 @@ async function ocrPage(p, onNote) {
         tile.getContext('2d').drawImage(cv,left,top,right-left,bot-top,0,0,right-left,bot-top);
         const refined=[];collect(await w.recognize(tile,{}, {blocks:true}),top,refined);
         refined.forEach(x=>{x.x0+=left/cv.width;x.x1+=left/cv.width;});
-        if(refined.some(x=>/[a-z]{2}/i.test(x.s)&&(x.confidence||0)>60)) {
+        if(refined.some(x=>/[a-z0-9]{1,}/i.test(x.s)&&(x.confidence||0)>60)) {
           out=out.filter(x=>!(x.x0>=r.x0-.003&&x.x1<=r.x1+.003&&x.cy>r.y0&&x.cy<r.y1));out.push(...refined);
         }
       }

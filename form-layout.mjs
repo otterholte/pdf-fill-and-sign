@@ -15,7 +15,7 @@ export function detectRules(image) {
       count = vertical ? W : H;
     const minimum = Math.max(
       18,
-      Math.round(length * (vertical ? 0.03 : 0.045)),
+      Math.round(length * (vertical ? 0.011 : 0.025)),
     );
     const segments = [];
     for (let row = 0; row < count; row++) {
@@ -30,7 +30,11 @@ export function detectRules(image) {
           last = col;
           hits++;
         } else if (start >= 0 && col - last > 2) {
-          if (last - start + 1 >= minimum && hits / (last - start + 1) > 0.88)
+          if (
+            last - start + 1 >= minimum &&
+            hits / (last - start + 1) >
+              (vertical && last - start < H * 0.03 ? 0.97 : 0.88)
+          )
             segments.push({ row, start, end: last });
           start = -1;
           hits = 0;
@@ -44,7 +48,7 @@ export function detectRules(image) {
           s.row - b.r1 <= 3 &&
           s.row >= b.r0 &&
           overlap(s.start, s.end, b.start, b.end) >
-            0.78 * Math.min(s.end - s.start, b.end - b.start),
+            0.78 * Math.max(s.end - s.start, b.end - b.start),
       );
       if (b) {
         b.r1 = s.row;
@@ -73,7 +77,57 @@ export function detectRules(image) {
               r.x1 <= b.x1 + 0.002,
           ),
     );
-  return { horizontal, vertical: run(true), width: W, height: H };
+  const dashed = [];
+  for (let y = 0; y < H; y++) {
+    const runs = [];
+    for (let x = 0; x < W; ) {
+      if (!ink[y * W + x]) {
+        x++;
+        continue;
+      }
+      const start = x;
+      while (x < W && ink[y * W + x]) x++;
+      runs.push({ start, end: x });
+    }
+    for (let i = 0; i < runs.length; ) {
+      let j = i + 1;
+      while (
+        j < runs.length &&
+        runs[j].start - runs[j - 1].end <= Math.max(5, W * 0.004)
+      )
+        j++;
+      const a = runs.slice(i, j);
+      i = j;
+      if (a.length < 12 || a.at(-1).end - a[0].start < W * 0.08) continue;
+      const lengths = a.map((r) => r.end - r.start),
+        gaps = a.slice(1).map((r, k) => r.start - a[k].end);
+      const cv = (a) => {
+        const mean = a.reduce((s, x) => s + x, 0) / a.length;
+        return (
+          Math.sqrt(a.reduce((s, x) => s + (x - mean) ** 2, 0) / a.length) /
+          mean
+        );
+      };
+      if (cv(lengths) > 0.45 || cv(gaps) > 0.4) continue;
+      const previous = dashed.at(-1);
+      if (
+        previous &&
+        y / H - previous.y1 < 3 / H &&
+        Math.abs(previous.x0 - a[0].start / W) < 0.003
+      ) {
+        previous.y1 = y / H;
+        continue;
+      }
+      dashed.push({
+        x0: a[0].start / W,
+        x1: a.at(-1).end / W,
+        y0: y / H,
+        y1: y / H,
+        dashed: true,
+      });
+    }
+  }
+  return { horizontal, vertical: run(true), dashed, width: W, height: H };
 }
 
 /** Establish rows before joining words; sorting by tiny baseline differences
@@ -171,7 +225,31 @@ export function detectRings(image) {
       [r, b],
     ])
       if (dark(y * W + x)) corners++;
-    if (corners >= 3) continue;
+    const horizontalEdge = (y) => {
+      let n = 0,
+        total = 0;
+      for (let x = l + Math.ceil(w * 0.1); x <= r - w * 0.1; x++) {
+        total++;
+        if (dark(y * W + x) || dark((y === t ? y + 1 : y - 1) * W + x)) n++;
+      }
+      return n / total;
+    };
+    const verticalEdge = (x) => {
+      let n = 0,
+        total = 0;
+      for (let y = t + Math.ceil(h * 0.1); y <= b - h * 0.1; y++) {
+        total++;
+        if (dark(y * W + x) || dark(y * W + (x === l ? x + 1 : x - 1))) n++;
+      }
+      return n / total;
+    };
+    const square =
+      Math.min(
+        horizontalEdge(t),
+        horizontalEdge(b),
+        verticalEdge(l),
+        verticalEdge(r),
+      ) > 0.9;
     out.push({
       x0: l / W,
       x1: r / W,
@@ -181,10 +259,51 @@ export function detectRings(image) {
       cy: (t + b) / 2 / H,
       w: w / W,
       h: h / H,
-      shape: "circle",
+      shape: square ? "square" : "circle",
     });
   }
   return out;
+}
+
+/** Validate fallback controls against all four outline sides, even when an
+    outline touches a table rule and is no longer an isolated component. */
+export function verifyBoxes(image, boxes) {
+  const { width: W, height: H, data } = image,
+    pad = Math.max(1, Math.ceil(W / 1000));
+  const dark = (x, y) =>
+    x >= 0 && x < W && y >= 0 && y < H && data[(y * W + x) * 4] < 215;
+  return boxes.filter((b) => {
+    if (b.guessed) return false;
+    const l = Math.round(b.x0 * W),
+      r = Math.round(b.x1 * W),
+      t = Math.round(b.y0 * H),
+      bot = Math.round(b.y1 * H);
+    const edge = (vertical, fixed, start, end) => {
+      let hits = 0,
+        total = 0;
+      for (
+        let v = Math.ceil(start + (end - start) * 0.15);
+        v <= end - (end - start) * 0.15;
+        v++
+      ) {
+        total++;
+        for (let d = -pad; d <= pad; d++)
+          if (dark(vertical ? fixed + d : v, vertical ? v : fixed + d)) {
+            hits++;
+            break;
+          }
+      }
+      return hits / Math.max(total, 1);
+    };
+    return (
+      Math.min(
+        edge(false, t, l, r),
+        edge(false, bot, l, r),
+        edge(true, l, t, bot),
+        edge(true, r, t, bot),
+      ) > 0.8
+    );
+  });
 }
 
 const clean = (s) =>
@@ -193,7 +312,8 @@ const clean = (s) =>
     .replace(/\s+/g, " ")
     .replace(/^[\s:.,-]+|[\s:.,-]+$/g, "")
     .trim();
-const meaningful = (w) => /[a-z]{2}/i.test(w.s);
+const meaningful = (w) => /[a-z]{2}/i.test(w.s) || /^\d{1,3}[a-z]?$/i.test(w.s);
+const rowCode = (w) => /^\d{1,3}[a-z]?$/i.test(w.s);
 const contents = (words, r) =>
   words.filter(
     (w) =>
@@ -218,6 +338,107 @@ export function fieldType(label, kind = "text") {
   return "text";
 }
 
+/** Reconstruct adjacent cells from intersections, including open table edges.
+    An implied edge needs repeated horizontal endpoints; short dotted character
+    guides never qualify as full-height dividers. No page identity is used. */
+export function ruleCells(rules) {
+  const hs = rules.horizontal
+      .filter((h) => h.y1 - h.y0 < 0.004 && h.x1 - h.x0 > 0.04)
+      .sort((a, b) => a.y0 - b.y0),
+    vs = rules.vertical,
+    result = [];
+  for (let i = 0; i < hs.length; i++) {
+    const top = hs[i];
+    for (const bottom of hs.slice(i + 1)) {
+      const height = bottom.y0 - top.y1;
+      if (height > 0.13) break;
+      if (height < 0.01) continue;
+      const x0 = Math.max(top.x0, bottom.x0),
+        x1 = Math.min(top.x1, bottom.x1);
+      if (x1 - x0 < 0.04) continue;
+      const cuts = vs
+        .filter(
+          (v) =>
+            v.x0 > x0 - 0.003 &&
+            v.x0 < x1 + 0.003 &&
+            v.y0 <= top.y1 + 0.001 &&
+            v.y1 >= bottom.y0 - 0.001,
+        )
+        .map((v) => (v.x0 + v.x1) / 2);
+      const edge = (x) =>
+        cuts.some((v) => Math.abs(v - x) < 0.004) ||
+        hs.filter(
+          (h) => Math.abs(h.x0 - x) < 0.003 || Math.abs(h.x1 - x) < 0.003,
+        ).length >= 3;
+      if (edge(x0)) cuts.push(x0);
+      if (edge(x1)) cuts.push(x1);
+      const xs = cuts
+        .sort((a, b) => a - b)
+        .filter((x, j, a) => !j || x - a[j - 1] > 0.005);
+      for (let k = 0; k < xs.length - 1; k++) {
+        const left = xs[k],
+          right = xs[k + 1];
+        if (right - left < 0.023) continue;
+        if (
+          hs.some(
+            (h) =>
+              h.y0 > top.y1 + 0.003 &&
+              h.y1 < bottom.y0 - 0.003 &&
+              h.x0 <= left + 0.003 &&
+              h.x1 >= right - 0.003,
+          )
+        )
+          continue;
+        result.push({
+          x0: left,
+          x1: right,
+          y0: top.y1,
+          y1: bottom.y0,
+          geometric: true,
+        });
+      }
+    }
+  }
+  // Open-top amount boxes have short uprights ending on their underline.
+  for (const h of hs) {
+    const uprights = vs.filter(
+      (v) =>
+        v.x0 >= h.x0 - 0.002 &&
+        v.x0 <= h.x1 + 0.002 &&
+        v.y0 < h.y0 - 0.009 &&
+        v.y1 >= h.y0 - 0.001,
+    );
+    for (const v of uprights) {
+      if (v.y0 < h.y0 - 0.028) continue;
+      const right = uprights
+        .filter((b) => b.x0 > v.x1 + 0.023 && b.y0 <= v.y0 + 0.001)
+        .sort((a, b) => a.x0 - b.x0)[0];
+      if (!right) continue;
+      const rect = {
+        x0: (v.x0 + v.x1) / 2,
+        x1: (right.x0 + right.x1) / 2,
+        y0: v.y0,
+        y1: h.y0,
+        geometric: true,
+      };
+      rect.openTop = true;
+      result.push(rect);
+    }
+  }
+  return result.filter(
+    (c, i, all) =>
+      !all
+        .slice(0, i)
+        .some(
+          (b) =>
+            Math.abs(c.x0 - b.x0) < 0.003 &&
+            Math.abs(c.x1 - b.x1) < 0.003 &&
+            Math.abs(c.y0 - b.y0) < 0.003 &&
+            Math.abs(c.y1 - b.y1) < 0.003,
+        ),
+  );
+}
+
 /** Refine existing scan evidence using printed structure. No answer text is
     consulted. The old pixel scanner remains the fallback for unruled pages. */
 export function analyzeForm(rawWords, rules, base, rings = []) {
@@ -226,6 +447,9 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
   const hs = rules.horizontal,
     vs = rules.vertical;
   const sections = [];
+  const textHeights = words.map((w) => w.h).sort((a, b) => a - b);
+  const normalHeight =
+    textHeights[Math.floor(textHeights.length * 0.75)] || 0.01;
   for (const h of hs.filter((h) => h.x1 - h.x0 > 0.55)) {
     const title = phrases.find(
       (w) =>
@@ -243,17 +467,69 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
     );
     if (
       title &&
-      enclosed &&
+      ((enclosed &&
+        hs.filter(
+          (b) =>
+            b.y0 > h.y1 + 0.02 &&
+            b.y0 < h.y0 + 0.16 &&
+            b.x0 >= h.x0 - 0.004 &&
+            b.x1 <= h.x1 + 0.004,
+        ).length >= 2) ||
+        (title.h > normalHeight * 1.35 &&
+          title.s.split(/\s+/).length <= 4 &&
+          Math.abs(
+            h.x0 -
+              Math.min(
+                ...hs.filter((b) => b.x1 - b.x0 > 0.55).map((b) => b.x0),
+              ),
+          ) < 0.005)) &&
       !sections.some((s) => Math.abs(s.y - title.cy) < 0.02)
     )
       sections.push({ label: clean(title.s), y: title.cy, x0: h.x0, x1: h.x1 });
   }
   sections.sort((a, b) => a.y - b.y);
   const sectionAt = (y) => sections.findLast((s) => s.y < y)?.label || "";
-  const cellsAll = (base.cellsAll || base.cells || []).map((c) => ({
+  let measured = ruleCells(rules);
+  // Character guides subdivide an identifier, not the logical answer. Reuse
+  // adjacent table-column boundaries only when the row explicitly asks for one.
+  for (const labelCell of [...measured]) {
+    if (
+      !/\b(ssn|social security|account number|identification|telephone)\b/i.test(
+        said(contents(words, labelCell)),
+      )
+    )
+      continue;
+    const above = measured.filter(
+      (b) =>
+        Math.abs(b.y1 - labelCell.y0) < 0.003 &&
+        b.x0 >= labelCell.x1 - 0.002 &&
+        b.x1 - b.x0 > 0.06,
+    );
+    for (const col of above) {
+      const parts = measured.filter(
+        (c) =>
+          Math.abs(c.y0 - labelCell.y0) < 0.002 &&
+          Math.abs(c.y1 - labelCell.y1) < 0.002 &&
+          c.x0 >= col.x0 - 0.002 &&
+          c.x1 <= col.x1 + 0.002,
+      );
+      if (parts.length < 2 || parts.some((c) => contents(words, c).length))
+        continue;
+      measured = measured.filter((c) => !parts.includes(c));
+      measured.push({
+        x0: col.x0,
+        x1: col.x1,
+        y0: labelCell.y0,
+        y1: labelCell.y1,
+        geometric: true,
+      });
+    }
+  }
+  const legacyCells = (base.cellsAll || base.cells || []).map((c) => ({
     ...c,
     ...(c.box || {}),
   }));
+  const cellsAll = legacyCells;
   const lines = [],
     cells = [];
   const occupied = [];
@@ -282,6 +558,144 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
       )
     )
       cells.push(c);
+  }
+  // Printed captions occupy the top of a box; the answer belongs BELOW them.
+  // Multiple lines of instructions filling a panel are not a text field.
+  for (const c of measured) {
+    const own = contents(words, c),
+      height = c.y1 - c.y0;
+    if (!own.length || height < 0.022 || height > 0.12) continue;
+    const bottom = Math.max(...own.map((w) => w.cy + w.h / 2));
+    if (bottom > c.y0 + height * 0.58 || c.y1 - bottom < 0.01) continue;
+    const label = said(own);
+    if (
+      !label ||
+      sections.some((s) => s.label === label) ||
+      rings.some(
+        (r) => r.cx > c.x0 && r.cx < c.x1 && r.cy > c.y0 && r.cy < c.y1,
+      )
+    )
+      continue;
+    // A table's printed row labels are not top-caption answer boxes.
+    if (
+      c.x1 - c.x0 < 0.09 &&
+      measured.some(
+        (b) =>
+          Math.abs(b.x0 - c.x1) < 0.003 &&
+          Math.abs(b.y0 - c.y0) < 0.003 &&
+          Math.abs(b.y1 - c.y1) < 0.003 &&
+          rings.some(
+            (r) => r.cx > b.x0 && r.cx < b.x1 && r.cy > b.y0 && r.cy < b.y1,
+          ),
+      )
+    )
+      continue;
+    addCell(
+      {
+        x0: c.x0 + 0.002,
+        x1: c.x1 - 0.002,
+        y0: bottom + 0.002,
+        y1: c.y1 - 0.001,
+      },
+      label,
+      "caption",
+      {
+        align: /\b(zip|postal|state|ssn|social security)\b/i.test(label)
+          ? "center"
+          : "left",
+        multiline: height > 0.055,
+      },
+    );
+  }
+  // Compact grids: use the nearest column heading and row label, keeping
+  // each repeated table separate from unrelated columns elsewhere on the page.
+  for (const c of measured) {
+    if (contents(words, c).length || c.x1 - c.x0 < 0.035 || c.x1 - c.x0 > 0.45)
+      continue;
+    const codeCell = measured.find(
+      (b) =>
+        Math.abs(b.x1 - c.x0) < 0.004 &&
+        Math.abs(b.y0 - c.y0) < 0.003 &&
+        Math.abs(b.y1 - c.y1) < 0.003 &&
+        b.x1 - b.x0 < 0.04,
+    );
+    const code = rawWords
+      .filter(
+        (w) =>
+          (rowCode(w) || (codeCell && /^[a-z0-9]{1,3}$/i.test(w.s))) &&
+          w.x1 <= c.x0 + 0.001 &&
+          c.x0 - w.x1 < 0.035 &&
+          w.cy > c.y0 &&
+          w.cy < c.y1,
+      )
+      .sort((a, b) => b.cy - a.cy)[0];
+    const targetY = code?.cy || c.y1 - 0.007;
+    const left = words.filter(
+      (w) =>
+        w.x1 < (codeCell?.x0 || c.x0) - 0.001 &&
+        w.x0 > c.x0 - 0.5 &&
+        Math.abs(w.cy - targetY) < 0.006,
+    );
+    if (
+      (code ||
+        (codeCell &&
+          measured.filter(
+            (b) =>
+              Math.abs(b.x0 - codeCell.x0) < 0.003 &&
+              Math.abs(b.x1 - codeCell.x1) < 0.003,
+          ).length >= 3)) &&
+      left.length
+    ) {
+      const label = said(left).replace(/(?:[.·]\s*)+$/, "");
+      addCell(
+        {
+          x0: c.x0 + 0.002,
+          x1: c.x1 - 0.002,
+          y0: Math.max(c.y0 + 0.001, (code?.cy || c.y1 - 0.007) - 0.007),
+          y1: Math.min(c.y1 - 0.001, (code?.cy || c.y1 - 0.007) + 0.008),
+        },
+        `${code?.s ? code.s + " — " : ""}${label}`,
+        "amount",
+        { align: "right", multiline: false },
+      );
+      continue;
+    }
+    if (c.y1 - c.y0 > 0.024) continue;
+    const col = measured.filter(
+      (b) =>
+        Math.abs(b.x0 - c.x0) < 0.004 &&
+        Math.abs(b.x1 - c.x1) < 0.004 &&
+        b.y0 <= c.y0 &&
+        c.y0 - b.y1 < 0.09,
+    );
+    const headerCell = col
+      .filter((b) => contents(words, b).length && b.y1 <= c.y0 + 0.002)
+      .sort((a, b) => b.y1 - a.y1)[0];
+    if (!headerCell) continue;
+    const header = said(contents(words, headerCell));
+    const rowCell = measured
+      .filter(
+        (b) =>
+          b.x1 <= c.x0 + 0.002 &&
+          c.x0 - b.x1 < 0.5 &&
+          Math.abs(b.y0 - c.y0) < 0.003 &&
+          Math.abs(b.y1 - c.y1) < 0.003 &&
+          contents(words, b).length,
+      )
+      .sort((a, b) => b.x1 - a.x1)[0];
+    if (!rowCell) continue;
+    const row = said(contents(words, rowCell));
+    addCell(
+      {
+        x0: c.x0 + 0.002,
+        x1: c.x1 - 0.002,
+        y0: c.y0 + 0.001,
+        y1: c.y1 - 0.001,
+      },
+      `${row} — ${header}`,
+      "grid",
+      { columnLabel: header, rowLabel: row, align: "left", multiline: false },
+    );
   }
   // Same-column blank cells establish a table block, even if header rules are faint.
   const blanks = cellsAll.filter(
@@ -332,12 +746,45 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
     occupied.push(c);
   }
   // Caption-at-left cells: short date subrows, or full-width prose answers.
-  for (const c of cellsAll) {
+  for (const c of [
+    ...cellsAll,
+    ...measured.filter(
+      (c) =>
+        !vs.some(
+          (v) =>
+            v.x0 > c.x0 + 0.005 &&
+            v.x0 < c.x1 - 0.005 &&
+            v.y0 < middle(c) &&
+            v.y1 > middle(c),
+        ) &&
+        !cellsAll.some(
+          (b) =>
+            overlap(c.x0, c.x1, b.x0, b.x1) > 0.02 &&
+            overlap(c.y0, c.y1, b.y0, b.y1) > 0.5 * (c.y1 - c.y0),
+        ),
+    ),
+  ]) {
     const width = c.x1 - c.x0,
       height = c.y1 - c.y0;
     if (height > 0.05) continue;
     const own = contents(words, c);
     if (!own.length) continue;
+    if (
+      Math.max(...own.map((w) => w.cy)) - Math.min(...own.map((w) => w.cy)) >
+        0.01 &&
+      !own.some((w) =>
+        sections.some(
+          (s) => s.label.includes(w.s) && Math.abs(s.y - w.cy) < 0.005,
+        ),
+      )
+    )
+      continue;
+    if (
+      [...rings, ...(base.boxes || [])].some(
+        (b) => b.cy > c.y0 && b.cy < c.y1 && b.cx > c.x0 && b.cx < c.x1,
+      )
+    )
+      continue;
     const row = phraseWords(own, rules).filter(
       (w) => w.cy > c.y1 - 0.025 && w.cy < c.y1 - 0.002,
     );
@@ -345,7 +792,15 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
     for (let i = 0; i < row.length; i++) {
       const label = row[i];
       if (sectionAt(label.cy + 0.001) === clean(label.s)) continue;
-      const right = row[i + 1]?.x0 || c.x1;
+      const printedRight = rawWords
+        .filter(
+          (w) =>
+            w.x0 > label.x1 + 0.012 &&
+            Math.abs(w.cy - label.cy) < 0.006 &&
+            w.x1 < c.x1 + 0.002,
+        )
+        .sort((a, b) => a.x0 - b.x0)[0]?.x0;
+      const right = Math.min(row[i + 1]?.x0 || c.x1, printedRight || c.x1);
       if (right - label.x1 < 0.055) continue;
       addCell(
         {
@@ -406,7 +861,7 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
     );
   }
   // Open underlines are answers; closed table and section edges are not.
-  for (const h of hs) {
+  for (const h of [...hs, ...(rules.dashed || [])]) {
     const y = h.y0,
       width = h.x1 - h.x0;
     if (width < 0.045 || sections.some((s) => Math.abs(s.y - y) < 0.012))
@@ -417,6 +872,14 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
           Math.abs(v.x0 - x) < 0.005 && v.y0 < y + 0.003 && v.y1 > y - 0.003,
       );
     if (upright(h.x0) && upright(h.x1)) continue;
+    if (
+      measured.some(
+        (c) =>
+          overlap(c.x0, c.x1, h.x0, h.x1) > 0.02 &&
+          (Math.abs(c.y0 - y) < 0.003 || Math.abs(c.y1 - y) < 0.003),
+      )
+    )
+      continue;
     if (
       cellsAll.some(
         (c) =>
@@ -430,7 +893,7 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
       phrases.some(
         (w) =>
           overlap(w.x0, w.x1, h.x0, h.x1) > width * 0.15 &&
-          Math.abs(w.cy - y) < w.h * 0.5,
+          Math.abs(w.cy - y) < w.h * 0.65,
       )
     )
       continue;
@@ -443,7 +906,8 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
           y - w.cy < 0.016,
       )
       .sort((a, b) => b.x1 - a.x1)[0];
-    if (!left && width > 0.5) continue;
+    if (!left && (width > 0.5 || (!h.dashed && width < 0.08))) continue;
+    if (y < 0.03 || y > 0.97 || h.y1 - h.y0 > 0.004) continue;
     if (
       sections.length &&
       (h.x0 < Math.min(...sections.map((s) => s.x0)) - 0.01 ||
@@ -467,34 +931,68 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
   }
   // Only rings on a printed question/option row become controls. This excludes
   // punched holes, the letter O in a heading, and decorative circles.
-  const seeded = rings.filter((r) =>
-    phrases.some(
-      (w) =>
-        Math.abs(w.cy - r.cy) < 0.009 &&
-        ((w.x0 >= r.x1 - 0.004 && w.x0 - r.x1 < 0.04) ||
-          (/\?/.test(w.s) && r.x0 - w.x1 < 0.035 && r.x0 > w.x1)),
-    ),
+  const seeded = rings.filter(
+    (r) =>
+      !(
+        r.shape === "circle" &&
+        rawWords.some(
+          (w) =>
+            w.x0 < r.cx &&
+            w.x1 > r.cx &&
+            Math.abs(w.cy - r.cy) < r.h * 0.6 &&
+            meaningful(w),
+        )
+      ) &&
+      phrases.some(
+        (w) =>
+          Math.abs(w.cy - r.cy) < 0.009 &&
+          ((w.x0 >= r.x1 - 0.004 && w.x0 - r.x1 < 0.04) ||
+            (/\?/.test(w.s) && r.x0 - w.x1 < 0.035 && r.x0 > w.x1)),
+      ),
   );
   const boxes = rings.filter(
     (r) =>
-      seeded.includes(r) ||
-      seeded.some(
-        (b) => Math.abs(b.cy - r.cy) < 0.006 && Math.abs(b.cx - r.cx) < 0.09,
-      ),
+      !rawWords.some(
+        (w) =>
+          w.x0 < r.x0 - 0.003 &&
+          w.x1 > r.x1 + 0.003 &&
+          Math.abs(w.cy - r.cy) < r.h * 0.6,
+      ) &&
+      (r.shape === "square" ||
+        seeded.includes(r) ||
+        seeded.some(
+          (b) => Math.abs(b.cy - r.cy) < 0.006 && Math.abs(b.cx - r.cx) < 0.09,
+        )),
   );
   for (const r of boxes) {
     const next = boxes
       .filter((b) => Math.abs(b.cy - r.cy) < 0.008 && b.cx > r.cx)
       .sort((a, b) => a.cx - b.cx)[0];
+    const enclosure = measured
+      .filter((c) => r.cx > c.x0 && r.cx < c.x1 && r.cy > c.y0 && r.cy < c.y1)
+      .sort(
+        (a, b) => (a.x1 - a.x0) * (a.y1 - a.y0) - (b.x1 - b.x0) * (b.y1 - b.y0),
+      )[0];
+    const optionRight = Math.min(next?.x0 || 1, enclosure?.x1 || 1, r.x1 + 0.6);
+    const optionRow = phraseWords(
+      words.filter(
+        (w) =>
+          Math.abs(w.cy - r.cy) < 0.007 &&
+          w.x0 > r.x1 - 0.001 &&
+          w.x1 < optionRight,
+      ),
+      rules,
+    );
     r.label = said(
       words.filter(
         (w) =>
           Math.abs(w.cy - r.cy) < 0.008 &&
           w.x0 > r.cx &&
-          w.x1 < Math.min(next?.x0 || 1, r.x1 + 0.055),
+          w.x1 <
+            Math.min(optionRight, optionRow[0]?.x1 + 0.001 || r.x1 + 0.055),
       ),
     );
-    r.label = r.label.replace(/^[oO0()\s]+(?=[A-Za-z])/, "");
+    r.label = r.label.replace(/^[()\s]+/, "");
     if (/^(yes|no)$/i.test(r.label)) r.label = r.label.toUpperCase();
     const left = phrases
       .filter(
@@ -516,21 +1014,68 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
     ...(base.boxes || []).filter(
       (b) =>
         !b.guessed &&
+        !rawWords.some(
+          (w) =>
+            (w.confidence || 0) > 90 &&
+            /^[a-z]{3,}$/i.test(w.s) &&
+            Math.abs(w.cy - b.cy) < 0.005 &&
+            w.x0 < b.x0 + 0.002 &&
+            w.x1 > b.x1 + 0.006,
+        ) &&
         !boxes.some(
           (r) =>
             Math.hypot(
               (b.cx - r.cx) * rules.width,
               (b.cy - r.cy) * rules.height,
             ) < 20,
-        ) &&
-        !words.some(
-          (w) =>
-            Math.abs(w.cy - b.cy) < 0.006 &&
-            overlap(w.x0, w.x1, b.x0, b.x1) > (b.x1 - b.x0) * 0.5,
         ),
     ),
   );
-  return { ...base, lines, cells, boxes, sections, structured: true };
+  // An explicit "check only one" instruction makes nearby option rows
+  // exclusive. Boxes elsewhere (such as independent table credits) stay separate.
+  const exclusive = phrases.find((w) => /check only/i.test(w.s));
+  if (exclusive) {
+    const range = hs
+      .filter((h) => h.y0 > exclusive.cy)
+      .sort((a, b) => a.y0 - b.y0)[0];
+    const options = boxes.filter(
+      (b) =>
+        b.cx > exclusive.x1 &&
+        b.cy > exclusive.cy - 0.025 &&
+        b.cy < exclusive.cy + 0.025 &&
+        b.cy < (range?.y0 || 1),
+    );
+    if (options.length >= 2 && options.length <= 8)
+      for (const b of options) {
+        b.groupId = `exclusive:${exclusive.cy.toFixed(4)}`;
+        b.askLabel = sectionAt(b.cy) || "Choose one";
+      }
+  }
+  for (const b of boxes) {
+    const column = cells
+      .filter(
+        (c) =>
+          c.columnLabel &&
+          c.y1 < b.y0 &&
+          b.y0 - c.y1 < 0.13 &&
+          b.cx > c.x0 &&
+          b.cx < c.x1,
+      )
+      .sort((a, b) => b.y1 - a.y1)[0];
+    if (column) {
+      b.columnLabel = column.columnLabel;
+      b.label = `${column.columnLabel} — ${b.label || "Check box"}`;
+    }
+  }
+  return {
+    ...base,
+    lines,
+    cells,
+    boxes,
+    sections,
+    structuralCells: measured,
+    structured: true,
+  };
 }
 
 export function readingOrder(spots) {
