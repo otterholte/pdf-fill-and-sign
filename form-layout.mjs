@@ -2,6 +2,7 @@ import {
   numberFormat,
   placeholderFields,
   connectNumberLines,
+  boxedFormats,
 } from "./field-formats.mjs";
 /* Local form geometry. No model, network request, form-specific coordinates, or
    stored answers. All coordinates exposed to the editor are normalized. */
@@ -328,7 +329,10 @@ const clean = (s) =>
     .replace(/\s+/g, " ")
     .replace(/^[\s:.,-]+|[\s:.,-]+$/g, "")
     .trim();
-const meaningful = (w) => /[a-z]{2}/i.test(w.s) || /^\d{1,3}[a-z]?$/i.test(w.s);
+const meaningful = (w) =>
+  /[a-z].*[a-z]/i.test(w.s) ||
+  (/^[A-Z]$/.test(w.s) && w.x1 - w.x0 > 0.002 && w.h > 0.004) ||
+  /^\d{1,3}[a-z]?$/i.test(w.s);
 const rowCode = (w) => /^\d{1,3}[a-z]?$/i.test(w.s);
 const contents = (words, r) =>
   words.filter(
@@ -367,7 +371,19 @@ export function ruleCells(rules) {
     const top = hs[i];
     for (const bottom of hs.slice(i + 1)) {
       const height = bottom.y0 - top.y1;
-      if (height > 0.13) break;
+      if (height > 0.65) break;
+      if (
+        height > 0.13 &&
+        ![Math.max(top.x0, bottom.x0), Math.min(top.x1, bottom.x1)].every((x) =>
+          vs.some(
+            (v) =>
+              Math.abs(v.x0 - x) < 0.004 &&
+              v.y0 <= top.y1 + 0.001 &&
+              v.y1 >= bottom.y0 - 0.001,
+          ),
+        )
+      )
+        continue;
       if (height < 0.01) continue;
       const x0 = Math.max(top.x0, bottom.x0),
         x1 = Math.min(top.x1, bottom.x1);
@@ -381,6 +397,7 @@ export function ruleCells(rules) {
             v.y1 >= bottom.y0 - 0.001,
         )
         .map((v) => (v.x0 + v.x1) / 2);
+      const physical = cuts.slice();
       const edge = (x) =>
         cuts.some((v) => Math.abs(v - x) < 0.004) ||
         hs.filter(
@@ -394,7 +411,13 @@ export function ruleCells(rules) {
       for (let k = 0; k < xs.length - 1; k++) {
         const left = xs[k],
           right = xs[k + 1];
-        if (right - left < 0.023) continue;
+        if (
+          right - left < 0.023 ||
+          !physical.some(
+            (x) => Math.abs(x - left) < 0.004 || Math.abs(x - right) < 0.004,
+          )
+        )
+          continue;
         if (
           hs.some(
             (h) =>
@@ -458,8 +481,11 @@ export function ruleCells(rules) {
 /** Refine existing scan evidence using printed structure. No answer text is
     consulted. The old pixel scanner remains the fallback for unruled pages. */
 export function analyzeForm(rawWords, rules, base, rings = []) {
-  const words = rawWords.filter(meaningful),
-    phrases = phraseWords(words, rules);
+  const words = rawWords.filter((w) => meaningful(w) && w.h > 0.003),
+    phrases = phraseWords(
+      rawWords.filter((w) => w.h > 0.003 && (meaningful(w) || w.s === "/")),
+      rules,
+    );
   const hs = rules.horizontal,
     vs = rules.vertical;
   const sections = [];
@@ -918,12 +944,29 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
       .filter(
         (w) =>
           w.x1 <= h.x0 + 0.006 &&
-          h.x0 - w.x1 < 0.045 &&
+          h.x0 - w.x1 < 0.25 &&
+          (w.s.length > 2 || /^(id|to|ta)$/i.test(w.s)) &&
+          !hs.some(
+            (b) =>
+              b !== h &&
+              Math.abs(b.y0 - y) < 0.004 &&
+              b.x0 > w.x1 + 0.003 &&
+              b.x1 < h.x0 - 0.004 &&
+              b.x1 - b.x0 > 0.035,
+          ) &&
           y - w.cy > -0.002 &&
-          y - w.cy < 0.016,
+          y - w.cy < Math.max(0.016, w.h * 1.4),
       )
       .sort((a, b) => b.x1 - a.x1)[0];
-    if (!left && (width > 0.5 || (!h.dashed && width < 0.08))) continue;
+    const numberRow = phrases.some(
+      (w) =>
+        /phone|telephone|social security|ssn|\bein\b/i.test(w.s) &&
+        w.x1 < h.x0 &&
+        h.x0 - w.x1 < 0.5 &&
+        Math.abs(y - w.cy) < 0.02,
+    );
+    if (!left && (width > 0.5 || (!h.dashed && width < 0.08 && !numberRow)))
+      continue;
     if (y < 0.03 || y > 0.97 || h.y1 - h.y0 > 0.004) continue;
     if (
       sections.length &&
@@ -964,11 +1007,22 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
         (w) =>
           Math.abs(w.cy - r.cy) < 0.009 &&
           ((w.x0 >= r.x1 - 0.004 && w.x0 - r.x1 < 0.04) ||
-            (/\?/.test(w.s) && r.x0 - w.x1 < 0.035 && r.x0 > w.x1)),
+            (/\?/.test(w.s) && r.x0 - w.x1 < 0.08 && r.x0 > w.x1)),
       ),
   );
   const boxes = rings.filter(
     (r) =>
+      !(
+        r.shape === "circle" &&
+        rawWords.some(
+          (w) =>
+            /^[a-z]{2,}$/i.test(w.s) &&
+            !/^o(?:yes|no)$/i.test(w.s) &&
+            w.x0 <= r.cx &&
+            w.x1 >= r.cx &&
+            Math.abs(w.cy - r.cy) < w.h * 0.7,
+        )
+      ) &&
       !rawWords.some(
         (w) =>
           w.x0 < r.x0 - 0.003 &&
@@ -1033,8 +1087,7 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
         !b.guessed &&
         !rawWords.some(
           (w) =>
-            (w.confidence || 0) > 90 &&
-            /^[a-z]{3,}$/i.test(w.s) &&
+            /^[a-z]{2,}$/i.test(w.s) &&
             Math.abs(w.cy - b.cy) < 0.005 &&
             w.x0 < b.x0 + 0.002 &&
             w.x1 > b.x1 + 0.006,
@@ -1084,6 +1137,69 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
       b.label = `${column.columnLabel} — ${b.label || "Check box"}`;
     }
   }
+  const extraBoxes = boxedFormats(measured, rawWords, phrases);
+  const replaces = (c, f) =>
+    overlap(c.x0, c.x1, f.x0, f.x1) > 0.8 * (c.x1 - c.x0) &&
+    overlap(c.y0, c.y1, f.y0, f.y1) > 0.7 * (c.y1 - c.y0);
+  for (const f of extraBoxes) {
+    for (let i = cells.length - 1; i >= 0; i--)
+      if (replaces(cells[i], f)) cells.splice(i, 1);
+    cells.push({ ...f, section: sectionAt(f.cy) });
+  }
+  // Large empty response boxes can be labeled outside their border.
+  for (const c of measured) {
+    if (
+      c.openTop ||
+      c.x1 - c.x0 < 0.08 ||
+      c.y1 - c.y0 < 0.015 ||
+      contents(words, c).some((w) => w.h < (c.y1 - c.y0) * 0.8) ||
+      cells.some((f) => replaces(c, f)) ||
+      rings.some(
+        (r) => r.cx > c.x0 && r.cx < c.x1 && r.cy > c.y0 && r.cy < c.y1,
+      )
+    )
+      continue;
+    const label = phrases
+      .filter(
+        (w) =>
+          /[:?]$/.test(w.s) &&
+          ((w.x1 < c.x0 &&
+            c.x0 - w.x1 < 0.25 &&
+            Math.abs(w.cy - middle(c)) < 0.012) ||
+            (Math.abs(w.x0 - c.x0) < 0.025 &&
+              w.cy < c.y0 &&
+              c.y0 - w.cy < Math.max(0.023, w.h * 1.6))),
+      )
+      .sort(
+        (a, b) => Math.abs(a.cy - middle(c)) - Math.abs(b.cy - middle(c)),
+      )[0];
+    if (label && !/office use|instructions|section/i.test(label.s))
+      addCell(
+        {
+          x0: c.x0 + 0.002,
+          x1: c.x1 - 0.002,
+          y0: c.y0 + 0.002,
+          y1: c.y1 - 0.002,
+        },
+        label.s,
+        "external caption",
+        { multiline: c.y1 - c.y0 > 0.035 },
+      );
+  }
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const a = lines[i];
+    if (
+      lines.some(
+        (b, j) =>
+          j !== i &&
+          Math.abs(a.y - b.y) < 0.003 &&
+          a.x0 >= b.x0 - 0.002 &&
+          a.x1 <= b.x1 + 0.002 &&
+          b.x1 - b.x0 > a.x1 - a.x0 + 0.003,
+      )
+    )
+      lines.splice(i, 1);
+  }
   const connected = connectNumberLines(lines, rawWords);
   cells.push(...connected.fields);
   for (let i = lines.length - 1; i >= 0; i--)
@@ -1095,7 +1211,12 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
       f.multiline = false;
     }
   }
-  for (const f of placeholderFields(rawWords)) {
+  for (const f of placeholderFields(
+    rawWords,
+    extraBoxes
+      .filter((f) => f.format.kind === "date")
+      .flatMap((f) => f.format.parts),
+  )) {
     if (
       !cells.some(
         (c) =>

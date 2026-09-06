@@ -69,7 +69,7 @@ export function numberFormat(field, rules) {
     source: "printed guides",
   };
 }
-export function placeholderFields(words) {
+export function placeholderFields(words, boxes = []) {
   const candidates = words.filter((w) => /^(MM|DD|YYYY|YY|HH|SS)$/i.test(w.s));
   const tokens = candidates.filter(
     (w) =>
@@ -85,6 +85,16 @@ export function placeholderFields(words) {
   );
   const result = [];
   for (const first of tokens) {
+    if (
+      boxes.some(
+        (c) =>
+          first.x0 < c.x1 &&
+          first.x1 > c.x0 &&
+          ((first.cy > c.y1 && first.cy - c.y1 < 0.022) ||
+            (first.cy < c.y0 && c.y0 - first.cy < 0.022)),
+      )
+    )
+      continue;
     if (!/^(MM|DD|YY|YYYY)$/i.test(first.s)) continue;
     const row = tokens
       .filter(
@@ -171,6 +181,18 @@ export function splitNumber(value, format) {
     parts = format.parts;
   if (!s)
     return { values: parts.map(() => ""), invalid: false, incomplete: false };
+  if (format.kind === "characters") {
+    const chars = Array.from(s);
+    return {
+      values: parts.map((_, i) => chars[i] || ""),
+      invalid: chars.length > parts.length,
+      incomplete: false,
+      message:
+        chars.length > parts.length
+          ? `Use at most ${parts.length} characters.`
+          : "",
+    };
+  }
   if (/[^\d\s()+./-]/.test(s))
     return {
       values: [],
@@ -455,4 +477,182 @@ export function dateHintGeometry(image, rect, text) {
     });
   }
   return result;
+}
+
+/** Associate physical boxes with outside labels and component captions. */
+export function boxedFormats(boxes, words, phrases = words) {
+  const result = [],
+    used = new Set();
+  const empty = (c) =>
+    !words.some(
+      (w) =>
+        /[a-z0-9]{2}/i.test(w.s) &&
+        w.x0 > c.x0 + 0.002 &&
+        w.x1 < c.x1 - 0.002 &&
+        w.cy > c.y0 &&
+        w.cy < c.y1 &&
+        w.h < (c.y1 - c.y0) * 0.8,
+    );
+  const labelAt = (c) =>
+    phrases
+      .filter(
+        (w) =>
+          w.x1 < c.x0 + 0.001 &&
+          c.x0 - w.x1 < 0.3 &&
+          Math.abs(w.cy - (c.y0 + c.y1) / 2) < 0.02 &&
+          /[a-z]{2}/i.test(w.s),
+      )
+      .sort((a, b) => b.x1 - a.x1)[0]?.s || "";
+  const make = (row, label, format, source) => {
+    const x0 = row[0].x0 + 0.002,
+      x1 = row.at(-1).x1 - 0.002,
+      y0 = Math.min(...row.map((c) => c.y0)) + 0.002,
+      y1 = Math.max(...row.map((c) => c.y1)) - 0.002;
+    result.push({
+      x0,
+      x1,
+      y0,
+      y1,
+      w: x1 - x0,
+      h: y1 - y0,
+      cx: (x0 + x1) / 2,
+      cy: (y0 + y1) / 2,
+      label,
+      format,
+      multiline: false,
+      align: "center",
+      source,
+      inputType: format.kind === "date" ? "date" : "text",
+    });
+    row.forEach((c) => used.add(c));
+  };
+  const hint = (c) =>
+    words
+      .filter(
+        (w) =>
+          /^(MM|DD|YY|YYYY)$/i.test(w.s) &&
+          (w.x0 + w.x1) / 2 > c.x0 &&
+          (w.x0 + w.x1) / 2 < c.x1 &&
+          ((w.cy > c.y1 && w.cy - c.y1 < 0.026) ||
+            (w.cy < c.y0 && c.y0 - w.cy < 0.026)),
+      )
+      .sort(
+        (a, b) =>
+          Math.abs(a.cy - (c.y0 + c.y1) / 2) -
+          Math.abs(b.cy - (c.y0 + c.y1) / 2),
+      )[0];
+  const ordered = boxes
+    .filter((c) => !c.openTop && empty(c))
+    .sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
+  for (const c of ordered) {
+    if (used.has(c)) continue;
+    const row = ordered
+        .filter(
+          (b) =>
+            b.x0 >= c.x0 - 0.001 &&
+            Math.abs(b.y0 - c.y0) < 0.003 &&
+            Math.abs(b.y1 - c.y1) < 0.003,
+        )
+        .sort((a, b) => a.x0 - b.x0)
+        .slice(0, 3),
+      hints = row.map(hint);
+    if (
+      row.length !== 3 ||
+      hints.some((h) => !h) ||
+      new Set(hints.map((h) => h.s[0].toUpperCase())).size !== 3 ||
+      row.slice(1).some((b, i) => b.x0 - row[i].x1 > 0.07)
+    )
+      continue;
+    const parts = row.map((b, i) => ({
+      x0: b.x0 + 0.003,
+      x1: b.x1 - 0.003,
+      y0: b.y0 + 0.002,
+      y1: b.y1 - 0.002,
+      capacity: hints[i].s.length,
+      token: hints[i].s.toUpperCase(),
+    }));
+    make(
+      row,
+      labelAt(c) || "Date",
+      {
+        kind: "date",
+        hint: parts.map((p) => p.token).join("/"),
+        parts,
+        source: "component captions",
+      },
+      "boxed date",
+    );
+  }
+  for (const c of ordered) {
+    if (used.has(c)) continue;
+    const label = labelAt(c);
+    if (
+      !/\bid\b|identifier|code|account|passport|licen[cs]e|policy|number/i.test(
+        label,
+      )
+    )
+      continue;
+    const row = [c];
+    for (const b of ordered
+      .filter(
+        (b) =>
+          b.x0 > c.x0 &&
+          !used.has(b) &&
+          Math.abs(b.y0 - c.y0) < 0.003 &&
+          Math.abs(b.y1 - c.y1) < 0.003,
+      )
+      .sort((a, b) => a.x0 - b.x0)) {
+      const last = row.at(-1);
+      if (
+        Math.abs(b.x0 - last.x1) > 0.005 ||
+        Math.abs((b.x1 - b.x0) / (c.x1 - c.x0) - 1) > 0.2
+      )
+        break;
+      row.push(b);
+    }
+    if (row.length < 3 || row.length > 24) continue;
+    const parts = row.map((b) => ({
+      x0: b.x0 + 0.002,
+      x1: b.x1 - 0.002,
+      y0: b.y0 + 0.002,
+      y1: b.y1 - 0.002,
+      capacity: 1,
+    }));
+    make(
+      row,
+      label,
+      {
+        kind: "characters",
+        hint: `Up to ${row.length} characters`,
+        parts,
+        source: "character boxes",
+      },
+      "character boxes",
+    );
+  }
+  return result;
+}
+
+/** Count the separate lower stems of an OCR-identified year placeholder.
+ * Repeated letters are often collapsed to YY even when the word spans YYYY.
+ * Only unambiguous two/four-stem evidence may override the OCR token.
+ */
+export function yearHintToken(image, word) {
+  if (!/^Y{2,4}$/i.test(word.s)) return word.s;
+  const { width: W, height: H, data } = image;
+  const left = Math.max(0, Math.floor(word.x0 * W)),
+    right = Math.min(W, Math.ceil(word.x1 * W));
+  const top = Math.max(0, Math.floor((word.cy + word.h * 0.17) * H)),
+    bottom = Math.min(H, Math.ceil((word.cy + word.h * 0.45) * H));
+  if (bottom - top < 3) return word.s;
+  let stems = 0,
+    was = false;
+  for (let x = left; x < right; x++) {
+    let n = 0;
+    for (let y = top; y < bottom; y++) if (data[(y * W + x) * 4] < 128) n++;
+    const on = n >= (bottom - top) * 0.65;
+    if (on && !was) stems++;
+    was = on;
+  }
+  return stems === 2 || stems === 4 ? "Y".repeat(stems) : word.s;
 }

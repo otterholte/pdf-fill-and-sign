@@ -1,0 +1,340 @@
+{
+  "width": 1103,
+  "height": 1426,
+  "fields": [
+    {
+      "label": "Full Name",
+      "rect": [
+        292,
+        232,
+        1042,
+        251
+      ],
+      "value": "Alex Example",
+      "kind": "text"
+    },
+    {
+      "label": "Date of Birth",
+      "rect": [
+        292,
+        274,
+        679,
+        308
+      ],
+      "value": "03/14/1990",
+      "kind": "text",
+      "parts": [
+        [
+          292,
+          274,
+          390,
+          308
+        ],
+        [
+          432,
+          274,
+          513,
+          308
+        ],
+        [
+          556,
+          274,
+          679,
+          308
+        ]
+      ],
+      "tokens": [
+        "MM",
+        "DD",
+        "YYYY"
+      ]
+    },
+    {
+      "label": "Phone Number",
+      "rect": [
+        300,
+        365,
+        711,
+        385
+      ],
+      "value": "212-555-0100",
+      "kind": "text",
+      "parts": [
+        [
+          300,
+          365,
+          382,
+          385
+        ],
+        [
+          409,
+          365,
+          486,
+          385
+        ],
+        [
+          519,
+          365,
+          711,
+          385
+        ]
+      ]
+    },
+    {
+      "label": "Social Security",
+      "rect": [
+        292,
+        415,
+        597,
+        435
+      ],
+      "value": "000-12-3456",
+      "kind": "text",
+      "parts": [
+        [
+          292,
+          415,
+          375,
+          435
+        ],
+        [
+          410,
+          415,
+          469,
+          435
+        ],
+        [
+          503,
+          415,
+          597,
+          435
+        ]
+      ]
+    },
+    {
+      "label": "Email Address",
+      "rect": [
+        292,
+        469,
+        1042,
+        489
+      ],
+      "value": "alex@example.com",
+      "kind": "text"
+    },
+    {
+      "label": "Street Address",
+      "rect": [
+        292,
+        522,
+        1042,
+        542
+      ],
+      "value": "123 Example Lane",
+      "kind": "text"
+    },
+    {
+      "label": "City, State",
+      "rect": [
+        292,
+        579,
+        1042,
+        599
+      ],
+      "value": "Example City, CO 80000",
+      "kind": "text"
+    },
+    {
+      "label": "Employee ID",
+      "rect": [
+        292,
+        621,
+        609,
+        664
+      ],
+      "value": "AB1234",
+      "kind": "text",
+      "parts": [
+        [
+          292,
+          621,
+          345,
+          664
+        ],
+        [
+          345,
+          621,
+          398,
+          664
+        ],
+        [
+          398,
+          621,
+          451,
+          664
+        ],
+        [
+          451,
+          621,
+          504,
+          664
+        ],
+        [
+          504,
+          621,
+          557,
+          664
+        ],
+        [
+          557,
+          621,
+          610,
+          664
+        ]
+      ]
+    },
+    {
+      "label": "New Applicant",
+      "rect": [
+        293,
+        699,
+        320,
+        726
+      ],
+      "value": "Alex Example",
+      "kind": "box"
+    },
+    {
+      "label": "Returning",
+      "rect": [
+        489,
+        699,
+        516,
+        726
+      ],
+      "value": "Alex Example",
+      "kind": "box"
+    },
+    {
+      "label": "Verified",
+      "rect": [
+        649,
+        699,
+        676,
+        726
+      ],
+      "value": "Alex Example",
+      "kind": "box"
+    },
+    {
+      "label": "Requires Follow-Up",
+      "rect": [
+        789,
+        699,
+        816,
+        726
+      ],
+      "value": "Alex Example",
+      "kind": "box"
+    },
+    {
+      "label": "legally authorized",
+      "rect": [
+        534,
+        770,
+        701,
+        798
+      ],
+      "value": "Alex Example",
+      "kind": "radio"
+    },
+    {
+      "label": "Comments",
+      "rect": [
+        62,
+        869,
+        1042,
+        1022
+      ],
+      "value": "Sample notes.\nSecond line of notes.",
+      "kind": "text"
+    },
+    {
+      "label": "Signature",
+      "rect": [
+        230,
+        1083,
+        751,
+        1103
+      ],
+      "value": "Alex Example",
+      "kind": "signature"
+    },
+    {
+      "label": "^Date$",
+      "rect": [
+        851,
+        1083,
+        1042,
+        1103
+      ],
+      "value": "09/06/2026",
+      "kind": "text"
+    },
+    {
+      "label": "Printed Name",
+      "rect": [
+        230,
+        1149,
+        751,
+        1169
+      ],
+      "value": "Alex Example",
+      "kind": "text"
+    },
+    {
+      "label": "Initials",
+      "rect": [
+        871,
+        1149,
+        1042,
+        1169
+      ],
+      "value": "AE",
+      "kind": "text"
+    },
+    {
+      "label": "Reviewed By",
+      "rect": [
+        62,
+        1276,
+        383,
+        1331
+      ],
+      "value": "Alex Example",
+      "kind": "text"
+    },
+    {
+      "label": "Date Reviewed",
+      "rect": [
+        383,
+        1276,
+        713,
+        1331
+      ],
+      "value": "09/06/2026",
+      "kind": "text"
+    },
+    {
+      "label": "Reference No",
+      "rect": [
+        713,
+        1276,
+        1042,
+        1331
+      ],
+      "value": "REF-0123",
+      "kind": "text"
+    }
+  ]
+}

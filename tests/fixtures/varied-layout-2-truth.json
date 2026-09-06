@@ -1,0 +1,179 @@
+{
+  "width": 1000,
+  "height": 1300,
+  "fields": [
+    {
+      "label": "Customer name",
+      "rect": [
+        365,
+        172,
+        930,
+        195
+      ],
+      "value": "Alex Example",
+      "kind": "text"
+    },
+    {
+      "label": "Start date",
+      "rect": [
+        365,
+        245,
+        702,
+        285
+      ],
+      "value": "2026/09/14",
+      "kind": "text",
+      "parts": [
+        [
+          365,
+          245,
+          480,
+          285
+        ],
+        [
+          513,
+          245,
+          591,
+          285
+        ],
+        [
+          624,
+          245,
+          702,
+          285
+        ]
+      ],
+      "tokens": [
+        "YYYY",
+        "MM",
+        "DD"
+      ]
+    },
+    {
+      "label": "Account ID",
+      "rect": [
+        365,
+        380,
+        635,
+        425
+      ],
+      "value": "AB1234",
+      "kind": "text",
+      "parts": [
+        [
+          365,
+          380,
+          410,
+          425
+        ],
+        [
+          410,
+          380,
+          455,
+          425
+        ],
+        [
+          455,
+          380,
+          500,
+          425
+        ],
+        [
+          500,
+          380,
+          545,
+          425
+        ],
+        [
+          545,
+          380,
+          590,
+          425
+        ],
+        [
+          590,
+          380,
+          635,
+          425
+        ]
+      ]
+    },
+    {
+      "label": "Comments",
+      "rect": [
+        60,
+        525,
+        880,
+        700
+      ],
+      "value": "Sample details.\nAnother line.",
+      "kind": "text"
+    },
+    {
+      "label": "Option A",
+      "rect": [
+        250,
+        770,
+        276,
+        796
+      ],
+      "value": "Alex Example",
+      "kind": "box"
+    },
+    {
+      "label": "Option B",
+      "rect": [
+        520,
+        770,
+        546,
+        796
+      ],
+      "value": "Alex Example",
+      "kind": "box"
+    },
+    {
+      "label": "Processed by",
+      "rect": [
+        60,
+        941,
+        510,
+        1000
+      ],
+      "value": "Alex Example",
+      "kind": "text"
+    },
+    {
+      "label": "Reference",
+      "rect": [
+        510,
+        941,
+        940,
+        1000
+      ],
+      "value": "Alex Example",
+      "kind": "text"
+    },
+    {
+      "label": "Signature",
+      "rect": [
+        250,
+        1125,
+        670,
+        1150
+      ],
+      "value": "Alex Example",
+      "kind": "signature"
+    },
+    {
+      "label": "^Date$",
+      "rect": [
+        785,
+        1125,
+        940,
+        1150
+      ],
+      "value": "09/06/2026",
+      "kind": "text"
+    }
+  ]
+}

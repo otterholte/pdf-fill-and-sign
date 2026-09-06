@@ -16,7 +16,12 @@ const url = deployedUrl
   : `http://127.0.0.1:${server.address().port}`;
 if (deployedUrl) {
   // Refuse a stale deployment: exercise exactly the code in this checkout.
-  for (const file of ["app.js", "form-layout.mjs", "field-formats.mjs", "sw.js"]) {
+  for (const file of [
+    "app.js",
+    "form-layout.mjs",
+    "field-formats.mjs",
+    "sw.js",
+  ]) {
     const response = await fetch(new URL(file, url));
     assert.ok(response.ok, `deployed ${file} is available`);
     assert.equal(
@@ -82,6 +87,7 @@ try {
     const a = window.__fs;
     return {
       questions: a.SIMof().qs,
+      words: a.S.pageBox[0].rawWords,
       sections: a.S.pageBox[0].scanned.sections,
       spots: a.spotsForPage(0),
       heap: performance.memory?.usedJSHeapSize,
@@ -433,6 +439,9 @@ try {
   await page.locator('[data-tab="type"]').click();
   await page.locator("#typeName").fill("Alex Example");
   await page.locator("#sigUse").click();
+  await page.waitForFunction(() =>
+    window.__fs.S.items.some((i) => i.type === "sig" && i.sigLine),
+  );
   assert.equal(
     await page.evaluate(
       () =>

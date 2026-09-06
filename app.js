@@ -1,4 +1,4 @@
-import { formatLayout, splitNumber, dateHintGeometry } from './field-formats.mjs';
+import { formatLayout, splitNumber, dateHintGeometry, yearHintToken } from './field-formats.mjs';
 /* Fill & Sign — open it, fill it out, sign it, send it back.
    Built by Eli Otterholt. There is no server: every byte stays in this browser. */
 
@@ -3475,7 +3475,7 @@ function edit(d) {
   const t = d.firstChild;
   const current=S.items.find(i=>i.id===d.dataset.id);
   if(current?.answer?.format) {
-    const inp=document.createElement('input');inp.className='number-editor';inp.value=current.text;inp.placeholder=current.answer.format.hint;inp.setAttribute('aria-label',current.label||'Number');inp.inputMode='numeric';
+    const inp=document.createElement('input');inp.className='number-editor';inp.value=current.text;inp.placeholder=current.answer.format.hint;inp.setAttribute('aria-label',current.label||'Number');inp.inputMode=current.answer.format.kind==='characters'?'text':'numeric';
     d.append(inp);inp.focus();inp.select();
     inp.oninput=()=>{markFieldHistory();current.text=inp.value;sizeItem(current,d);saveSoon();};
     inp.onblur=()=>{inp.remove();sizeItem(current,d);saveSoon();};
@@ -4294,7 +4294,7 @@ async function ocrPage(p, onNote) {
       }
       // Circular choices sometimes vanish into OCR punctuation. Read the
       // adjacent option crop using the circle's measured geometry.
-      for (const ring of (p.formRings||[]).filter(r=>r.cy>.12&&r.shape==='circle')) {
+      for (const ring of (p.formRings||[]).filter(r=>r.cy>.12&&r.shape==='circle'&&!out.some(x=>/^[a-z]{2,}$/i.test(x.s)&&!/^o(?:yes|no)$/i.test(x.s)&&x.x0<=r.cx&&x.x1>=r.cx&&Math.abs(x.cy-r.cy)<x.h*.7))) {
         const left=Math.round(ring.x1*cv.width)+2,right=Math.min(cv.width,left+Math.round(ring.w*cv.width*2.6));
         const top=Math.max(0,Math.round(ring.y0*cv.height)-2),bot=Math.min(cv.height,Math.round(ring.y1*cv.height)+2);
         tile.width=right-left;tile.height=bot-top;
@@ -4312,7 +4312,7 @@ async function ocrPage(p, onNote) {
       const captionRegions=denseGrid
         ? ruleCells(p.formRules).filter(c=>c.x1-c.x0<.5&&c.y1-c.y0<.06&&out.some(x=>x.x0>=c.x0&&x.x1<=c.x1&&x.cy>c.y0&&x.cy<c.y1))
         : all.filter(c=>(c.filled||c.cap)&&c.x1-c.x0<.5&&c.y1-c.y0<.06);
-      for(const c of ruleCells(p.formRules).filter(c=>c.x1-c.x0>.5&&c.y1-c.y0>.025&&c.y1-c.y0<.12&&!out.some(x=>x.x0>c.x0&&x.x1<c.x1&&x.cy>c.y0&&x.cy<c.y1)))captionRegions.push({...c,y1:(c.y0+c.y1)/2});
+      for(const c of ruleCells(p.formRules).filter(c=>c.x1-c.x0>.12&&c.y1-c.y0>.025&&c.y1-c.y0<.12&&!out.some(x=>x.x0>c.x0&&x.x1<c.x1&&x.cy>c.y0&&x.cy<c.y1)))captionRegions.push({...c,y1:(c.y0+c.y1)/2});
       const blank=all.filter(c=>!c.filled&&!c.cap&&c.x1-c.x0<.5);
       for(const c of blank) {
         if(blank.some(b=>Math.abs(b.x0-c.x0)<.008&&Math.abs(b.x1-c.x1)<.008&&b.y0<c.y0&&c.y0-b.y0<.08))continue;
@@ -4332,6 +4332,27 @@ async function ocrPage(p, onNote) {
         }
       }
     } finally {tile.width=tile.height=0;}
+    // Small boxes can put component captions above or below the writing area.
+    // Seed the bounded reread from either a date label or an explicit date token.
+    const dateTokens=out.filter(x=>/^(MM|DD|YY|YYYY)$/i.test(x.s)),dateLabels=out.filter(x=>/^(date:?|birth:?|DOB:?)$/i.test(x.s));
+    if(dateTokens.length||dateLabels.length){
+      const tile=document.createElement('canvas');
+      await w.setParameters({tessedit_pageseg_mode:'7',tessedit_char_whitelist:'MDY'});
+      try {
+        const candidates=ruleCells(p.formRules).filter(c=>!c.openTop&&c.x1-c.x0<.25&&c.y1-c.y0<.05&&(dateTokens.some(t=>Math.abs(t.cy-c.y1)<.026||Math.abs(t.cy-c.y0)<.026)||dateLabels.some(t=>t.x1<c.x0&&Math.abs(t.cy-(c.y0+c.y1)/2)<.025)));
+        for(const c of candidates.slice(0,24))for(const above of [false,true]){
+          const left=Math.max(0,Math.floor(c.x0*cv.width)),right=Math.min(cv.width,Math.ceil(c.x1*cv.width));
+          const top=Math.max(0,Math.ceil((above?c.y0-.026:c.y1+.001)*cv.height)),bottom=Math.min(cv.height,Math.floor((above?c.y0-.001:c.y1+.026)*cv.height));
+          const scale=3,pad=24;tile.width=(right-left)*scale+pad*2;tile.height=(bottom-top)*scale+pad*2;
+          const tc=tile.getContext('2d');tc.fillStyle='#fff';tc.fillRect(0,0,tile.width,tile.height);tc.drawImage(cv,left,top,right-left,bottom-top,pad,pad,(right-left)*scale,(bottom-top)*scale);
+          const refined=[];collect(await w.recognize(tile,{}, {blocks:true}),0,refined);
+          for(const x of refined.filter(x=>/^(MM|DD|YY|YYYY)$/.test(x.s))){
+            x.x0=x.x0/scale+(left-pad/scale)/cv.width;x.x1=x.x1/scale+(left-pad/scale)/cv.width;x.cy=x.cy/scale+(top-pad/scale)/cv.height;x.h/=scale;
+            if(!out.some(t=>t.s===x.s&&Math.abs(t.x0-x.x0)<.003&&Math.abs(t.cy-x.cy)<.003))out.push(x);
+          }
+        }
+      }finally{tile.width=tile.height=0;await w.setParameters({tessedit_char_whitelist:''});}
+    }
     // A single bounded contrast pass recovers faint printed format hints.
     // Only explicit date tokens are retained; normal OCR labels are untouched.
     const hintCanvas=document.createElement('canvas');hintCanvas.width=cv.width;hintCanvas.height=cv.height;
@@ -4384,6 +4405,7 @@ async function ocrPage(p, onNote) {
         if(!out.some(x=>x.s===hint.s&&Math.abs(x.x0-hint.x0)<.003&&Math.abs(x.cy-hint.cy)<.004))out.push(hint);
       }
     } finally {hintCanvas.width=hintCanvas.height=0;}
+    for(const token of out)if(/^Y{2,4}$/i.test(token.s))token.s=yearHintToken(image,token);
     p.rawWords = out;
     return out;
   } finally { cv.width = cv.height = 0; }
@@ -6911,7 +6933,7 @@ function qCard(q, i) {
   inp.value = simGet(q) ?? '';
   const numberSettings=q.C||q.L;const numberFormat=numberSettings?.formatDisabled?null:numberSettings?.format;
   let formatNote;
-  if(numberFormat) {inp.placeholder=numberFormat.hint;inp.inputMode='numeric';formatNote=document.createElement('small');formatNote.className='number-hint';formatNote.id='format-'+i;formatNote.textContent='Format: '+numberFormat.hint;inp.setAttribute('aria-describedby',formatNote.id);d.append(formatNote);}
+  if(numberFormat) {inp.placeholder=numberFormat.hint;inp.inputMode=numberFormat.kind==='characters'?'text':'numeric';formatNote=document.createElement('small');formatNote.className='number-hint';formatNote.id='format-'+i;formatNote.textContent='Format: '+numberFormat.hint;inp.setAttribute('aria-describedby',formatNote.id);d.append(formatNote);}
 
   inp.addEventListener('input', () => {
     markFieldHistory();
