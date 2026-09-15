@@ -1127,6 +1127,30 @@ function layoutFields() {
   });
 }
 
+/* The item layer turns with the page (its 90° steps), and while the
+   straighten dial is being turned it leans with the page too: whatever is
+   written on the paper is part of the paper, and a preview that turned the
+   picture and left the writing standing made the two look unrelated until
+   Crop was pressed. The lean goes in front of the turn, about the page's
+   middle — the same point the canvas leans about. */
+function layerTransform(p) {
+  const r = totalRot(p);
+  const base =
+    r === 90 ? `translateX(${p.dw}px) rotate(90deg)` :
+    r === 180 ? `translate(${p.dw}px, ${p.dh}px) rotate(180deg)` :
+    r === 270 ? `translateY(${p.dh}px) rotate(270deg)` : '';
+  const d = p.skewPreview || 0;
+  const lean = d ? `translate(${p.dw / 2}px, ${p.dh / 2}px) rotate(${d}deg) translate(${-p.dw / 2}px, ${-p.dh / 2}px) ` : '';
+  return (lean + base) || 'none';
+}
+function skewPreview(p, d) {
+  if (!p) return;
+  const r = Math.abs(d) > 0.001 ? d : 0;
+  p.skewPreview = r;
+  if (p.cv) { p.cv.style.transform = r ? `rotate(${r}deg)` : ''; p.cv.style.transformOrigin = '50% 50%'; }
+  if (p.layer) p.layer.style.transform = layerTransform(p);
+}
+
 function layoutPagesInner() {
   const W = Math.round(S.baseW * S.zoom);
   S.pageBox.forEach(p => {
@@ -1140,10 +1164,7 @@ function layoutPagesInner() {
     p.el.style.height = p.dh + 'px';
     p.layer.style.width = p.lw + 'px';
     p.layer.style.height = p.lh + 'px';
-    p.layer.style.transform =
-      r === 90 ? `translateX(${p.dw}px) rotate(90deg)` :
-      r === 180 ? `translate(${p.dw}px, ${p.dh}px) rotate(180deg)` :
-      r === 270 ? `translateY(${p.dh}px) rotate(270deg)` : 'none';
+    p.layer.style.transform = layerTransform(p);
     showCrop(p);
   });
   relayoutItems();
@@ -6477,12 +6498,7 @@ function setSkew(v, quiet) {
   skewDeg = clamp(Math.round(v * 10) / 10, -15, 15);
   $('#skewVal').textContent = (skewDeg > 0 ? '+' : '') + skewDeg.toFixed(1) + '\u00b0';
   $('#skewRule').setAttribute('aria-valuenow', skewDeg);
-  const p = S.pageBox[skewPi];
-  if (p?.cv) {
-    const d = skewDeg - pageSkew(skewPi);      // the page already shows what is baked
-    p.cv.style.transform = Math.abs(d) > 0.001 ? `rotate(${d}deg)` : '';
-    p.cv.style.transformOrigin = '50% 50%';
-  }
+  skewPreview(S.pageBox[skewPi], skewDeg - pageSkew(skewPi));   // the page already shows what is baked
   drawRule();
 }
 /* one dial, moved to whichever bar is asking — the same control in both
@@ -6495,7 +6511,7 @@ function skewInto(bar, pi) {
   requestAnimationFrame(drawRule);
 }
 function clearSkewPreview() {
-  S.pageBox.forEach(p => { if (p.cv) p.cv.style.transform = ''; });
+  S.pageBox.forEach(p => skewPreview(p, 0));
   skewDeg = 0;
 }
 $('#skewVal').addEventListener('click', () => setSkew(0));
@@ -6613,12 +6629,30 @@ $('#cropCCW').addEventListener('click', () => cropTurn(-90));
 $('#cropCW').addEventListener('click', () => cropTurn(90));
 
 $('#cropCancel').addEventListener('click', closeCrop);
-$('#cropReset').addEventListener('click', () => {
+/* Revert to original does what it says the moment it is pressed: the crop
+   is taken off, and a straightened page is drawn again from the untouched
+   original. Nothing is left half-shown for a Crop press to finish. It is
+   one undo step, and the crop bar stays open in case the next thing is a
+   fresh crop. */
+$('#cropReset').addEventListener('click', async () => {
   const p = S.pageBox[cropPi];
-  if (!p) return;
+  if (!p || skewBusy) return;
+  push();
+  p.crop = null;
   p.draft = { x0: 0, y0: 0, x1: 1, y1: 1 };
-  if (skewDeg || pageSkew(cropPi)) setSkew(0);   // the original, whole — Crop applies it
+  layoutPages();
+  if (skewDeg || pageSkew(cropPi)) {
+    setSkew(0);
+    const d = skewDelta();
+    if (d) {
+      skewBusy = true; busy(true, 'Restoring the original…');
+      try { await bakeSkew(d); } catch (e) { console.warn('revert', e); }
+      finally { skewBusy = false; busy(false); }
+    }
+  }
   paintCrop();
+  saveSoon();
+  toast('Back to the original page.', 2200);
 });
 
 /* ------------------------------------------------------------ clear a page */
