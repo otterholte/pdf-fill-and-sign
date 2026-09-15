@@ -40,6 +40,12 @@ async function readyDoc() {
   const todo = pages.filter(p => p.scanKey !== scanKeyOf(p));
   if (!todo.length) return;
   const pdfAt = S.pdf;
+  /* A page seen before comes back from the device in a few milliseconds,
+     and a card that flashes up and away for that is worse than none. Give
+     the answer a moment; only a scan that is actually running gets the card. */
+  const work = Promise.all(todo.map(p => ensureScan(p)));
+  const quick = await Promise.race([work.then(() => true), new Promise(res => setTimeout(() => res(false), 300))]);
+  if (quick || S.pdf !== pdfAt) return;
   busy(true, PREP_TITLE, 'Finding the blanks you can fill in…');
   prepNote = msg => { if (S.pdf === pdfAt && !$('#busy').hidden) busy(true, PREP_TITLE, msg); };
   let skipped = false;
@@ -49,7 +55,7 @@ async function readyDoc() {
   });
   try {
     await Promise.race([
-      Promise.all(todo.map(p => ensureScan(p))),
+      work,
       new Promise(res => setTimeout(res, 45000)),
       skip,
     ]);
@@ -110,6 +116,7 @@ const DB = (() => {
     get: k => tx('readonly', s => s.get(k)),
     set: (k, v) => tx('readwrite', s => s.put(v, k)),
     del: k => tx('readwrite', s => s.delete(k)),
+    delPrefix: k => tx('readwrite', s => s.delete(IDBKeyRange.bound(k, k + '\uffff'))),
   };
 })();
 
@@ -297,7 +304,7 @@ function saveSoon() {
       const dix = (await dixGet()).filter(d => d.id !== S.docId);
       dix.unshift({ id: S.docId, name: S.name, ts: Date.now(),
                     pages: S.pdf?.numPages || 1, kb: Math.round(S.bytes.byteLength / 1024) });
-      for (const old of dix.slice(MAX_DOCS)) { try { await DB.del('d:' + old.id); await DB.del('maps:' + old.id); } catch (_) {} }
+      for (const old of dix.slice(MAX_DOCS)) { try { await DB.del('d:' + old.id); await DB.del('maps:' + old.id); await forgetScans(old.id); } catch (_) {} }
       await dixPut(dix.slice(0, MAX_DOCS));
     } catch (_) {}
   }, 700);
@@ -2227,6 +2234,39 @@ function findCells(hs0, vs, W, H, mask) {
    bitmap. The canvas is thrown away immediately; only the measurements are
    kept, in memory, in this tab. */
 const EMPTY_SCAN = { lines: [], boxes: [], cells: [] };
+
+/* ------------------------------------------------------ remembering a scan
+   Finding the blanks is the slow part of opening a form — the page is drawn
+   at scanning size, measured, and on a photograph read with the text reader
+   — and none of it changes between one visit and the next. So what a page
+   scan found is kept on the device beside the document, and a reopened page
+   gets its blanks back in the time it takes to read a record rather than
+   the time it took to find them.
+
+   The key carries everything the answer depends on: which document (its id
+   and its exact size, since straightening rewrites the bytes but keeps the
+   id), which page, and which way up it is. Bump SCAN_CACHE_V whenever the
+   detector changes what it finds, so old answers are not served for a new
+   question. */
+const SCAN_CACHE_V = 1;
+const SCAN_FIELDS = ['scanned', 'ink', 'words', 'rawWords', 'formRules', 'formRings',
+                     'answerFontSize', 'wordKey', 'ocrKey'];
+function scanCacheKey(p, key) {
+  const i = S.pageBox.indexOf(p);
+  if (i < 0 || !S.docId || !S.bytes) return null;
+  return `scan:${S.docId}:${S.bytes.byteLength}:${i}:${key}`;
+}
+function restoreScan(p, hit) {
+  if (!hit || hit.v !== SCAN_CACHE_V || !hit.scanned) return false;
+  for (const k of SCAN_FIELDS) { if (k in hit) p[k] = hit[k]; else delete p[k]; }
+  return true;
+}
+function rememberScan(p, ck) {
+  const rec = { v: SCAN_CACHE_V, ts: Date.now() };
+  for (const k of SCAN_FIELDS) if (p[k] !== undefined) rec[k] = p[k];
+  DB.set(ck, rec).catch(() => {});                // a cache that cannot be written is just a cache
+}
+const forgetScans = id => DB.delPrefix(id ? 'scan:' + id + ':' : 'scan:').catch(() => {});
 /* The scan used to run at a fixed 1000px wide whatever the page was, which
    quietly downsampled anything bigger. A form that arrives as a photograph is
    a bitmap of 1200-2000px, and a table rule in it is a hairline one or two
@@ -2447,6 +2487,14 @@ function ensureScan(p) {
   p.scanPending = key;
   p.scanJob = scanQueue = scanQueue.catch(()=>{}).then(async () => {
     delete p.formRules;delete p.formRings;delete p.rawWords;
+    /* seen this page before? then the answer is on the device already */
+    const ck = scanCacheKey(p, key);
+    if (ck) {
+      let hit = null;
+      try { hit = await DB.get(ck); } catch (_) {}
+      if (restoreScan(p, hit)) { p.scanKey = key; p.scanPending = null; return p.scanned; }
+    }
+    let ok = false;
     const cv = document.createElement('canvas');
     try {
       try { await p.task?.promise; } catch (_) {}      // don't render a page twice at once
@@ -2672,6 +2720,7 @@ function ensureScan(p) {
         const regular=heights[Math.floor(heights.length*.1)];
         p.answerFontSize=regular?Math.min(ANSWER_FONT_SIZE,Math.max(6.75,Math.floor((regular-1.2)/.925*4)/4)):ANSWER_FONT_SIZE;
       }
+      ok = true;
     } catch (err) {
       console.warn('page scan failed', err);
       p.scanned = EMPTY_SCAN;
@@ -2679,6 +2728,7 @@ function ensureScan(p) {
     cv.width = cv.height = 0;                       // release the bitmap
     p.scanKey = key;
     p.scanPending = null;
+    if (ok && ck && S.pageBox.indexOf(p) >= 0) rememberScan(p, ck);
     return p.scanned;
   });
   return p.scanJob;
@@ -7254,7 +7304,7 @@ async function renderRecents() {
       askWipe(`Delete \u201c${d.name}\u201d?`,
               'The document and everything you added to it will be removed from this device. This cannot be undone.',
               async () => {
-                await DB.del('d:' + d.id); await DB.del('maps:' + d.id);
+                await DB.del('d:' + d.id); await DB.del('maps:' + d.id); await forgetScans(d.id);
                 await dixPut((await dixGet()).filter(x => x.id !== d.id));
                 renderRecents();
                 toast('Deleted.');
@@ -7287,6 +7337,7 @@ $('#btnWipe').addEventListener('click', () => {
           'Every saved document and every saved signature will be removed from this device. This cannot be undone.',
           async () => {
             for (const d of await dixGet()) { try { await DB.del('d:' + d.id); await DB.del('maps:' + d.id); } catch (_) {} }
+            await forgetScans();
             await DB.del('dix'); await DB.del('doc'); await DB.del('sigs');
             recentsOpen = false;
             renderRecents();
