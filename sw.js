@@ -1,5 +1,5 @@
 /* Fill & Sign service worker — offline shell + Android share-target intake. */
-const V = 'fillandsign-v14-scan-cache';
+const V = 'fillandsign-v15-arrow-keys';
 const SHARE = 'fillandsign-share';
 const SHELL = [
   './', 'index.html', 'app.css', 'app.js', 'form-layout.mjs', 'field-formats.mjs', 'manifest.webmanifest',

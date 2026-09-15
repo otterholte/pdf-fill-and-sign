@@ -4154,33 +4154,33 @@ document.addEventListener('keydown', e => {
     return;
   }
 
-  /* Up and down belong to the object, always. Left and right belong to the
-     caret while you are typing, because inside a line of words that is what
-     they can only mean — and Shift hands them to the object too, so a text
-     box can be walked sideways into place without clicking out of it and
-     back into it.
-
-     Shift with up or down is the size of the thing rather than its position:
-     the two buttons in the selection bar, on the keyboard. Nothing is lost by
-     spending Shift here — these boxes hold one short answer and there is no
-     ranged selection in them worth extending.
+  /* One rule for all four arrows, so the hand does not have to remember
+     which axis wanted Shift. Shift with any arrow *moves* the selected thing
+     — the nudge pad, on the keyboard. A plain up or down arrow changes its
+     *size* — the two buttons in the selection bar, on the keyboard. A plain
+     left or right arrow is left to the caret while you are typing, because
+     inside a line of words that is the only thing it can mean; when nothing
+     is being typed it does nothing, rather than mean something different
+     from the same key a moment earlier. Nothing is lost by spending Shift on
+     movement — these boxes hold one short answer and there is no ranged
+     selection in them worth extending.
 
      A held key goes further per press after about a second, the same way the
      pad on the phone does when you hold a corner down, and one held burst is
      one undo step rather than forty. */
   const vert = dir === 'up' || dir === 'down';
   if (dir && S.sel && !e.metaKey && !e.ctrlKey && !e.altKey && !KB.box &&
-      (vert || !typing || e.shiftKey)) {
+      (e.shiftKey || vert)) {
     e.preventDefault();
     const now = performance.now();
     const held = now - arrowAt <= 700;
     if (!held) arrowT0 = now;
     arrowAt = now;
-    if (e.shiftKey && vert) {
-      bump(dir === 'up' ? 1.06 : 1 / 1.06, held);
-    } else {
+    if (e.shiftKey) {
       if (!held) push();
       nudge(dir, now - arrowT0 > 900);
+    } else {
+      bump(dir === 'up' ? 1.06 : 1 / 1.06, held);
     }
     return;
   }

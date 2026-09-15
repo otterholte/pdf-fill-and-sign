@@ -152,7 +152,8 @@ verify the exact deployed source and behavior.
   than merely covered.
 - **Rotate** — 90° / 180° / 270° / original, per page or all pages. Objects rotate with
   the page, and objects added to an already-sideways page land upright.
-- **Undo / redo**, duplicate, and arrow keys to nudge whatever is selected
+- **Undo / redo**, duplicate, and the keyboard: Shift + arrow keys nudge whatever is
+  selected, plain up and down arrows make it bigger or smaller
 - **Save or Share** — download the PDF, or hand it to the device share sheet (Gmail,
   Outlook, Messages, Drive, Files, …). The finished screen also offers three clear
   exits — start another PDF, the other tools, or home — and a little confetti, which
