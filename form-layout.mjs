@@ -1404,6 +1404,20 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
       lines.splice(i, 1);
   }
   const connected = connectNumberLines(lines, rawWords);
+  /* A number row drawn inside a captioned box is the box's answer, so the
+     box itself is not offered as a second blank around it: one formatted
+     field, not a plain one with a formatted one inside it. */
+  for (const f of connected.fields)
+    for (let i = cells.length - 1; i >= 0; i--) {
+      const c = cells[i];
+      if (c.format || c.y1 - c.y0 > 0.08) continue;
+      if (
+        overlap(c.x0, c.x1, f.x0, f.x1) > 0.8 * (f.x1 - f.x0) &&
+        f.cy > c.y0 - 0.002 &&
+        f.cy < c.y1 + 0.002
+      )
+        cells.splice(i, 1);
+    }
   cells.push(...connected.fields);
   for (let i = lines.length - 1; i >= 0; i--)
     if (
