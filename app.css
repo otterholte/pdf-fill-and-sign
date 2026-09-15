@@ -215,13 +215,53 @@ a:hover{text-decoration:underline;}
 /* ---- why it is free: five short answers, not five paragraphs ----
    The gap belongs between the pairs, not inside them: a heading floating
    equidistant from its own answer and the next question belongs to neither. */
-.why{margin:0;}
-.why dt{
-  margin:20px 0 4px;font-size:14.5px;font-weight:650;
-  letter-spacing:-.01em;color:var(--fg);
+.why-lead{margin:0 0 14px;font-size:15px;line-height:1.55;color:var(--fg-2);}
+.why{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;}
+.why li{
+  display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border-radius:14px;
+  background:var(--bg-2);border:1px solid var(--line);
+  animation:rise .45s cubic-bezier(.2,.7,.2,1) both;
+  transition:transform .16s cubic-bezier(.2,.7,.2,1), border-color .16s ease, background .16s ease;
 }
-.why dt:first-child{margin-top:2px;}
-.why dd{margin:0;font-size:14px;line-height:1.55;color:var(--fg-2);}
+.why li:nth-child(1){animation-delay:.04s;} .why li:nth-child(2){animation-delay:.1s;}
+.why li:nth-child(3){animation-delay:.16s;} .why li:nth-child(4){animation-delay:.22s;}
+.why li:nth-child(5){animation-delay:.28s;} .why li:nth-child(6){animation-delay:.34s;}
+.why li:nth-child(7){animation-delay:.4s;}
+.why-ico{
+  flex:none;width:38px;height:38px;border-radius:11px;display:grid;place-items:center;
+  color:var(--tint,var(--accent));background:color-mix(in srgb, var(--tint,var(--accent)) 14%, transparent);
+}
+.why-ico svg{width:20px;height:20px;}
+.why li strong{display:block;font-size:14.5px;letter-spacing:-.01em;color:var(--fg);margin:1px 0 3px;line-height:1.3;}
+.why li p{margin:0;font-size:13.5px;line-height:1.5;color:var(--fg-2);}
+@media (hover:hover){
+  .why li:hover{transform:translateX(4px);border-color:color-mix(in srgb, var(--tint,var(--accent)) 45%, transparent);background:color-mix(in srgb, var(--tint,var(--accent)) 6%, var(--bg-2));}
+  .why li:hover .why-ico svg{animation:wiggle .5s ease;}
+}
+.why-sign{margin:16px 2px 14px;font-size:14.5px;color:var(--fg);font-weight:500;}
+.why-actions{display:flex;gap:10px;flex-wrap:wrap;}
+.why-actions > *{flex:1 1 180px;}
+.why-actions .btn-primary{padding:13px 20px;font-size:15px;}
+
+/* ---------- the contact form ---------- */
+.cform-lead{margin:0 0 14px;font-size:14.5px;line-height:1.55;color:var(--fg-2);}
+.cform{display:flex;flex-direction:column;gap:12px;}
+.cform label{display:block;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);}
+.cform input,.cform textarea{
+  display:block;width:100%;margin-top:7px;padding:12px 13px;font:inherit;font-size:15px;
+  border-radius:12px;border:1px solid var(--line);background:var(--bg-2);color:var(--fg);outline:none;
+  text-transform:none;letter-spacing:normal;font-weight:400;resize:vertical;
+  transition:border-color .12s ease, box-shadow .12s ease;
+}
+.cform input:focus,.cform textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);}
+.cform .btn-primary{margin-top:4px;}
+.cform-note{margin:2px 0 0;font-size:12.5px;line-height:1.5;color:var(--fg-3);}
+.cform-honey{position:absolute;left:-9999px;width:1px;height:1px;opacity:0;}
+.cform-done{display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;padding:8px 0 4px;}
+.cform-done h3{margin:6px 0 0;font-size:19px;letter-spacing:-.02em;}
+.cform-done p{margin:0 0 12px;font-size:14.5px;line-height:1.55;color:var(--fg-2);}
+.cform-done .btn-ghost,.cform-done .btn-primary{margin-top:4px;}
+
 
 /* ---------- the two "how to be quick about it" cards ----------
    Side by side where there is room, stacked where there is not. Each card
@@ -793,15 +833,17 @@ select.fld{padding-right:0;}
 /* where to go once the job is done — one quiet group, three clear exits */
 .next-up{margin-top:34px;padding-top:22px;border-top:1px solid var(--line);}
 .next-lead{margin:0 0 12px;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);}
-.next-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;}
+.next-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media (max-width:380px){ .next-grid{grid-template-columns:1fr;} }
+.next-tile small{font-size:11.5px;font-weight:500;line-height:1.35;opacity:.78;}
 .next-tile{
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
-  padding:16px 8px;border-radius:14px;border:1px solid transparent;
-  font-size:12.5px;font-weight:650;letter-spacing:-.01em;text-align:center;line-height:1.2;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;
+  padding:22px 14px 18px;border-radius:16px;border:1px solid transparent;
+  font-size:14.5px;font-weight:650;letter-spacing:-.01em;text-align:center;line-height:1.2;
   transition:transform .16s cubic-bezier(.2,.7,.2,1), box-shadow .16s ease, background .16s ease, border-color .16s ease;
 }
 .next-tile:active{transform:scale(.97);}
-.next-tile svg{width:21px;height:21px;transition:transform .2s cubic-bezier(.2,.7,.2,1);}
+.next-tile svg{width:28px;height:28px;margin-bottom:2px;transition:transform .2s cubic-bezier(.2,.7,.2,1);}
 @media (hover:hover){
   .next-tile:hover{text-decoration:none;transform:translateY(-3px);box-shadow:var(--shadow);}
   .next-tile:hover svg{transform:translateY(-2px) scale(1.12);animation:wiggle .5s ease;}
@@ -838,13 +880,13 @@ select.fld{padding-right:0;}
 #btnSave,#btnShare{position:relative;overflow:hidden;transition:transform .16s cubic-bezier(.2,.7,.2,1), box-shadow .16s ease, background .16s ease, border-color .16s ease;}
 #btnSave::after{
   content:"";position:absolute;top:-20%;bottom:-20%;left:0;width:34%;pointer-events:none;
-  background:linear-gradient(90deg, transparent, rgba(255,255,255,.34), transparent);
+  background:linear-gradient(90deg, transparent, rgba(255,255,255,.2), transparent);
   transform:translateX(-140%) skewX(-18deg);
 }
 @media (hover:hover){
-  #btnSave:hover{background:color-mix(in srgb, var(--accent) 86%, #000);transform:translateY(-2px);box-shadow:0 10px 24px color-mix(in srgb, var(--accent) 38%, transparent);}
-  #btnSave:hover::after{animation:sheen .7s ease;}
-  #btnShare:hover{background:var(--bg-3);border-color:color-mix(in srgb, var(--accent) 45%, transparent);color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow);}
+  #btnSave:hover{background:color-mix(in srgb, var(--accent) 88%, #000);transform:translateY(-1px);box-shadow:0 3px 10px color-mix(in srgb, var(--accent) 22%, transparent);z-index:1;}
+  #btnSave:hover::after{animation:sheen .8s ease;}
+  #btnShare:hover{background:var(--bg-3);border-color:color-mix(in srgb, var(--accent) 45%, transparent);color:var(--accent);transform:translateY(-1px);box-shadow:0 3px 10px rgba(15,18,22,.08);z-index:1;}
 }
 #btnSave:active,#btnShare:active{transform:translateY(0) scale(.985);box-shadow:none;}
 .t-new{background:var(--accent-soft);color:var(--accent);}

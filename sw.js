@@ -1,9 +1,9 @@
 /* Fill & Sign service worker — offline shell + Android share-target intake. */
-const V = 'fillandsign-v16-straighten-original';
+const V = 'fillandsign-v17-why-contact-folio';
 const SHARE = 'fillandsign-share';
 const SHELL = [
   './', 'index.html', 'app.css', 'app.js', 'form-layout.mjs', 'field-formats.mjs', 'manifest.webmanifest',
-  'tools.html', 'site.css', 'shrink.html', 'shrink.css', 'shrink.js',
+  'tools.html', 'site.css', 'contact.js', 'shrink.html', 'shrink.css', 'shrink.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/shrink.svg',
   'vendor/pdf.min.mjs', 'vendor/pdf.worker.min.mjs', 'vendor/pdf-lib.min.js',
   'vendor/caveat.woff2', 'vendor/dancing.woff2',

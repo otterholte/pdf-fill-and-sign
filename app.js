@@ -6706,12 +6706,10 @@ $('#btnContinue').addEventListener('click', () => {
   healing = 0;
   setTimeout(healPages, 400);
 });
-$('#btnHome').addEventListener('click', () => { stopConfetti(); closeDoc(); });
-$('#btnNewDoc').addEventListener('click', () => {
-  stopConfetti();
-  closeDoc();
-  $('#fileInput').click();          // still inside the click, so the picker opens
-});
+/* New PDF goes back to the start rather than straight into a file picker:
+   the next thing may be a photo, a scan, or a document already on the
+   device, and the start is where all of those are offered. */
+$('#btnNewDoc').addEventListener('click', () => { stopConfetti(); closeDoc(); });
 
 /* ------------------------------------------------------------- confetti
    A small reward for finishing, drawn in about forty lines: paper
