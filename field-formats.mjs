@@ -304,7 +304,7 @@ export function formatLayout(
    number, three with two alike and a longer end are a phone number, three
    split by slashes are a date with the year where the wide piece is. A label
    that does say wins over the shape. */
-function shapeKind(widths, seps = [], paren = false, kind = null) {
+function shapeKind(widths, seps = [], paren = false, kind = null, hint = null) {
   const n = widths.length;
   const slash = seps.includes("/");
   const wide = (a, b) => a > b * 1.35;
@@ -314,11 +314,11 @@ function shapeKind(widths, seps = [], paren = false, kind = null) {
     if (kind === "phone" || paren || seps[0] === ")")
       return { kind: "phone", counts: [3, 3, 4] };
     if (kind === "date" || slash) {
-      if (wide(c, a) && wide(c, b))
-        return { kind: "date", counts: [2, 2, 4], tokens: ["MM", "DD", "YYYY"] };
+      if (hint && hint.length === 3)
+        return { kind: "date", counts: hint.map((t) => t.length), tokens: hint };
       if (wide(a, b) && wide(a, c))
         return { kind: "date", counts: [4, 2, 2], tokens: ["YYYY", "MM", "DD"] };
-      return { kind: "date", counts: [2, 2, 2], tokens: ["MM", "DD", "YY"] };
+      return { kind: "date", counts: [2, 2, 4], tokens: ["MM", "DD", "YYYY"] };
     }
     if (kind) return null;                                  // a labelled kind that is not three pieces
     if (b < a * 0.85 && c > a * 1.1) return { kind: "ssn", counts: [3, 2, 4] };
@@ -353,11 +353,37 @@ export function connectNumberLines(lines, words = []) {
       row = lines
         .filter((l) => l.chain === line.chain)
         .sort((a, b) => a.x0 - b.x0);
+      if (!kind) {
+        const above = words
+          .filter(
+            (w) =>
+              w.cy < line.y - 0.008 &&
+              line.y - w.cy < 0.045 &&
+              w.x1 > row[0].x0 - 0.02 &&
+              w.x0 < row.at(-1).x1 + 0.02,
+          )
+          .map((w) => w.s)
+          .join(" ");
+        kind = kindOf(above);
+      }
+      /* "(MM/DD/YYYY)" printed beside or above the row settles the order */
+      const x0 = row[0].x0, x1 = row.at(-1).x1;
+      const printed = words.find(
+        (w) =>
+          /^\(?(MM|DD|YY|YYYY)(\/(MM|DD|YY|YYYY)){1,2}\)?$/i.test(w.s.trim()) &&
+          Math.abs(w.cy - line.y) < 0.035 &&
+          w.x1 > x0 - 0.15 &&
+          w.x0 < x1 + 0.15,
+      );
+      const hint = printed
+        ? printed.s.trim().replace(/[()]/g, "").toUpperCase().split("/")
+        : null;
       const shape = shapeKind(
         row.map((l) => l.x1 - l.x0),
         line.seps,
         line.paren,
         kind,
+        hint,
       );
       if (!shape) continue;
       kind = shape.kind;

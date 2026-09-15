@@ -831,7 +831,46 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
     const row = phraseWords(own, rules).filter(
       (w) => w.cy > c.y1 - 0.025 && w.cy < c.y1 - 0.002,
     );
-    if (width < 0.5 && !/^(from|to|ta)$/i.test(said(own))) continue;
+    /* A short cell with one word at its left and room after it is a caption
+       with its answer beside it — "First |", "Middle |", "Suffix |" — even
+       when it is narrow. Wide cells were the only ones read this way before,
+       which is how a name row lost every one of its parts. */
+    /* …but only when the word sits in the middle of a cell barely taller
+       than itself. A caption at the top of a taller cell has its answer
+       below it, and that case is already handled. */
+    const shortRow =
+      height < 0.03 &&
+      row.length === 1 &&
+      Math.abs(row[0].cy - (c.y0 + c.y1) / 2) < height * 0.25 &&
+      row[0].s.length <= 14 &&
+      c.x1 - row[0].x1 > 0.06 &&
+      own.length <= 2;
+    if (width < 0.5 && !shortRow && !/^(from|to|ta)$/i.test(said(own))) continue;
+    if (shortRow) {
+      /* the word before this row's first cell, on the same row, with no cell
+         of its own — "Last" ahead of "First" — gets one drawn for it */
+      const lead = rawWords
+        .filter(
+          (w) =>
+            /^[A-Za-z][A-Za-z.]{1,13}$/.test(w.s) &&
+            Math.abs(w.cy - row[0].cy) < 0.006 &&
+            w.x1 < c.x0 - 0.06 &&
+            c.x0 - w.x1 < 0.4 &&
+            !measured.some((m) => m !== c && w.x0 > m.x0 && w.x1 < m.x1 && m.y1 - m.y0 < 0.03 && w.cy > m.y0 && w.cy < m.y1),
+        )
+        .sort((a, b) => b.x1 - a.x1)[0];
+      if (
+        lead &&
+        !cells.some((k) => Math.abs(k.y1 - c.y1) < 0.006 && k.x1 > lead.x1 && k.x0 < c.x0) &&
+        !rawWords.some((w) => w !== lead && Math.abs(w.cy - lead.cy) < 0.006 && w.x0 > lead.x1 && w.x1 < c.x0)
+      )
+        addCell(
+          { x0: lead.x1 + 0.012, x1: c.x0 - 0.008, y0: c.y0 + 0.001, y1: c.y1 - 0.001 },
+          lead.s,
+          "inline",
+          { align: "left", multiline: false },
+        );
+    }
     for (let i = 0; i < row.length; i++) {
       const label = row[i];
       if (sectionAt(label.cy + 0.001) === clean(label.s)) continue;
@@ -977,6 +1016,21 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
       }
     }
   }
+  const UNIT = /^(ft|in|[lI1]bs?|kg|g|cm|mm|m|oz|hrs?|min|yrs?|mo|mos|yr|%|\$|ea|pcs?|qty)\.?$/i;
+  const asUnit = (s) => s.trim().replace(/[.]+$/, "").replace(/^[lI1]bs?$/i, "lbs");
+  /* the caption printed above a row of blanks, when nothing names them on
+     their own row: "Social Security Number" over "___ - __ - ____" */
+  const captionAbove = (x0, x1, y) =>
+    phrases
+      .filter(
+        (w) =>
+          w.cy < y - 0.008 &&
+          y - w.cy < 0.045 &&
+          w.x1 > x0 - 0.02 &&
+          w.x0 < x1 + 0.02 &&
+          /[a-z]{2,}/i.test(w.s),
+      )
+      .sort((a, b) => b.cy - a.cy || a.x0 - b.x0)[0];
   const leftOf = (h, y) =>
     phrases
       .filter(
@@ -1009,11 +1063,16 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
           Math.abs(v.x0 - x) < 0.005 && v.y0 < y + 0.003 && v.y1 > y - 0.003,
       );
     if (upright(h.x0) && upright(h.x1)) continue;
+    /* A rule at the height of a cell's edge is that edge — unless it is far
+       shorter than the cell, in which case it is a blank drawn just above
+       the border ("____ lbs." at the foot of a Weight box). */
+    const spans = (c) => width > (c.x1 - c.x0) * 0.7;
     if (
       measured.some(
         (c) =>
           overlap(c.x0, c.x1, h.x0, h.x1) > 0.02 &&
-          (Math.abs(c.y0 - y) < 0.003 || Math.abs(c.y1 - y) < 0.003),
+          (Math.abs(c.y0 - y) < 0.003 || Math.abs(c.y1 - y) < 0.003) &&
+          spans(c),
       )
     )
       continue;
@@ -1022,7 +1081,8 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
         (c) =>
           h.x0 >= c.x0 - 0.005 &&
           h.x1 <= c.x1 + 0.005 &&
-          (Math.abs(c.y0 - y) < 0.005 || Math.abs(c.y1 - y) < 0.005),
+          (Math.abs(c.y0 - y) < 0.005 || Math.abs(c.y1 - y) < 0.005) &&
+          spans(c),
       )
     )
       continue;
@@ -1035,6 +1095,7 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
     )
       continue;
     let left = leftOf(h, y);
+    if (left && UNIT.test(left.s.trim())) left = null;      // "ft." before "____ in." is not a label
     // The word straight after a blank names it when the blank comes first:
     // "____ Daisy ____ Brownie". Each blank there has a word on its left too,
     // but that word is the previous blank's, standing right after it.
@@ -1087,8 +1148,13 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
       continue;
     // every piece of a number row takes the row's label, which is the word
     // before its first piece
-    const chainLeft = chain ? (chain.members[0] === h ? left : leftOf(chain.members[0], chain.members[0].y0)) : null;
-    const named = chain ? chainLeft : left || rightWord;
+    let chainLeft = chain ? (chain.members[0] === h ? left : leftOf(chain.members[0], chain.members[0].y0)) : null;
+    if (chain && !(chainLeft && /[a-z]{2,}/i.test(chainLeft.s)))
+      chainLeft = captionAbove(chain.members[0].x0, chain.members.at(-1).x1, chain.members[0].y0) || null;
+    /* "____ ft." "____ lbs.": the word after is a unit, which keeps the
+       blank but does not name it — the caption above does that. */
+    const unit = rightWord && UNIT.test(rightWord.s.trim()) ? asUnit(rightWord.s) : "";
+    const named = chain ? chainLeft : left || (unit ? null : rightWord);
     const label = clean(named?.s || "");
     const fs = Math.min(0.012, Math.max(0.0095, named?.h * 1.15 || 0.0105));
     lines.push({
@@ -1102,6 +1168,7 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
       inputType: fieldType(label),
       source: chain ? "number row" : rightWord ? "underline (label after)" : "underline",
       confidence: label ? "high" : "review",
+      ...(unit ? { unit } : {}),
       ...(chain
         ? {
             chain: chain.id,

@@ -2275,7 +2275,7 @@ const EMPTY_SCAN = { lines: [], boxes: [], cells: [] };
    id), which page, and which way up it is. Bump SCAN_CACHE_V whenever the
    detector changes what it finds, so old answers are not served for a new
    question. */
-const SCAN_CACHE_V = 2;   // 2: number rows and labels after a blank
+const SCAN_CACHE_V = 3;   // 3: name rows, units, captions above number rows
 const SCAN_FIELDS = ['scanned', 'ink', 'words', 'rawWords', 'formRules', 'formRings',
                      'answerFontSize', 'wordKey', 'ocrKey'];
 function scanCacheKey(p, key) {
@@ -4607,6 +4607,7 @@ function tidyLabel(s) {
   return t;
 }
 
+const UNIT_WORD = /^(ft|in|[lI1]bs?|kg|g|cm|mm|m|oz|hrs?|min|yrs?|mo|mos|yr|%|$|ea|pcs?|qty).?$/i;
 /** the words belonging to one spot, or null if the page has nothing to read */
 function labelFor(words, sp, skipRight) {
   const mapped = sp.L || sp.C || sp.B;
@@ -4676,11 +4677,13 @@ function labelFor(words, sp, skipRight) {
   let best = null, bd = 0.30;
   for (const r of words) {
     if (Math.abs(r.cy - sp.cy) > Math.max(rowTol, (r.h || 0) * 0.8)) continue;
+    if (UNIT_WORD.test(r.s.trim())) continue;       // "ft." before "____ in." is the last blank's unit, not this one's name
     const d = sp.x - r.x1;
     if (d < -0.004 || d > bd) continue;
     bd = d; best = r;
   }
-  if (best) return tidyLabel(best.s);
+  const unit = sp.L?.unit ? ' ' + sp.L.unit : '';
+  if (best) return tidyLabel(best.s + unit);
 
   /* Above it. A row of blanks shares one row of headings, so height alone
      ties — "State" and "ZIP code" sit at exactly the same distance. Score
@@ -4694,7 +4697,7 @@ function labelFor(words, sp, skipRight) {
     const score = dy + Math.abs(r.x0 - sp.x) * 0.6;
     if (score < best2) { best2 = score; ab = r; }
   }
-  return ab ? tidyLabel(ab.s) : '';
+  return ab ? tidyLabel(ab.s + unit) : (unit ? tidyLabel(unit) : '');
 }
 
 /** every spot in the document, in reading order, with its question */
