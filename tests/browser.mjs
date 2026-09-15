@@ -409,6 +409,8 @@ try {
   // so wait for the file to have become the document first.
   await page.waitForFunction(
     () => window.__fs.S.pdf !== window.__prevPdf && document.querySelector("#busy").hidden,
+    {},
+    { timeout: 90000 },
   );
   await page.evaluate(() => document.querySelector('[data-tool="simple"]').click()); // hidden on the bar for now
   await page.waitForFunction(
@@ -539,6 +541,8 @@ try {
   // so wait for the file to have become the document first.
   await page.waitForFunction(
     () => window.__fs.S.pdf !== window.__prevPdf && document.querySelector("#busy").hidden,
+    {},
+    { timeout: 90000 },
   );
   await page.evaluate(() => document.querySelector('[data-tool="simple"]').click()); // hidden on the bar for now
   await page.waitForFunction(

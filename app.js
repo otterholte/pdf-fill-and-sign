@@ -19,7 +19,48 @@ function toast(msg, ms = 2400) {
   const t = $('#toast'); t.textContent = msg; t.hidden = false;
   clearTimeout(toastT); toastT = setTimeout(() => (t.hidden = true), ms);
 }
-function busy(on, text = 'Working…') { $('#busyText').textContent = text; $('#busy').hidden = !on; }
+function busy(on, text = 'Working…', sub = '') {
+  $('#busyText').textContent = text;
+  const s = $('#busySub'); s.textContent = sub; s.hidden = !sub;
+  if (!on) { $('#busySkip').hidden = true; clearTimeout(skipT); }
+  $('#busy').hidden = !on;
+}
+/* ---------------------------------------------------- getting a form ready
+   Opening a document is quick; knowing where the blanks are is not. The
+   page is scanned for rules and boxes and, on a photographed form, read with
+   the bundled text reader, and until that lands the page looks finished but
+   is not. So the card stays up through it, says what is happening, and comes
+   down when the pages in view know their blanks. It is never allowed to
+   become a wall: it lets go after a limit, and after a few seconds offers to
+   show the page early. */
+let prepNote = null, skipT = null;
+const PREP_TITLE = 'Getting your form ready';
+async function readyDoc() {
+  const pages = S.pageBox.filter(p => p.el.offsetTop < stageEl.scrollTop + stageEl.clientHeight * 2);
+  const todo = pages.filter(p => p.scanKey !== scanKeyOf(p));
+  if (!todo.length) return;
+  const pdfAt = S.pdf;
+  busy(true, PREP_TITLE, 'Finding the blanks you can fill in…');
+  prepNote = msg => { if (S.pdf === pdfAt && !$('#busy').hidden) busy(true, PREP_TITLE, msg); };
+  let skipped = false;
+  const skip = new Promise(res => {
+    skipT = setTimeout(() => { $('#busySkip').hidden = false; }, 6000);
+    $('#busySkip').onclick = () => { skipped = true; res(); };
+  });
+  try {
+    await Promise.race([
+      Promise.all(todo.map(p => ensureScan(p))),
+      new Promise(res => setTimeout(res, 45000)),
+      skip,
+    ]);
+  } catch (_) {}
+  finally {
+    prepNote = null;
+    $('#busySkip').onclick = null;
+    if (S.pdf === pdfAt) busy(false);
+    if (skipped) toast('The blanks will appear as soon as they are found.', 2600);
+  }
+}
 const hex2rgb = h => {
   const n = parseInt(h.slice(1), 16);
   return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
@@ -521,6 +562,7 @@ $('#btnScanGo').addEventListener('click', async () => {
        crop are one press away on the toolbar for anyone who wants them, and
        nobody is made to pass through a crop screen on the way to the form. */
     showPage();
+    await readyDoc();
   } catch (err) {
     console.error(err);
     toast('That photo could not be turned into a PDF.', 5000);
@@ -726,6 +768,7 @@ async function openFile(file) {
     const buf = await file.arrayBuffer();
     await loadDoc(buf, file.name || 'Document.pdf', [], null);
     showPage();
+    await readyDoc();
   } catch (err) {
     console.error(err);
     const locked = err?.name === 'PasswordException' || /password/i.test(err?.message || '');
@@ -2616,7 +2659,7 @@ function ensureScan(p) {
         cellsAll: cells, vrules: vs.length, bands: scan.bands.length,
         lines, boxes,
       };
-      const words = await wordsOrOcr(p);
+      const words = await wordsOrOcr(p, n => prepNote?.(n));
       if (words.length) {
         if (!p.formRules) {
           const pixels = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height);
@@ -4235,6 +4278,7 @@ async function ocrReady(onNote) {
 /** read one page with OCR, in the same shape the text layer gives */
 async function ocrPage(p, onNote) {
   const w = await ocrReady(onNote);
+  onNote?.('Reading the printed words…');
   const cv = document.createElement('canvas');
   try {
     const v0 = p.page.getViewport({ scale: 1, rotation: totalRot(p) });
@@ -7177,6 +7221,7 @@ async function renderRecents() {
         if (!full) throw new Error('gone');
         await loadDoc(full.bytes, full.name, full.items, full.rots, full.fields, full.crops);
         showPage();
+        await readyDoc();
       } catch (_) { toast('That document could not be opened.'); renderRecents(); }
       finally { busy(false); }
     });
@@ -7239,6 +7284,7 @@ async function checkShared() {
     busy(true, 'Opening…');
     await loadDoc(buf, name, [], null);
     showPage();
+    await readyDoc();
     busy(false);
     return true;
   } catch (_) { return false; }
@@ -7273,4 +7319,4 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 openQr, closeLink, LINKof: () => LINK, setSkew, bakeSkew, runSmartCrop, skewNow: () => skewDeg, paperAnalyse, renderRecents, dixGet,
                 answerLayout, groupQuestions, simSetLine, simSetCell, simSetBox, enterSpot,
                 copySel, pasteClip, setMarq, clearMarq, MARQof: () => MARQ,
-                openCrop, closeCrop, nudgeCrop, pickCrop, syncRail, turn, openRotate, cropOf };
+                openCrop, closeCrop, nudgeCrop, pickCrop, syncRail, turn, openRotate, cropOf, readyDoc };
