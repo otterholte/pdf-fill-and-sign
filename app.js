@@ -4641,17 +4641,41 @@ function setEditText(el, text, caret) {
   }
 }
 document.addEventListener('focusin', e => { if (inForm(e.target)) e.target.__hist = [editText(e.target)]; }, true);
+const caretOf = el => {
+  if (el.isContentEditable) { try { const sel = getSelection(); return sel.rangeCount ? sel.getRangeAt(0).startOffset : el.textContent.length; } catch (_) { return el.textContent.length; } }
+  return el.selectionStart ?? el.value.length;
+};
 document.addEventListener('input', e => {
   const el = e.target;
   if (!inForm(el)) return;
   const now = editText(el), hist = el.__hist || [];
   for (const prev of hist) {
-    if (typeof prev !== 'string' || now.length !== prev.length + 1) continue;
+    if (typeof prev !== 'string') continue;
     let i = 0;
     while (i < prev.length && prev[i] === now[i]) i++;
-    if (prev[i] !== ' ' || now[i] !== '.' || now[i + 1] !== ' ' || now.slice(i + 2) !== prev.slice(i + 1)) continue;
-    const fixed = prev.slice(0, i) + '  ' + prev.slice(i + 1);
-    setEditText(el, fixed, i + 2);
+    if (prev[i] !== ' ' || now[i] !== '.') continue;
+    /* a space became ". " in one keystroke (or a delete then ". ") */
+    if (now.length === prev.length + 1 && now[i + 1] === ' ' && now.slice(i + 2) === prev.slice(i + 1)) {
+      const fixed = prev.slice(0, i) + '  ' + prev.slice(i + 1);
+      setEditText(el, fixed, i + 2);
+      el.__hist = [fixed];
+      return;
+    }
+    /* a space became "." on its own, the keyboard's space to follow */
+    if (now.length === prev.length && now.slice(i + 1) === prev.slice(i + 1)) {
+      setEditText(el, prev, i + 1);
+      el.__hist = [prev];
+      return;
+    }
+  }
+  /* And whatever the keyboard did to get there: in a box with no letters
+     in it, a full stop straight after a digit and before a space or the
+     end is never part of the answer. "3.5" and "Apt. 5" are left alone. */
+  if (!/[a-z]/i.test(now) && /\d\.(?=\s|$)/.test(now)) {
+    const caret = caretOf(el);
+    let removedBefore = 0;
+    const fixed = now.replace(/(\d)\.(?=\s|$)/g, (m, d, at) => { if (at + 1 < caret) removedBefore++; return d; });
+    setEditText(el, fixed, Math.max(0, caret - removedBefore));
     el.__hist = [fixed];
     return;
   }
