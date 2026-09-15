@@ -84,7 +84,20 @@ a:hover{text-decoration:underline;}
 .btn-primary.big{font-size:17px;padding:17px 42px;}
 .btn-primary:active{transform:scale(.975);}
 .btn-primary:disabled{opacity:.35;}
-.btn-primary.wide,.btn-ghost.wide{width:100%;border-radius:var(--radius);}
+.btn-primary.wide,.btn-ghost.wide,.btn-outline.wide{width:100%;border-radius:var(--radius);}
+/* the app's own blue, for the one press the finished page is for */
+.btn-primary.accent{background:var(--accent);color:#fff;}
+/* a way back that looks like a button: off-white, a dotted line of the
+   app's blue, and a shade darker under the pointer */
+.btn-outline{
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  background:var(--bg-2);color:var(--accent);font-weight:600;font-size:15px;
+  padding:13px 20px;border-radius:999px;
+  border:1.5px dotted color-mix(in srgb, var(--accent) 70%, transparent);
+  transition:background .12s ease, border-color .12s ease;
+}
+@media (hover:hover){ .btn-outline:hover{background:var(--bg-3);border-color:var(--accent);} }
+.btn-outline:active{background:var(--bg-3);}
 .btn-ghost{
   display:inline-flex;align-items:center;justify-content:center;gap:9px;
   background:var(--bg-2); color:var(--fg); font-weight:600; font-size:15px;
@@ -776,6 +789,7 @@ select.fld{padding-right:0;}
 .namefield input{display:block;width:100%;margin-top:8px;padding:13px;font-size:15px;border-radius:12px;border:1px solid var(--line);background:var(--bg-2);color:var(--fg);outline:none;text-transform:none;letter-spacing:normal;font-weight:400;}
 .namefield input:focus{border-color:var(--accent);}
 #btnShare{margin-top:10px;}
+#btnContinue{margin-top:14px;}
 /* where to go once the job is done — one quiet group, three clear exits */
 .next-up{margin-top:34px;padding-top:22px;border-top:1px solid var(--line);}
 .next-lead{margin:0 0 12px;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--fg-3);}

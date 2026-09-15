@@ -3221,7 +3221,14 @@ pagesEl.addEventListener('pointerdown', e => {
 
   // …and tapping a marked-up blank line starts typing on it
   const hint = findHint(p, x, y);
-  if (hint) return armHintTap(e, pi, hint);
+  if (hint) {
+    /* The press must not get its default: on a mouse that default is to
+       move focus to the stage, which would take the caret straight back out
+       of the box this tap is about to put it in. Touch keeps its default so
+       the page still scrolls when the finger moves on. */
+    if (e.pointerType !== 'touch') e.preventDefault();
+    return armHintTap(e, pi, hint);
+  }
 
   /* Nothing here — which is exactly when the second tap means something. It
      never gets to overrule a tick box or a blank the scan already found:
@@ -4848,13 +4855,31 @@ async function spotsOf(pi) {
   return S.pageBox[pi] === p ? spotsForPage(pi) : [];   // document may have closed mid-scan
 }
 
+/** Whether the user is actually *in* the current spot — typing in its box,
+    focused on its field, or holding its tick box — as opposed to having
+    clicked away from it. Judged before anything is awaited, because the
+    handlers that call moveSpot blur things on the way. */
+function inSpot() {
+  const s = KB.cur;
+  if (!s || !KB.key) return false;
+  if (s.kind === 'box') return !!KB.box;
+  if (s.kind === 'field') return !!s.f?.el && document.activeElement === s.f.el;
+  const it = getSel();
+  return !!it && it.page === s.page && it.lineKey === s.key;
+}
+
 async function moveSpot(dir) {
   if (!S.pdf || !S.pageBox.length) return;
+  /* Tab means "on from here". Having clicked away from a blank, "here" is
+     still that blank, so the first Tab takes you back into it rather than
+     skipping past it to the next one — the blank you left is the one you
+     had not finished with. */
+  const back = !!KB.key && !inSpot();
   const n = S.pageBox.length;
   let pi = clamp(KB.pi || 0, 0, n - 1);
   let list = await spotsOf(pi);
   const ix = KB.key ? list.findIndex(s => s.key === KB.key) : -1;
-  let next = ix < 0 ? (dir > 0 ? 0 : list.length - 1) : ix + dir;
+  let next = ix < 0 ? (dir > 0 ? 0 : list.length - 1) : back ? ix : ix + dir;
 
   for (let hop = 0; hop <= n; hop++) {
     if (next >= 0 && next < list.length) {
