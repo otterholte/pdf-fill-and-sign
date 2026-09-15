@@ -946,15 +946,24 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
   // them but a dash, a slash or a bracket: ___-___-____, __/__/____, (___)
   // ___-____. Each piece is too short to be offered on its own, so first find
   // the rows, and let their pieces through together.
-  const allRules = [...hs, ...(rules.dashed || [])].filter(
-    (r) => r.x1 - r.x0 >= 0.014,
-  );
   const lettered = (w) => /[a-z]{2,}/i.test(w.s);
+  /* a rule with a word sitting on it is the word's baseline as the rule
+     finder saw it, not a blank — it must not seed or join a row */
+  const underText = (r) =>
+    rawWords.some(
+      (w) =>
+        /[a-z0-9]/i.test(w.s) &&
+        overlap(w.x0, w.x1, r.x0, r.x1) > (r.x1 - r.x0) * 0.3 &&
+        Math.abs(w.cy - r.y0) < 0.012,
+    );
+  const allRules = [...hs, ...(rules.dashed || [])].filter(
+    (r) => r.x1 - r.x0 >= 0.014 && !underText(r),
+  );
   const chainOf = new Map();
   {
     const sorted = allRules
       .slice()
-      .sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
+      .sort((a, b) => a.x0 - b.x0 || a.y0 - b.y0);
     const taken = new Set();
     let id = 0;
     for (const a of sorted) {
@@ -968,7 +977,7 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
             (b) =>
               !taken.has(b) &&
               !members.includes(b) &&
-              Math.abs(b.y0 - cur.y0) < 0.004 &&
+              Math.abs(b.y0 - cur.y0) < 0.005 &&
               b.x0 > cur.x1 - 0.002 &&
               b.x0 - cur.x1 < 0.05,
           )
@@ -1008,7 +1017,8 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
             .sort((p, q) => q.x1 - p.x1)[0];
         if (open && !paren) lead = { x0: open.x1 + 0.002, x1: close.x0 - 0.002 };
         if (lead) seps.unshift(")");
-        const chain = { id: id++, members, seps, paren: paren || !!lead, lead };
+        const parts = [...(lead ? [lead] : []), ...members].map((m) => ({ x0: m.x0, x1: m.x1 }));
+        const chain = { id: id++, members, seps, paren: paren || !!lead, lead, parts };
         members.forEach((m) => {
           taken.add(m);
           chainOf.set(m, chain);
@@ -1089,6 +1099,7 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
     if (
       phrases.some(
         (w) =>
+          /[a-z0-9]/i.test(w.s) &&                     // a "—" read off the rule itself is not text on it
           overlap(w.x0, w.x1, h.x0, h.x1) > width * 0.15 &&
           Math.abs(w.cy - y) < w.h * 0.65,
       )
@@ -1139,7 +1150,7 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
       (width > 0.5 || (!h.dashed && width < 0.08 && !numberRow))
     )
       continue;
-    if (y < 0.03 || y > 0.97 || h.y1 - h.y0 > 0.004) continue;
+    if (y < 0.03 || y > 0.97 || h.y1 - h.y0 > (width < 0.2 ? 0.008 : 0.004)) continue;
     if (
       sections.length &&
       (h.x0 < Math.min(...sections.map((s) => s.x0)) - 0.01 ||
@@ -1173,6 +1184,7 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
         ? {
             chain: chain.id,
             chainIndex: chain.members.indexOf(h) + (chain.lead ? 1 : 0),
+            chainParts: chain.parts,
             seps: chain.seps,
             paren: chain.paren,
           }

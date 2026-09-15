@@ -327,6 +327,8 @@ function shapeKind(widths, seps = [], paren = false, kind = null, hint = null) {
   }
   if (n === 2 && (kind === "postal" || kind === "ein"))
     return { kind, counts: capacities[kind] };
+  if (n === 2 && kind === "phone" && widths[1] > widths[0] * 1.1)
+    return { kind: "phone", counts: [3, 4] };
   if (n === 4 && (kind === "phone" || paren))
     return { kind: "phone", counts: [1, 3, 3, 4] };
   return null;
@@ -348,10 +350,13 @@ export function connectNumberLines(lines, words = []) {
     let kind = kindOf(line.label || "");
     let row, counts, tokens = null;
     if (line.chain !== undefined) {
-      /* a row the layout already found by its dashes and slashes */
-      if (line.chainIndex !== 0) continue;
-      row = lines
-        .filter((l) => l.chain === line.chain)
+      /* a row the layout already found by its dashes and slashes. Its
+         pieces are taken from the row itself, so a piece the underline
+         pass let go of (OCR read it as a dash, say) is still a part. */
+      const mates = lines.filter((l) => l.chain === line.chain);
+      if (mates.some((l) => l.chainIndex < line.chainIndex)) continue;
+      row = (line.chainParts || mates.map((l) => ({ x0: l.x0, x1: l.x1 })))
+        .map((p) => ({ x0: p.x0, x1: p.x1, y: line.y, label: line.label, __chain: line.chain }))
         .sort((a, b) => a.x0 - b.x0);
       if (!kind) {
         const above = words
@@ -410,6 +415,8 @@ export function connectNumberLines(lines, words = []) {
         continue;
     }
     if (row.length !== counts.length) continue;
+    if (line.chain !== undefined)
+      for (const l of lines) if (l.chain === line.chain) used.add(l);
     const widths = row.map((l) => l.x1 - l.x0),
       unit =
         widths.reduce((a, b) => a + b, 0) / counts.reduce((a, b) => a + b, 0);
@@ -452,7 +459,7 @@ export function connectNumberLines(lines, words = []) {
         source: "separate underlines",
       },
     });
-    row.forEach((l) => used.add(l));
+    row.forEach((l) => { if (!l.__chain) used.add(l); });
   }
   return { fields, used };
 }
