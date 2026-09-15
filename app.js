@@ -2275,7 +2275,7 @@ const EMPTY_SCAN = { lines: [], boxes: [], cells: [] };
    id), which page, and which way up it is. Bump SCAN_CACHE_V whenever the
    detector changes what it finds, so old answers are not served for a new
    question. */
-const SCAN_CACHE_V = 1;
+const SCAN_CACHE_V = 2;   // 2: number rows and labels after a blank
 const SCAN_FIELDS = ['scanned', 'ink', 'words', 'rawWords', 'formRules', 'formRings',
                      'answerFontSize', 'wordKey', 'ocrKey'];
 function scanCacheKey(p, key) {

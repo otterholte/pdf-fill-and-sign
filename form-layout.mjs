@@ -903,11 +903,105 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
       "caption",
     );
   }
+  // A printed number format is a row of short underlines with nothing between
+  // them but a dash, a slash or a bracket: ___-___-____, __/__/____, (___)
+  // ___-____. Each piece is too short to be offered on its own, so first find
+  // the rows, and let their pieces through together.
+  const allRules = [...hs, ...(rules.dashed || [])].filter(
+    (r) => r.x1 - r.x0 >= 0.014,
+  );
+  const lettered = (w) => /[a-z]{2,}/i.test(w.s);
+  const chainOf = new Map();
+  {
+    const sorted = allRules
+      .slice()
+      .sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
+    const taken = new Set();
+    let id = 0;
+    for (const a of sorted) {
+      if (taken.has(a)) continue;
+      const members = [a],
+        seps = [];
+      let cur = a;
+      for (;;) {
+        const next = sorted
+          .filter(
+            (b) =>
+              !taken.has(b) &&
+              !members.includes(b) &&
+              Math.abs(b.y0 - cur.y0) < 0.004 &&
+              b.x0 > cur.x1 - 0.002 &&
+              b.x0 - cur.x1 < 0.05,
+          )
+          .sort((p, q) => p.x0 - q.x0)[0];
+        if (!next) break;
+        const between = rawWords.filter(
+          (w) =>
+            Math.abs(w.cy - cur.y0) < 0.02 &&
+            w.x0 > cur.x1 - 0.004 &&
+            w.x1 < next.x0 + 0.004,
+        );
+        if (between.some(lettered)) break;
+        const sep = between.map((w) => w.s).join("");
+        seps.push(/\//.test(sep) ? "/" : /[()]/.test(sep) ? ")" : "-");
+        members.push(next);
+        cur = next;
+      }
+      if (members.length >= 2 && members.at(-1).x1 - members[0].x0 >= 0.06) {
+        const near = (w, dist) =>
+          Math.abs(w.cy - a.y0) < 0.02 && w.x1 <= a.x0 + 0.004 && a.x0 - w.x1 < dist;
+        const paren = rawWords.some((w) => /^\($/.test(w.s.trim()) && near(w, 0.02));
+        /* "(      ) ___-____": the area code goes in the brackets, which hold
+           no underline at all. Give the space between them a part of its own. */
+        let lead = null;
+        const close = rawWords.find((w) => /^\)$/.test(w.s.trim()) && near(w, 0.02));
+        const open =
+          close &&
+          rawWords
+            .filter(
+              (w) =>
+                /^\($/.test(w.s.trim()) &&
+                Math.abs(w.cy - a.y0) < 0.02 &&
+                w.x1 < close.x0 &&
+                close.x0 - w.x1 > 0.015 &&
+                close.x0 - w.x1 < 0.12,
+            )
+            .sort((p, q) => q.x1 - p.x1)[0];
+        if (open && !paren) lead = { x0: open.x1 + 0.002, x1: close.x0 - 0.002 };
+        if (lead) seps.unshift(")");
+        const chain = { id: id++, members, seps, paren: paren || !!lead, lead };
+        members.forEach((m) => {
+          taken.add(m);
+          chainOf.set(m, chain);
+        });
+      }
+    }
+  }
+  const leftOf = (h, y) =>
+    phrases
+      .filter(
+        (w) =>
+          w.x1 <= h.x0 + 0.006 &&
+          h.x0 - w.x1 < 0.25 &&
+          (w.s.length > 2 || /^(id|to|ta)$/i.test(w.s)) &&
+          !hs.some(
+            (b) =>
+              b !== h &&
+              Math.abs(b.y0 - y) < 0.004 &&
+              b.x0 > w.x1 + 0.003 &&
+              b.x1 < h.x0 - 0.004 &&
+              b.x1 - b.x0 > 0.035,
+          ) &&
+          y - w.cy > -0.002 &&
+          y - w.cy < Math.max(0.016, w.h * 1.4),
+      )
+      .sort((a, b) => b.x1 - a.x1)[0];
   // Open underlines are answers; closed table and section edges are not.
   for (const h of [...hs, ...(rules.dashed || [])]) {
     const y = h.y0,
       width = h.x1 - h.x0;
-    if (width < 0.045 || sections.some((s) => Math.abs(s.y - y) < 0.012))
+    const chain = chainOf.get(h);
+    if ((width < 0.045 && !chain) || sections.some((s) => Math.abs(s.y - y) < 0.012))
       continue;
     const upright = (x) =>
       vs.some(
@@ -940,32 +1034,49 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
       )
     )
       continue;
-    const left = phrases
-      .filter(
-        (w) =>
-          w.x1 <= h.x0 + 0.006 &&
-          h.x0 - w.x1 < 0.25 &&
-          (w.s.length > 2 || /^(id|to|ta)$/i.test(w.s)) &&
-          !hs.some(
-            (b) =>
-              b !== h &&
-              Math.abs(b.y0 - y) < 0.004 &&
-              b.x0 > w.x1 + 0.003 &&
-              b.x1 < h.x0 - 0.004 &&
-              b.x1 - b.x0 > 0.035,
-          ) &&
-          y - w.cy > -0.002 &&
-          y - w.cy < Math.max(0.016, w.h * 1.4),
-      )
-      .sort((a, b) => b.x1 - a.x1)[0];
+    let left = leftOf(h, y);
+    // The word straight after a blank names it when the blank comes first:
+    // "____ Daisy ____ Brownie". Each blank there has a word on its left too,
+    // but that word is the previous blank's, standing right after it.
+    let rightWord = null;
+    if (!chain) {
+      rightWord =
+        phrases
+          .filter(
+            (w) =>
+              lettered(w) &&
+              w.x0 >= h.x1 - 0.004 &&
+              w.x0 - h.x1 < 0.03 &&
+              y - w.cy > -0.002 &&
+              y - w.cy < Math.max(0.016, w.h * 1.4),
+          )
+          .sort((a, b) => a.x0 - b.x0)[0] || null;
+      const leftTrails =
+        left &&
+        hs.some(
+          (b) =>
+            b !== h &&
+            Math.abs(b.y0 - y) < 0.004 &&
+            b.x1 <= left.x0 + 0.004 &&
+            left.x0 - b.x1 < 0.03,
+        );
+      if (leftTrails) left = rightWord ? null : left;
+      if (rightWord && left) rightWord = null;   // a word on each side: the left one is the label, as ever
+      if (rightWord && rightWord.x0 - h.x0 < 0.045) rightWord = null;   // too little blank left to write on
+    }
     const numberRow = phrases.some(
       (w) =>
-        /phone|telephone|social security|ssn|\bein\b/i.test(w.s) &&
+        /phone|telephone|mobile|cell|fax|social security|ssn|\bein\b/i.test(w.s) &&
         w.x1 < h.x0 &&
         h.x0 - w.x1 < 0.5 &&
         Math.abs(y - w.cy) < 0.02,
     );
-    if (!left && (width > 0.5 || (!h.dashed && width < 0.08 && !numberRow)))
+    if (
+      !left &&
+      !rightWord &&
+      !chain &&
+      (width > 0.5 || (!h.dashed && width < 0.08 && !numberRow))
+    )
       continue;
     if (y < 0.03 || y > 0.97 || h.y1 - h.y0 > 0.004) continue;
     if (
@@ -974,19 +1085,44 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
         h.x1 > Math.max(...sections.map((s) => s.x1)) + 0.01)
     )
       continue;
-    const label = clean(left?.s || "");
-    const fs = Math.min(0.012, Math.max(0.0095, left?.h * 1.15 || 0.0105));
+    // every piece of a number row takes the row's label, which is the word
+    // before its first piece
+    const chainLeft = chain ? (chain.members[0] === h ? left : leftOf(chain.members[0], chain.members[0].y0)) : null;
+    const named = chain ? chainLeft : left || rightWord;
+    const label = clean(named?.s || "");
+    const fs = Math.min(0.012, Math.max(0.0095, named?.h * 1.15 || 0.0105));
     lines.push({
-      x0: Math.max(h.x0, left ? left.x1 + 0.003 : 0),
-      x1: h.x1,
+      x0: Math.max(h.x0, left && !chain ? left.x1 + 0.003 : 0),
+      x1: rightWord ? Math.min(h.x1, rightWord.x0 - 0.003) : h.x1,
       y,
       fs,
       clr: 0.022,
       label,
       section: sectionAt(y),
       inputType: fieldType(label),
-      source: "underline",
+      source: chain ? "number row" : rightWord ? "underline (label after)" : "underline",
       confidence: label ? "high" : "review",
+      ...(chain
+        ? {
+            chain: chain.id,
+            chainIndex: chain.members.indexOf(h) + (chain.lead ? 1 : 0),
+            seps: chain.seps,
+            paren: chain.paren,
+          }
+        : {}),
+    });
+  }
+  // the bracket space itself, as the first part of its row
+  for (const chain of new Set(chainOf.values())) {
+    if (!chain.lead) continue;
+    const first = lines.find((l) => l.chain === chain.id && l.chainIndex === 1);
+    if (!first) continue;
+    lines.push({
+      ...first,
+      x0: chain.lead.x0,
+      x1: chain.lead.x1,
+      chainIndex: 0,
+      source: "number row (brackets)",
     });
   }
   // Only rings on a printed question/option row become controls. This excludes
@@ -1203,7 +1339,11 @@ export function analyzeForm(rawWords, rules, base, rings = []) {
   const connected = connectNumberLines(lines, rawWords);
   cells.push(...connected.fields);
   for (let i = lines.length - 1; i >= 0; i--)
-    if (connected.used.has(lines[i])) lines.splice(i, 1);
+    if (
+      connected.used.has(lines[i]) ||
+      (lines[i].chain !== undefined && lines[i].x1 - lines[i].x0 < 0.045)
+    )
+      lines.splice(i, 1);
   for (const f of [...cells, ...lines]) {
     const format = numberFormat(f, rules);
     if (format) {

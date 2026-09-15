@@ -2,7 +2,7 @@
 const kindOf = (label) =>
   /social security|\bssn\b/i.test(label)
     ? "ssn"
-    : /phone|telephone|mobile|fax/i.test(label)
+    : /phone|telephone|mobile|cell|fax|\btel\b/i.test(label)
       ? "phone"
       : /\b(date|birth|dob)\b/i.test(label)
         ? "date"
@@ -299,35 +299,97 @@ export function formatLayout(
       .map((p) => p.eraseBox || p),
   };
 }
+/* What a row of blanks is for, from its shape alone when the label does not
+   say: three pieces with a short middle and a long end are a social security
+   number, three with two alike and a longer end are a phone number, three
+   split by slashes are a date with the year where the wide piece is. A label
+   that does say wins over the shape. */
+function shapeKind(widths, seps = [], paren = false, kind = null) {
+  const n = widths.length;
+  const slash = seps.includes("/");
+  const wide = (a, b) => a > b * 1.35;
+  if (n === 3) {
+    const [a, b, c] = widths;
+    if (kind === "ssn") return { kind, counts: [3, 2, 4] };
+    if (kind === "phone" || paren || seps[0] === ")")
+      return { kind: "phone", counts: [3, 3, 4] };
+    if (kind === "date" || slash) {
+      if (wide(c, a) && wide(c, b))
+        return { kind: "date", counts: [2, 2, 4], tokens: ["MM", "DD", "YYYY"] };
+      if (wide(a, b) && wide(a, c))
+        return { kind: "date", counts: [4, 2, 2], tokens: ["YYYY", "MM", "DD"] };
+      return { kind: "date", counts: [2, 2, 2], tokens: ["MM", "DD", "YY"] };
+    }
+    if (kind) return null;                                  // a labelled kind that is not three pieces
+    if (b < a * 0.85 && c > a * 1.1) return { kind: "ssn", counts: [3, 2, 4] };
+    if (Math.abs(a - b) < a * 0.3 && c > b * 1.1) return { kind: "phone", counts: [3, 3, 4] };
+    return null;
+  }
+  if (n === 2 && (kind === "postal" || kind === "ein"))
+    return { kind, counts: capacities[kind] };
+  if (n === 4 && (kind === "phone" || paren))
+    return { kind: "phone", counts: [1, 3, 3, 4] };
+  return null;
+}
+const hintFor = (kind, counts, tokens) =>
+  kind === "date"
+    ? tokens.join("/")
+    : kind === "ssn"
+      ? "123-45-6789"
+      : kind === "phone" && counts.length === 3
+        ? "123-456-7890"
+        : counts.map((n) => "0".repeat(n)).join("-");
+
 export function connectNumberLines(lines, words = []) {
   const used = new Set(),
     fields = [];
   for (const line of lines) {
-    const kind = kindOf(line.label || "");
-    if (!kind || kind === "date" || used.has(line)) continue;
-    const counts = capacities[kind],
+    if (used.has(line)) continue;
+    let kind = kindOf(line.label || "");
+    let row, counts, tokens = null;
+    if (line.chain !== undefined) {
+      /* a row the layout already found by its dashes and slashes */
+      if (line.chainIndex !== 0) continue;
+      row = lines
+        .filter((l) => l.chain === line.chain)
+        .sort((a, b) => a.x0 - b.x0);
+      const shape = shapeKind(
+        row.map((l) => l.x1 - l.x0),
+        line.seps,
+        line.paren,
+        kind,
+      );
+      if (!shape) continue;
+      kind = shape.kind;
+      counts = shape.counts;
+      tokens = shape.tokens || null;
+    } else {
+      if (!kind || kind === "date") continue;
+      counts = capacities[kind];
       row = lines
         .filter(
           (l) => l.x0 >= line.x0 - 0.001 && Math.abs(l.y - line.y) < 0.004,
         )
         .sort((a, b) => a.x0 - b.x0)
         .slice(0, counts.length);
-    if (
-      row.length !== counts.length ||
-      row
-        .slice(1)
-        .some(
-          (l, i) =>
-            l.x0 - row[i].x1 > 0.035 || (l.label && /[a-z]{3}/i.test(l.label)),
-        )
-    )
-      continue;
+      if (
+        row.length !== counts.length ||
+        row
+          .slice(1)
+          .some(
+            (l, i) =>
+              l.x0 - row[i].x1 > 0.035 || (l.label && /[a-z]{3}/i.test(l.label)),
+          )
+      )
+        continue;
+    }
+    if (row.length !== counts.length) continue;
     const widths = row.map((l) => l.x1 - l.x0),
       unit =
         widths.reduce((a, b) => a + b, 0) / counts.reduce((a, b) => a + b, 0);
     if (
       widths.some(
-        (w, i) => w / counts[i] < unit * 0.55 || w / counts[i] > unit * 1.5,
+        (w, i) => w / counts[i] < unit * 0.45 || w / counts[i] > unit * 1.8,
       )
     )
       continue;
@@ -337,6 +399,7 @@ export function connectNumberLines(lines, words = []) {
       y0: l.y - 0.016,
       y1: l.y - 0.001,
       capacity: counts[i],
+      ...(tokens ? { token: tokens[i] } : {}),
     }));
     const x0 = parts[0].x0,
       x1 = parts.at(-1).x1,
@@ -352,13 +415,13 @@ export function connectNumberLines(lines, words = []) {
       cx: (x0 + x1) / 2,
       cy: (y0 + y1) / 2,
       label: line.label,
-      inputType: kind === "phone" ? "tel" : "text",
+      inputType: kind === "phone" ? "tel" : kind === "date" ? "date" : "text",
       multiline: false,
       align: "center",
       source: "segmented underline",
       format: {
         kind,
-        hint: counts.map((n) => "0".repeat(n)).join("-"),
+        hint: hintFor(kind, counts, tokens),
         parts,
         source: "separate underlines",
       },
