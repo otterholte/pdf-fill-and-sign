@@ -798,11 +798,55 @@ select.fld{padding-right:0;}
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
   padding:16px 8px;border-radius:14px;border:1px solid transparent;
   font-size:12.5px;font-weight:650;letter-spacing:-.01em;text-align:center;line-height:1.2;
-  transition:transform .12s ease, opacity .12s ease;
+  transition:transform .16s cubic-bezier(.2,.7,.2,1), box-shadow .16s ease, background .16s ease, border-color .16s ease;
 }
-.next-tile:hover{text-decoration:none;opacity:.85;}
 .next-tile:active{transform:scale(.97);}
-.next-tile svg{width:21px;height:21px;}
+.next-tile svg{width:21px;height:21px;transition:transform .2s cubic-bezier(.2,.7,.2,1);}
+@media (hover:hover){
+  .next-tile:hover{text-decoration:none;transform:translateY(-3px);box-shadow:var(--shadow);}
+  .next-tile:hover svg{transform:translateY(-2px) scale(1.12);animation:wiggle .5s ease;}
+  .t-new:hover{background:color-mix(in srgb, var(--accent) 16%, var(--accent-soft));border-color:color-mix(in srgb, var(--accent) 35%, transparent);}
+  .t-tools:hover{background:color-mix(in srgb, var(--tools) 16%, var(--tools-soft));border-color:color-mix(in srgb, var(--tools) 35%, transparent);}
+  .t-home:hover{background:var(--bg-3);border-color:var(--fg-3);}
+}
+@keyframes wiggle{0%,100%{rotate:0deg;}30%{rotate:-8deg;}60%{rotate:8deg;}}
+
+/* The finish is a small occasion. Everything on the page arrives in order,
+   the tick pops and draws itself, and the buttons answer the pointer —
+   a lift and a sweep of light on Save — so the end of the job feels like
+   one, not like a form that happened to stop. */
+@keyframes rise{from{opacity:0;transform:translateY(14px);}to{opacity:1;transform:none;}}
+@keyframes pop{0%{transform:scale(.4);opacity:0;}60%{transform:scale(1.12);opacity:1;}100%{transform:scale(1);}}
+@keyframes draw{to{stroke-dashoffset:0;}}
+@keyframes sheen{from{transform:translateX(-140%) skewX(-18deg);}to{transform:translateX(240%) skewX(-18deg);}}
+.done-inner > *{animation:rise .55s cubic-bezier(.2,.7,.2,1) both;}
+.done-inner > :nth-child(1){animation-delay:0s;}
+.done-inner > :nth-child(2){animation-delay:.08s;}
+.done-inner > :nth-child(3){animation-delay:.14s;}
+.done-inner > :nth-child(4){animation-delay:.2s;}
+.done-inner > :nth-child(5){animation-delay:.26s;}
+.done-inner > :nth-child(6){animation-delay:.32s;}
+.done-inner > :nth-child(7){animation-delay:.38s;}
+.done-inner > :nth-child(8){animation-delay:.44s;}
+.done-inner > :nth-child(n+9){animation-delay:.5s;}
+.done-tick{animation:pop .6s cubic-bezier(.2,.8,.2,1.2) both;}
+.done-tick svg path{stroke-dasharray:30;stroke-dashoffset:30;animation:draw .45s .35s ease-out forwards;}
+.next-grid .next-tile{animation:rise .5s cubic-bezier(.2,.7,.2,1) both;}
+.next-grid .next-tile:nth-child(1){animation-delay:.55s;}
+.next-grid .next-tile:nth-child(2){animation-delay:.63s;}
+.next-grid .next-tile:nth-child(3){animation-delay:.71s;}
+#btnSave,#btnShare{position:relative;overflow:hidden;transition:transform .16s cubic-bezier(.2,.7,.2,1), box-shadow .16s ease, background .16s ease, border-color .16s ease;}
+#btnSave::after{
+  content:"";position:absolute;top:-20%;bottom:-20%;left:0;width:34%;pointer-events:none;
+  background:linear-gradient(90deg, transparent, rgba(255,255,255,.34), transparent);
+  transform:translateX(-140%) skewX(-18deg);
+}
+@media (hover:hover){
+  #btnSave:hover{background:color-mix(in srgb, var(--accent) 86%, #000);transform:translateY(-2px);box-shadow:0 10px 24px color-mix(in srgb, var(--accent) 38%, transparent);}
+  #btnSave:hover::after{animation:sheen .7s ease;}
+  #btnShare:hover{background:var(--bg-3);border-color:color-mix(in srgb, var(--accent) 45%, transparent);color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow);}
+}
+#btnSave:active,#btnShare:active{transform:translateY(0) scale(.985);box-shadow:none;}
 .t-new{background:var(--accent-soft);color:var(--accent);}
 .t-tools{background:var(--tools-soft);color:var(--tools);}
 .t-home{background:var(--bg-2);border-color:var(--line);color:var(--fg-2);}

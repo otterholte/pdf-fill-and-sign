@@ -279,6 +279,7 @@ $('#btnRedo').addEventListener('click', redo);
    would be asking every day. */
 const MAX_DOCS = 30;
 let keepDocId = null;      // a rebuild of the same document keeps its place
+let pendingSrc = null;     // the untouched original, handed to the next loadDoc
 async function docId(buf) {
   try {
     const h = await crypto.subtle.digest('SHA-256', buf.slice(0));
@@ -300,6 +301,7 @@ function saveSoon() {
         fields: S.fields,
         rots: S.pageBox.map(p => p.userRot),
         crops: S.pageBox.map(p => p.crop || null), ts: Date.now(),
+        src: S.src || null,
       });
       const dix = (await dixGet()).filter(d => d.id !== S.docId);
       dix.unshift({ id: S.docId, name: S.name, ts: Date.now(),
@@ -786,12 +788,15 @@ async function openFile(file) {
 }
 
 async function loadDoc(buf, name, items, rots, fields, crops) {
+  const rebuilt = !!keepDocId;               // the same document, redrawn straighter
   S.bytes = buf.slice(0);
   S.name = name;
   S.docId = keepDocId || await docId(S.bytes);
   try { S.fieldEdits = await DB.get('maps:' + S.docId) || {}; }
   catch (_) { S.fieldEdits = {}; }
   keepDocId = null;
+  if (!rebuilt) S.src = pendingSrc || null;
+  pendingSrc = null;
   /* Opening a file this device has seen before finds the work already on it —
      unless this call is itself carrying state (a restore, or a fresh scan). */
   if (!items?.length && !fields) {
@@ -801,6 +806,7 @@ async function loadDoc(buf, name, items, rots, fields, crops) {
         items = prev.items; rots = rots ?? prev.rots;
         fields = prev.fields; crops = crops ?? prev.crops;
         if (prev.name) name = S.name = prev.name;
+        if (prev.src) S.src = prev.src;
       }
     } catch (_) {}
   }
@@ -844,7 +850,7 @@ function closeDoc() {
   $('#home').hidden = false;
   pagesEl.innerHTML = '';
   try { S.pdf?.destroy?.(); } catch (_) {}
-  S.pdf = null; S.bytes = null; S.items = []; S.sel = null; S.tool = null; lastBlob = null;
+  S.pdf = null; S.bytes = null; S.src = null; S.items = []; S.sel = null; S.tool = null; lastBlob = null;
   S.fields = {}; S.fields0 = {}; formToldOnce = false;
   S.pageBox = [];
   SIM = { qs: [], scanned: false, built: false };
@@ -5267,7 +5273,7 @@ function labelRot() {
   $('#rotHint').textContent = n > 1 ? `Page ${i + 1} of ${n}` : 'This page';
 }
 async function turn(by) {
-  if (skewDeg) { const d = skewDeg; skewBusy = true; try { await bakeSkew(d); } finally { skewBusy = false; } }
+  { const d = skewDelta(); if (d) { skewBusy = true; try { await bakeSkew(d); } finally { skewBusy = false; } } }
   const all = $('#rotAll').checked;
   const i = +$('#rotbar').dataset.page;
   const p0 = S.pageBox[i];
@@ -5283,8 +5289,8 @@ async function turn(by) {
 $('#rotCCW').addEventListener('click', () => turn(-90));
 $('#rotCW').addEventListener('click', () => turn(90));
 $('#rotDone').addEventListener('click', async () => {
-  if (skewDeg) {
-    const d = skewDeg;
+  const d = skewDelta();
+  if (d) {
     push(); busy(true, 'Straightening…');
     try { await bakeSkew(d); } catch (e) { console.warn('straighten', e); }
     busy(false);
@@ -6091,8 +6097,8 @@ $('#cropApply').addEventListener('click', async () => {
   if (!p) return closeCrop();
   /* Turn first, then trim: a crop is a rectangle on a page, and which part of
      the paper it covers depends on which way the paper is lying. */
-  if (skewDeg) {
-    const deg = skewDeg;
+  const deg = skewDelta();
+  if (deg) {
     push();
     busy(true, 'Straightening…');
     try { await bakeSkew(deg); } catch (e) { console.warn('straighten', e); }
@@ -6429,6 +6435,14 @@ $('#cropSmart').addEventListener('click', runSmartCrop);
    what makes "line the writing up with this edge" possible — and the turn is
    written into the document when Crop is pressed. */
 let skewDeg = 0, skewBusy = false, skewPi = -1;
+/* The turn already written into a page. Straightening is never applied to a
+   copy that was itself straightened: the untouched original is kept in
+   S.src and every turn is drawn from it afresh with the page's *net* angle.
+   So over-turning and turning back does not stack two clipped corners, the
+   dial always shows where the page really stands, and 0.0° is the original
+   page exactly — nothing thrown away. */
+const pageSkew = pi => S.src?.skews?.[pi] || 0;
+const skewDelta = () => Math.round((skewDeg - pageSkew(skewPi)) * 10) / 10;
 const PPD = 9;                                   // pixels per degree on the rule
 function drawRule() {
   const cv = $('#skewRule');
@@ -6465,7 +6479,8 @@ function setSkew(v, quiet) {
   $('#skewRule').setAttribute('aria-valuenow', skewDeg);
   const p = S.pageBox[skewPi];
   if (p?.cv) {
-    p.cv.style.transform = skewDeg ? `rotate(${skewDeg}deg)` : '';
+    const d = skewDeg - pageSkew(skewPi);      // the page already shows what is baked
+    p.cv.style.transform = Math.abs(d) > 0.001 ? `rotate(${d}deg)` : '';
     p.cv.style.transformOrigin = '50% 50%';
   }
   drawRule();
@@ -6476,7 +6491,7 @@ function skewInto(bar, pi) {
   skewPi = pi;
   const row = $('#skewRow');
   bar.prepend(row);
-  setSkew(0, true);
+  setSkew(pageSkew(pi), true);
   requestAnimationFrame(drawRule);
 }
 function clearSkewPreview() {
@@ -6510,15 +6525,16 @@ $('#skewRule').addEventListener('keydown', e => {
 /* Write the turn into the document. The page is redrawn as itself, turned
    about its middle — vectors stay vectors, a photograph stays a photograph —
    and everything already placed on that page turns with it. */
-async function straightenBytes(pi, deg) {
-  const src = await PDFDocument.load(S.bytes.slice(0), { ignoreEncryption: true });
+async function straightenBytes(skews) {
+  const src = await PDFDocument.load(S.src.bytes.slice(0), { ignoreEncryption: true });
   const out = await PDFDocument.create();
   for (let i = 0; i < src.getPageCount(); i++) {
     const sp = src.getPage(i);
     const w = sp.getWidth(), h = sp.getHeight();
     const emb = await out.embedPage(sp);
     const np = out.addPage([w, h]);
-    if (i === pi) {
+    const deg = skews[i] || 0;
+    if (deg) {
       np.drawRectangle({ x: 0, y: 0, width: w, height: h, color: rgb(1, 1, 1) });
       /* the dial turns clockwise on screen; a PDF turns the other way */
       const f = -deg * Math.PI / 180, cx = w / 2, cy = h / 2;
@@ -6538,6 +6554,13 @@ async function straightenBytes(pi, deg) {
 async function bakeSkew(deg) {
   const pi = skewPi, p = S.pageBox[pi];
   if (!p || !deg) return false;
+  /* the first turn on a document puts the original aside; every turn after
+     is drawn from that original with the new net angle */
+  if (!S.src) S.src = { bytes: S.bytes.slice(0), skews: [] };
+  const skews = S.src.skews.slice();
+  let net = Math.round(((skews[pi] || 0) + deg) * 10) / 10;
+  if (Math.abs(net) < 0.05) net = 0;
+  skews[pi] = net;
   const draft = p.draft ? { ...p.draft } : null;
   const rots = S.pageBox.map(b => b.userRot);
   const crops = S.pageBox.map(b => b.crop || null);
@@ -6549,11 +6572,14 @@ async function bakeSkew(deg) {
     it.x = (dx * Math.cos(t) - dy * Math.sin(t)) / Wl + 0.5;
     it.y = (dx * Math.sin(t) + dy * Math.cos(t)) / Hl + 0.5;
   }
-  const bytes = await straightenBytes(pi, deg);
+  const straight = skews.some(Boolean);
+  const bytes = straight ? await straightenBytes(skews) : new Uint8Array(S.src.bytes.slice(0));
+  const src = straight ? { bytes: S.src.bytes, skews } : null;   // back at 0°, the copy *is* the original
   clearSkewPreview();
   keepDocId = S.docId;
   await loadDoc(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
                 S.name, S.items, rots, S.fields, crops);
+  S.src = src;
   showPage();
   if (draft !== null || cropPi >= 0) {
     openCrop();
@@ -6568,7 +6594,7 @@ async function bakeSkew(deg) {
    frame of the page as it stands, so it is carried through the turn the same
    way a committed crop is, and lands on the same part of the paper. */
 async function cropTurn(by) {
-  if (skewDeg) { const d = skewDeg; skewBusy = true; try { await bakeSkew(d); } finally { skewBusy = false; } }
+  { const d = skewDelta(); if (d) { skewBusy = true; try { await bakeSkew(d); } finally { skewBusy = false; } } }
   const p = S.pageBox[cropPi];
   if (!p) return;
   const from = totalRot(p);
@@ -6591,6 +6617,7 @@ $('#cropReset').addEventListener('click', () => {
   const p = S.pageBox[cropPi];
   if (!p) return;
   p.draft = { x0: 0, y0: 0, x1: 1, y1: 1 };
+  if (skewDeg || pageSkew(cropPi)) setSkew(0);   // the original, whole — Crop applies it
   paintCrop();
 });
 
@@ -7294,6 +7321,7 @@ async function renderRecents() {
       try {
         const full = await DB.get('d:' + d.id);
         if (!full) throw new Error('gone');
+        pendingSrc = full.src || null;
         await loadDoc(full.bytes, full.name, full.items, full.rots, full.fields, full.crops);
         showPage();
         await readyDoc();
@@ -7392,7 +7420,7 @@ window.__fs = { S, loadDoc, buildPdf, FMTS, pageLines, findLine, allFields, fiel
                 scanPanels, scanCanvas, shotsToPdf, SCANof: () => SCAN, select, finalName, renderVisible,
                 MARKS: { path: MARK_PATH, width: MARK_W }, markCanvas,
                 zoomFloor, zoomTo, paperEdges, setDocName, paintItems,
-                openQr, closeLink, LINKof: () => LINK, setSkew, bakeSkew, runSmartCrop, skewNow: () => skewDeg, paperAnalyse, renderRecents, dixGet,
+                openQr, closeLink, LINKof: () => LINK, setSkew, bakeSkew, runSmartCrop, skewNow: () => skewDeg, pageSkew, skewDelta, SRCof: () => S.src, paperAnalyse, renderRecents, dixGet,
                 answerLayout, groupQuestions, simSetLine, simSetCell, simSetBox, enterSpot,
                 copySel, pasteClip, setMarq, clearMarq, MARQof: () => MARQ,
                 openCrop, closeCrop, nudgeCrop, pickCrop, syncRail, turn, openRotate, cropOf, readyDoc };
