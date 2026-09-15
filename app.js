@@ -517,12 +517,10 @@ $('#btnScanGo').addEventListener('click', async () => {
     SCAN.shots = [];
     closeLink();          // the phone's address dies with the hand-off
     await loadDoc(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), name, [], null);
-    /* A photograph goes straight to the crop screen: the page has already
-       been straightened, smart crop offers the paper, and the same bar can
-       turn it — one screen between the camera and the filling-in. */
+    /* A photograph opens like any other document. The crop and the smart
+       crop are one press away on the toolbar for anyone who wants them, and
+       nobody is made to pass through a crop screen on the way to the form. */
     showPage();
-    openCrop();
-    runSmartCrop();
   } catch (err) {
     console.error(err);
     toast('That photo could not be turned into a PDF.', 5000);
@@ -1284,8 +1282,8 @@ window.addEventListener('resize', () => {
    page one with no way to see a whole page at once. So the floor is whatever
    it takes to stand one entire page in the window — and never above 1, which
    is what it works out to on a phone anyway, so nothing changes there. */
-function zoomFloor() {
-  const p = S.pageBox[0];
+function fitZoom(i) {
+  const p = S.pageBox[i];
   if (!p || !S.baseW) return 1;
   const flip = totalRot(p) % 180 !== 0;
   const h1 = S.baseW * (flip ? p.uw / p.uh : p.uh / p.uw);   // page height at zoom 1
@@ -1293,6 +1291,7 @@ function zoomFloor() {
   if (h1 <= 0 || room <= 0) return 1;
   return clamp(room / h1, 0.25, 1);
 }
+function zoomFloor() { return fitZoom(0); }
 function zoomTo(z, mx, my) {
   const z0 = S.zoom;
   S.zoom = clamp(z, zoomFloor(), 6);
@@ -3673,7 +3672,12 @@ function startDrag(e, d) {
   const up = ev => {
     if (ev && ev.pointerId !== pid) return;
     off();
-    if (!moved && isText(it) && !it.date && wasSel && !editing) edit(d);
+    /* A mouse click on a text box is a request to type in it, first click or
+       not: the pointer is precise enough that "select" and "edit" are the
+       same gesture. A finger keeps the two-step, since a tap that merely
+       lands on a box while scrolling should not summon the keyboard. */
+    if (!moved && isText(it) && !it.date && !editing &&
+        (wasSel || e.pointerType !== 'touch')) edit(d);
     /* Dragging a box you were typing into hands the caret back when you let
        go. You moved it because it was in the wrong place, not because you
        changed your mind about writing in it — having to tap it again to carry
@@ -4044,7 +4048,7 @@ document.addEventListener('keydown', e => {
   /* While the crop bar is open the arrows belong to the crop: same idea as
      the on-screen pad beside it, and the only way to take a precise slice off
      an edge with a trackpad. Shift strides. */
-  if (dir && cropPi >= 0 && !typing) {
+  if (dir && cropPi >= 0 && cropSel && !typing) {
     e.preventDefault();
     nudgeCrop(dir, e.shiftKey);
     return;
@@ -5130,7 +5134,6 @@ function openRotate() {
   $('#rotbar').dataset.page = currentPage();
   $('#rotbar').hidden = false;
   $('#editor').classList.add('busytool');
-  skewInto($('#rotbar'), +$('#rotbar').dataset.page);
   labelRot();
   revealPage(+$('#rotbar').dataset.page);
 }
@@ -5224,6 +5227,9 @@ $$('.tab').forEach(t => t.addEventListener('click', () => {
   $$('.pane').forEach(p => (p.hidden = p.dataset.pane !== sigTab));
   $('#penWrapSheet').hidden = sigTab === 'photo';
   updateUse();
+  /* A timeout rather than a frame: a frame never comes in a background tab,
+     and the caret should be waiting whenever the sheet is next looked at. */
+  if (sigTab === 'type' && HAS_KEYBOARD) setTimeout(() => $('#typeName').focus(), 0);
 }));
 $('#penPad').addEventListener('input', e => {
   pen = +e.target.value;
@@ -5786,7 +5792,8 @@ function frontPage() {
    top-left corner, and every entry says which of x0/x1 and y0/y1 it owns. */
 const CROP_GRIP = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 const MIN_CROP = 0.08;
-let cropSel = 'se';                       // the handle the arrows will move
+let cropSel = null;                       // the handle the arrows will move, once one is picked
+let cropZoom0 = null;                     // the zoom you were at before the crop opened
 
 function paintCrop() {
   S.pageBox.forEach(p => p.el.querySelector('.cropmask')?.remove());
@@ -5829,16 +5836,19 @@ function cropEdge(c, k, dx, dy) {
 const CROP_LABEL = { n: 'Top edge', s: 'Bottom edge', e: 'Right edge', w: 'Left edge',
                      nw: 'Top-left', ne: 'Top-right', sw: 'Bottom-left', se: 'Bottom-right' };
 function pickCrop(k) {
-  cropSel = k;
+  cropSel = k || null;
   $('#cropHint').textContent = CROP_LABEL[k] || 'Drag an edge or a corner';
-  /* An edge only moves along one axis, so only that axis is offered. Two dead
-     arrows beside two live ones is a worse answer to "which way does this
-     go?" than showing the two that work. Corners keep all four. */
-  const axis = k.length === 1 ? (k === 'n' || k === 's' ? 'y' : 'x') : null;
+  /* The arrows only mean something once there is a handle for them to move,
+     so until one is picked there are none. An edge only moves along one
+     axis, so only that axis is offered. Two dead arrows beside two live ones
+     is a worse answer to "which way does this go?" than showing the two that
+     work. Corners keep all four. */
+  const axis = !k ? 'none' : k.length === 1 ? (k === 'n' || k === 's' ? 'y' : 'x') : null;
   $$('#cropNudge .nud').forEach(b => {
     const mine = b.classList.contains('nud-y') ? 'y' : 'x';
     b.hidden = !!axis && axis !== mine;
   });
+  $('#cropNudge').hidden = !k;
   paintCrop();
 }
 
@@ -5847,7 +5857,7 @@ function pickCrop(k) {
    One press is a fifth of a percent of the page; held down, or with Shift,
    it strides. The arrow keys do it too while the crop bar is open. */
 function nudgeCrop(dir, far) {
-  if (cropPi < 0) return;
+  if (cropPi < 0 || !cropSel) return;
   const p = S.pageBox[cropPi];
   if (!p?.draft) return;
   const step = far ? 0.01 : 0.002;
@@ -5884,7 +5894,13 @@ function openCrop() {
   $('#editor').classList.add('cropping');
   skewInto($('#cropbar'), cropPi);
   showCrop(p);                            // show it whole again while you work
-  pickCrop(cropSel);
+  /* The whole page, every edge of it in view: you cannot drag a corner you
+     cannot see, and a crop is a decision about the whole sheet. The zoom you
+     came in at is put back when you leave. */
+  cropZoom0 = S.zoom;
+  const fit = fitZoom(cropPi);
+  if (S.zoom > fit + 0.001) { S.zoom = fit; layoutPages(); renderVisible(); }
+  pickCrop(null);
   revealPage(cropPi);
 }
 function closeCrop() {
@@ -5895,7 +5911,11 @@ function closeCrop() {
   $('#cropbar').hidden = true;
   $('#editor').classList.remove('cropping');
   if (p) showCrop(p);
-  paintCrop();
+  pickCrop(null);
+  if (cropZoom0 !== null) {
+    const z = cropZoom0; cropZoom0 = null;
+    if (Math.abs(z - S.zoom) > 0.001) { S.zoom = clamp(z, zoomFloor(), 6); layoutPages(); renderVisible(); }
+  }
 }
 
 /** Put a page in view — the crop bar is no use if the page is off screen.
@@ -5913,6 +5933,11 @@ function revealPage(i) {
   });
 }
 
+stageEl.addEventListener('pointerdown', e => {
+  if (cropPi < 0 || !cropSel || !e.isPrimary) return;
+  if (e.target.closest('.crophandle')) return;
+  pickCrop(null);
+}, true);
 pagesEl.addEventListener('pointerdown', e => {
   const h = e.target.closest('.crophandle');
   if (!h || cropPi < 0) return;

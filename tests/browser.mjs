@@ -73,10 +73,9 @@ try {
     .setInputFiles(path.join(root, "employment-blank.jpg"));
   await page.locator("#scanPrev").waitFor({ state: "visible" });
   await page.locator("#btnScanGo").click();
-  await page.locator("#cropCancel").waitFor({ state: "visible" });
-  await page.locator("#cropCancel").click();
+  await page.waitForFunction(() => window.__fs.S.pageBox.length > 0 && !document.querySelector("#editor").hidden); // the photo opens as a document; the crop is a tool, not a screen
   const start = Date.now();
-  await page.locator('[data-tool="simple"]').click();
+  await page.evaluate(() => document.querySelector('[data-tool="simple"]').click()); // hidden on the bar for now
   await page.waitForFunction(
     () => window.__fs.SIMof().built,
     {},
@@ -295,7 +294,7 @@ try {
     path: path.join(out, "page-view.png"),
     fullPage: true,
   });
-  await page.locator('[data-tool="simple"]').click();
+  await page.evaluate(() => document.querySelector('[data-tool="simple"]').click()); // hidden on the bar for now
   await page.waitForFunction(() => window.__fs.SIMof().built);
   // A previous bug returned a checkbox value instead of the cell's text.
   const firstCell = truth.fields.findIndex(
@@ -400,12 +399,18 @@ try {
     return [...(await doc.save())];
   });
   await page.evaluate(() => window.__fs.showPage());
+  await page.evaluate(() => { window.__prevPdf = window.__fs.S.pdf; });
   await page.locator("#fileInput").setInputFiles({
     name: "signature-fixture.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from(fixture),
   });
-  await page.locator('[data-tool="simple"]').click();
+  // A button on the bar waited to be clickable; a programmatic click does not,
+  // so wait for the file to have become the document first.
+  await page.waitForFunction(
+    () => window.__fs.S.pdf !== window.__prevPdf && document.querySelector("#busy").hidden,
+  );
+  await page.evaluate(() => document.querySelector('[data-tool="simple"]').click()); // hidden on the bar for now
   await page.waitForFunction(
     () => window.__fs.SIMof().built,
     {},
@@ -510,9 +515,8 @@ try {
     .setInputFiles(path.join(root, "employment-blank.jpg"));
   await page.locator("#scanPrev").waitFor({ state: "visible" });
   await page.locator("#btnScanGo").click();
-  await page.locator("#cropCancel").waitFor({ state: "visible" });
-  await page.locator("#cropCancel").click();
-  await page.locator('[data-tool="simple"]').click();
+  await page.waitForFunction(() => window.__fs.S.pageBox.length > 0 && !document.querySelector("#editor").hidden); // the photo opens as a document; the crop is a tool, not a screen
+  await page.evaluate(() => document.querySelector('[data-tool="simple"]').click()); // hidden on the bar for now
   await page.waitForFunction(
     () => window.__fs.SIMof().built,
     {},
@@ -525,12 +529,18 @@ try {
   );
   // Reopen the exact saved document: a newly generated scan is a new document.
   await page.evaluate(() => window.__fs.showPage());
+  await page.evaluate(() => { window.__prevPdf = window.__fs.S.pdf; });
   await page.locator("#fileInput").setInputFiles({
     name: "reopened-employment.pdf",
     mimeType: "application/pdf",
     buffer: Buffer.from(originalPdfBytes),
   });
-  await page.locator('[data-tool="simple"]').click();
+  // A button on the bar waited to be clickable; a programmatic click does not,
+  // so wait for the file to have become the document first.
+  await page.waitForFunction(
+    () => window.__fs.S.pdf !== window.__prevPdf && document.querySelector("#busy").hidden,
+  );
+  await page.evaluate(() => document.querySelector('[data-tool="simple"]').click()); // hidden on the bar for now
   await page.waitForFunction(
     () => window.__fs.SIMof().built,
     {},

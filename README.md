@@ -13,7 +13,7 @@ No account. No upload. No trial. No watermark. No surprise paywall.
 ## Local field analysis and regression tests
 
 The app now reads scanned forms with the bundled Tesseract worker in both Page
-view and **Fill fields** (the question view). Nothing leaves the device. No API
+view and **Fill fields** (the question view, currently hidden from the toolbar). Nothing leaves the device. No API
 key, cloud model, or form-specific coordinate template is used by the detector.
 
 The structural pass in `form-layout.mjs` combines printed words with underlines,

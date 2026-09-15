@@ -50,8 +50,8 @@ try {
     .locator("#picInput")
     .setInputFiles(`tests/fixtures/${fixture}-blank.png`);
   await page.locator("#btnScanGo").click();
-  await page.locator("#cropCancel").click();
-  await page.locator('[data-tool="simple"]').click();
+  await page.waitForFunction(() => window.__fs.S.pageBox.length > 0 && !document.querySelector("#editor").hidden); // the photo opens as a document; the crop is a tool, not a screen
+  await page.evaluate(() => document.querySelector('[data-tool="simple"]').click()); // hidden on the bar for now
   await page.waitForFunction(
     () => window.__fs.SIMof().built,
     {},
