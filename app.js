@@ -1057,6 +1057,7 @@ function paintFields() {
       }
       el.className = 'fld fld-' + f.type;
       el.dataset.name = f.name;
+      formKeys(el);
       el.title = f.name;
       // whichever field you land in becomes the place Next carries on from
       el.addEventListener('focus', () => markSpot(pi, `f:${pi}:${fi}`));
@@ -2814,6 +2815,7 @@ function itemEl(it) {
     const t = document.createElement('div');
     t.className = 'it-text';
     t.dataset.ph = 'Type…';
+    formKeys(t);
     t.textContent = textOf(it);
     t.style.color = it.color;
     d.append(t);
@@ -3601,7 +3603,7 @@ function edit(d) {
   const t = d.firstChild;
   const current=S.items.find(i=>i.id===d.dataset.id);
   if(current?.answer?.format) {
-    const inp=document.createElement('input');inp.className='number-editor';inp.value=current.text;inp.placeholder=current.answer.format.hint;inp.setAttribute('aria-label',current.label||'Number');inp.inputMode=current.answer.format.kind==='characters'?'text':'numeric';
+    const inp=document.createElement('input');inp.className='number-editor';formKeys(inp);inp.value=current.text;inp.placeholder=current.answer.format.hint;inp.setAttribute('aria-label',current.label||'Number');inp.inputMode=current.answer.format.kind==='characters'?'text':'numeric';
     d.append(inp);inp.focus();inp.select();
     inp.oninput=()=>{markFieldHistory();current.text=inp.value;sizeItem(current,d);saveSoon();};
     inp.onblur=()=>{inp.remove();sizeItem(current,d);saveSoon();};
@@ -4606,6 +4608,55 @@ function tidyLabel(s) {
   if (t.length > LABEL_MAX) t = t.slice(0, LABEL_MAX - 1).replace(/\s\S*$/, '') + '…';
   return t;
 }
+
+/* ----------------------------------------------- the double-space period
+   A phone keyboard turns two spaces into ". " because it assumes you are
+   writing sentences. On a form you are not: two spaces is how a phone
+   number gets walked across a printed row of blanks, and a full stop in
+   the middle of it is a correction nobody asked for. Two answers. First,
+   every box says what it is — an answer, not prose — with the attributes a
+   keyboard reads (autocorrect off, no spelling suggestions), which is enough
+   for some keyboards. Second, for the rest, the change is watched for and
+   put back: a space that turns into ". " in one keystroke (or a delete
+   followed by ". ", the other way keyboards do it) becomes two spaces
+   again, with the caret where it was going. A full stop you type yourself
+   arrives on its own, never as ". " replacing a space, so it is left alone. */
+function formKeys(el) {
+  el.setAttribute('autocorrect', 'off');
+  el.spellcheck = false;
+}
+const inForm = el => !!el && (el.isContentEditable || /^(INPUT|TEXTAREA)$/.test(el.tagName)) &&
+  !!(el.closest('#editor') || el.closest('#simple'));
+const editText = el => el.isContentEditable ? el.textContent : el.value;
+function setEditText(el, text, caret) {
+  if (el.isContentEditable) {
+    el.textContent = text;
+    try {
+      const r = document.createRange(), node = el.firstChild;
+      if (node) { r.setStart(node, Math.min(caret, node.length)); r.collapse(true); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r); }
+    } catch (_) {}
+  } else {
+    el.value = text;
+    try { el.setSelectionRange(caret, caret); } catch (_) {}
+  }
+}
+document.addEventListener('focusin', e => { if (inForm(e.target)) e.target.__hist = [editText(e.target)]; }, true);
+document.addEventListener('input', e => {
+  const el = e.target;
+  if (!inForm(el)) return;
+  const now = editText(el), hist = el.__hist || [];
+  for (const prev of hist) {
+    if (typeof prev !== 'string' || now.length !== prev.length + 1) continue;
+    let i = 0;
+    while (i < prev.length && prev[i] === now[i]) i++;
+    if (prev[i] !== ' ' || now[i] !== '.' || now[i + 1] !== ' ' || now.slice(i + 2) !== prev.slice(i + 1)) continue;
+    const fixed = prev.slice(0, i) + '  ' + prev.slice(i + 1);
+    setEditText(el, fixed, i + 2);
+    el.__hist = [fixed];
+    return;
+  }
+  el.__hist = [now, ...hist].slice(0, 2);
+}, true);
 
 const UNIT_WORD = /^(ft|in|[lI1]bs?|kg|g|cm|mm|m|oz|hrs?|min|yrs?|mo|mos|yr|%|$|ea|pcs?|qty).?$/i;
 /** the words belonging to one spot, or null if the page has nothing to read */
@@ -7134,7 +7185,7 @@ function qCard(q, i) {
   if (!multi) inp.type = q.inputType === 'email' ? 'email' : q.inputType === 'tel' ? 'tel' : 'text';
   if (q.inputType === 'tel') inp.inputMode = 'tel';
   inp.id = id;
-  inp.spellcheck = false;
+  formKeys(inp);
   if (q.kind === 'field' && q.f.maxLen) inp.maxLength = q.f.maxLen;
   inp.value = simGet(q) ?? '';
   const numberSettings=q.C||q.L;const numberFormat=numberSettings?.formatDisabled?null:numberSettings?.format;
